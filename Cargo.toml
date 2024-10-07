@@ -1,0 +1,6 @@
+[workspace]
+members = [
+    "ombrac-client",
+    "ombrac-protocol",
+    "ombrac-server",
+]
