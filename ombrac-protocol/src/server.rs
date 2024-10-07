@@ -14,7 +14,7 @@ pub struct Server<R, RE, RS> {
 impl<R, RS, RE> Server<R, RE, RS>
 where
     R: Provider<RS>,
-    RE: Resolver + Clone + Send + Sync + 'static,
+    RE: Resolver + Send + Sync + 'static,
     RS: AsyncReadExt + AsyncWriteExt + Unpin + Send + 'static,
 {
     pub fn with(accept: R, resolver: RE) -> Self {

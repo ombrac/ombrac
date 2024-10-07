@@ -1,4 +1,5 @@
 [workspace]
 members = [
-    "ombrac-protocol"
+    "ombrac-protocol",
+    "ombrac-server",
 ]

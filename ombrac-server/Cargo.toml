@@ -1,0 +1,16 @@
+[package]
+name = "ombrac-server"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+ombrac-protocol = { path = "../ombrac-protocol", default-features = false }
+
+clap = { version = "4", features = ["std", "derive", "help", "usage"], default-features = false }
+tokio = { version = "1", features = ["rt-multi-thread"], default-features = false }
+hickory-resolver = { version = "0.24", features = ["tokio-runtime"], default-features = false }
+
+# QUIC protocol impl
+# https://aws.github.io/aws-lc-rs/platform_support.html
+s2n-quic = { version = "1", features = ["provider-tls-default", "provider-address-token-default"], default-features = false }
+aws-lc-rs = { version = "1", features = ["bindgen"], default-features = false, optional = true }
