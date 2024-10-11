@@ -10,44 +10,75 @@ use connect::stream::Builder as StreamBuilder;
 use ombrac_protocol::client::Client;
 use socks::SocksServer;
 
-#[derive(Parser, Debug)]
+#[derive(Parser)]
 #[command(version, about, long_about = None)]
 struct Args {
-    /// Remote server IP address or domain name. e.g. example.com:port
-    #[arg(short, long)]
+    /// Remote server IP address or domain name
+    /// e.g., example.com:port
+    #[arg(short, long, verbatim_doc_comment, value_name = "ADDRESS")]
     remote: String,
 
-    /// SOCKS server listening address
-    #[arg(short, long, default_value = "127.0.0.1:1080")]
+    /// Listening address for the SOCKS server.
+    #[arg(short, long, default_value = "127.0.0.1:1080", value_name = "ADDRESS")]
     listen: String,
 
-    /// IO provider address for the client
-    #[arg(long, default_value = "0.0.0.0:0")]
+    /// IO provider address for the client.
+    #[arg(long, default_value = "0.0.0.0:0", value_name = "ADDRESS")]
     bind: String,
 
-    /// TLS SNI, if not provided, remote address will be used
-    #[arg(long, default_value = None)]
+    /// TLS SNI (Server Name Indication); defaults to remote address if not provided.
+    #[arg(long, default_value = None, value_name = "PATH")]
     tls_sni: Option<String>,
 
-    /// TLS certificate file path
-    #[arg(long, default_value = None)]
+    /// Path to the TLS certificate file.
+    #[arg(long, default_value = None, value_name = "PATH")]
     tls_cert: Option<String>,
 
-    /// Limit the number of concurrent instances of the client
-    #[arg(long, default_value = None)]
+    /// Initial congestion window size in bytes.
+    #[arg(long, default_value = None, value_name = "VALUE")]
+    initial_congestion_window: Option<u32>,
+
+    /// Limit on the number of concurrent client instances.
+    #[arg(long, default_value = None, value_name = "VALUE")]
     limit_concurrent_instances: Option<usize>,
 
     #[cfg(feature = "limit-connection-reuses")]
-    /// Limit the number of connection reuses
-    #[arg(long, default_value = None)]
+    /// Limit on the number of connection reuses.
+    #[arg(long, default_value = None, value_name = "VALUE")]
     limit_connection_reuses: Option<usize>,
 
-    /// Initial congestion window size in bytes
-    #[arg(long, default_value = None)]
-    initial_congestion_window: Option<u32>,
+    /// Maximum amount of data that can be sent without acknowledgment.
+    #[arg(long, default_value = None, value_name = "VALUE")]
+    limit_bidirectional_local_data_window: Option<u64>,
 
-    /// e.g. INFO WARN ERROR
-    #[arg(long, default_value = "WARN")]
+    /// Maximum amount of data the remote peer can send before needing acknowledgment.
+    #[arg(long, default_value = None, value_name = "VALUE")]
+    limit_bidirectional_remote_data_window: Option<u64>,
+
+    /// Restriction on the number of concurrent streams initiated by the local peer.
+    #[arg(long, default_value = None, value_name = "VALUE")]
+    limit_max_open_local_bidirectional_streams: Option<u64>,
+
+    /// Restriction on the number of concurrent streams initiated by the remote peer.
+    #[arg(long, default_value = None, value_name = "VALUE")]
+    limit_max_open_remote_bidirectional_streams: Option<u64>,
+
+    /// Maximum duration (in seconds) allowed for connection establishment before timing out.
+    #[arg(long, default_value = "4", value_name = "VALUE")]
+    limit_max_handshake_duration: Option<u64>,
+
+    /// Maximum interval (in seconds) for sending keep-alive packets to maintain the connection.
+    #[arg(long, default_value = "8", value_name = "VALUE")]
+    limit_max_keep_alive_period: Option<u64>,
+
+    /// Logging level
+    /// e.g., INFO, WARN, ERROR
+    #[arg(
+        long,
+        default_value = "WARN",
+        verbatim_doc_comment,
+        value_name = "LEVEL"
+    )]
     tracing_level: tracing::Level,
 }
 
@@ -101,14 +132,51 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 mod s2n_quic_client {
     use std::error::Error;
+    use std::time::Duration;
 
-    use s2n_quic::provider::congestion_controller;
+    use s2n_quic::provider::{congestion_controller, limits};
     use s2n_quic::Client as NoiseClient;
     use std::path::Path;
 
     use super::Args;
 
     pub fn build(args: &Args) -> Result<NoiseClient, Box<dyn Error>> {
+        let limits = {
+            let limits = limits::Limits::new();
+
+            let limits = match args.limit_bidirectional_local_data_window {
+                Some(value) => limits.with_bidirectional_local_data_window(value)?,
+                None => limits,
+            };
+
+            let limits = match args.limit_bidirectional_remote_data_window {
+                Some(value) => limits.with_bidirectional_remote_data_window(value)?,
+                None => limits,
+            };
+
+            let limits = match args.limit_max_open_local_bidirectional_streams {
+                Some(value) => limits.with_max_open_local_bidirectional_streams(value)?,
+                None => limits,
+            };
+
+            let limits = match args.limit_max_open_remote_bidirectional_streams {
+                Some(value) => limits.with_max_open_remote_bidirectional_streams(value)?,
+                None => limits,
+            };
+
+            let limits = match args.limit_max_handshake_duration {
+                Some(value) => limits.with_max_handshake_duration(Duration::from_secs(value))?,
+                None => limits,
+            };
+
+            let limits = match args.limit_max_keep_alive_period {
+                Some(value) => limits.with_max_keep_alive_period(Duration::from_secs(value))?,
+                None => limits,
+            };
+
+            limits
+        };
+
         let controller = {
             let controller = congestion_controller::bbr::Builder::default();
             let controller = match args.initial_congestion_window {
@@ -120,6 +188,7 @@ mod s2n_quic_client {
 
         let client = NoiseClient::builder()
             .with_io(args.bind.as_str())?
+            .with_limits(limits)?
             .with_congestion_controller(controller)?;
 
         let client = match &args.tls_cert {
