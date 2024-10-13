@@ -13,7 +13,7 @@ limit-connection-reuses = []
 ombrac-protocol = { path = "../ombrac-protocol", features = ["s2n-quic"], default-features = false }
 socks = { git = "https://github.com/ombrac/socks.git" }
 
-clap = { version = "4", features = ["derive", "color", "help", "usage", "error-context", "suggestions"], default-features = false }
+clap = { version = "4", features = ["std", "derive", "color", "help", "usage", "error-context", "suggestions"], default-features = false }
 tokio = { version = "1", features = ["rt-multi-thread"], default-features = false }
 
 # Logging
