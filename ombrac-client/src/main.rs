@@ -73,6 +73,7 @@ struct Args {
 
     /// Logging level
     /// e.g., INFO, WARN, ERROR
+    #[cfg(feature = "tracing")]
     #[arg(
         long,
         default_value = "WARN",
