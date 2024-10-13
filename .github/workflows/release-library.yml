@@ -1,0 +1,35 @@
+name: release-library
+
+on:
+  workflow_call:
+    inputs:
+      PACKAGE_NAME:
+        required: true
+        type: string
+
+jobs:
+  release-library:
+    permissions:
+      contents: write
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@main
+        with:
+          fetch-depth: 0
+
+      - name: Get package version on Unix-like system
+        run: |
+          echo "version=$(sed -rn 's/^version = \"(.*)\"/\1/p' ${{ inputs.PACKAGE_NAME }}/Cargo.toml)" >> $GITHUB_ENV
+          echo "prerelease=$((sed -rn 's/^version = \"(.*)\"/\1/p' ${{ inputs.PACKAGE_NAME }}/Cargo.toml | grep -qF '-') && echo "true" || echo "false")" >> $GITHUB_ENV
+
+      - name: Release library
+        uses: ncipollo/release-action@main
+        with:
+          name: ${{ inputs.PACKAGE_NAME }}-${{ env.version }}
+          tag: ${{ inputs.PACKAGE_NAME }}-${{ env.version }}
+          commit: ${{ github.sha }}
+          allowUpdates: true
+          prerelease: ${{ env.prerelease }}

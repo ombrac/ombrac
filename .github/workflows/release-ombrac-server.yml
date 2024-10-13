@@ -1,0 +1,13 @@
+name: release-ombrac-server
+
+on:
+  workflow_dispatch:
+
+jobs:
+  release-ombrac-server:
+    permissions:
+      contents: write
+
+    uses: ./.github/workflows/release-binary.yml
+    with:
+      PACKAGE_NAME: "ombrac-server"
