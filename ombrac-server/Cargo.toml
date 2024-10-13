@@ -3,8 +3,12 @@ name = "ombrac-server"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+default = ["udp"]
+udp = ["ombrac-protocol/udp"]
+
 [dependencies]
-ombrac-protocol = { path = "../ombrac-protocol", default-features = false }
+ombrac-protocol = { path = "../ombrac-protocol", features = ["s2n-quic"], default-features = false }
 
 clap = { version = "4", features = ["std", "derive", "help", "usage"], default-features = false }
 tokio = { version = "1", features = ["rt-multi-thread"], default-features = false }

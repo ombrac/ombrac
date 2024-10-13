@@ -59,9 +59,8 @@ impl Provider<(TcpStream, Request)> for SocksServer {
 }
 
 mod socks5 {
-    use std::net::SocketAddr;
 
-    use socks::socks5::{Address as SocksAddress, Method as Socks5Method};
+    use socks::socks5::{Address as Socks5Address, Method as Socks5Method};
     use socks::socks5::{Request as Socks5Request, Response as Socks5Response};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -94,39 +93,36 @@ mod socks5 {
                         .await?;
 
                     let address = match address {
-                        SocksAddress::IPv4(value) => Address::IPv4(value),
-                        SocksAddress::IPv6(value) => Address::IPv6(value),
-                        SocksAddress::Domain(domain, port) => Address::Domain(domain, port),
+                        Socks5Address::IPv4(value) => Address::IPv4(value),
+                        Socks5Address::IPv6(value) => Address::IPv6(value),
+                        Socks5Address::Domain(domain, port) => Address::Domain(domain, port),
                     };
 
                     return Ok(Some((stream, Request::TcpConnect(address))));
                 }
 
-                Socks5Request::Associate(address) => {
+                #[cfg(feature = "udp")]
+                Socks5Request::Associate(_address) => {
                     use tokio::net::UdpSocket;
 
-                    // IPV4 & IPV6
-                    let socket_addr = match socks5::udp::to_socket_address(address).await? {
-                        SocketAddr::V4(_) => "0.0.0.0:0",
-                        SocketAddr::V6(_) => "[::]:0",
-                    };
+                    let inbound = UdpSocket::bind("[::]:0").await?;
+                    let address = Socks5Address::from_socket_address(inbound.local_addr()?);
 
-                    let inbound = UdpSocket::bind(socket_addr).await?;
-                    let outbound = UdpSocket::bind(socket_addr).await?;
+                    let (request_sender, request_receiver) = mpsc::channel(1);
+                    let (response_sender, response_receiver) = mpsc::channel(1);
 
-                    let address = SocksAddress::from_socket_address(inbound.local_addr()?);
                     Socks5Response::Success(address).write(&mut stream).await?;
 
-                    tokio::select! {
-                        // TCP Stream closed
-                        _ = stream.read_u8() => {}
+                    tokio::spawn(async move {
+                        udp::hanlde(inbound, request_sender, response_receiver).await
+                    });
 
-                        // UDP Transfer
-                        _ = socks5::udp::relay(inbound, outbound) => {}
-                    }
-
-                    return Ok(None);
+                    return Ok(Some((
+                        stream,
+                        Request::UdpAssociate(Some((response_sender, request_receiver))),
+                    )));
                 }
+
                 _ => {
                     Socks5Response::CommandNotSupported
                         .write(&mut stream)
@@ -158,65 +154,68 @@ mod socks5 {
             S: AsyncReadExt + AsyncWriteExt + Unpin + Send;
     }
 
+    #[cfg(feature = "udp")]
     pub mod udp {
-        use socks::socks5::{Address, UdpPacket};
+        use ombrac_protocol::request::udp::Datagram;
+        use socks::socks5::UdpPacket as Socks5UdpPacket;
         use socks::{Streamable, ToBytes};
         use tokio::net::UdpSocket;
+        use tokio::sync::mpsc::{Receiver, Sender};
 
         use super::*;
 
-        pub async fn to_socket_address(address: Address) -> Result<SocketAddr> {
-            use std::io::Error;
+        pub async fn hanlde(
+            inbound: UdpSocket,
+            request_sender: Sender<Datagram>,
+            mut response_receiver: Receiver<Datagram>,
+        ) -> Result<()> {
+            tokio::try_join!(
+                handle_request(&inbound, &request_sender),
+                handle_response(&inbound, &mut response_receiver)
+            )?;
 
-            match address {
-                Address::Domain(domain, port) => {
-                    use tokio::net::lookup_host;
-                    let response = lookup_host((domain.as_str(), port)).await?;
-                    let address = response.into_iter().next().ok_or_else(|| {
-                        Error::other(format!("could not resolve domain '{}'", domain))
-                    })?;
-
-                    Ok(address)
-                }
-                Address::IPv4(addr) => Ok(addr.into()),
-                Address::IPv6(addr) => Ok(addr.into()),
-            }
+            Ok(())
         }
 
-        async fn handle_udp_response(inbound: &UdpSocket, outbound: &UdpSocket) -> Result<()> {
-            let mut buffer = vec![0u8; 8192];
-
-            loop {
-                let (size, remote_addr) = outbound.recv_from(&mut buffer).await?;
-
-                let data = (&buffer[..size]).into();
-                let address = Address::from_socket_address(remote_addr);
-                let packet = UdpPacket::un_frag(address, data);
-
-                inbound.send(&packet.to_bytes()).await?;
-            }
-        }
-
-        async fn handle_udp_request(inbound: &UdpSocket, outbound: &UdpSocket) -> Result<()> {
-            let mut buffer = vec![0u8; 8192];
+        async fn handle_request(inbound: &UdpSocket, sender: &Sender<Datagram>) -> Result<()> {
+            let mut buffer = vec![0u8; 4096];
 
             loop {
                 let (size, client_addr) = inbound.recv_from(&mut buffer).await?;
 
                 inbound.connect(client_addr).await?;
+                let packet = Socks5UdpPacket::read(&mut &buffer[..size]).await?;
+                let address = match packet.address {
+                    Socks5Address::IPv4(addr) => Address::IPv4(addr),
+                    Socks5Address::IPv6(addr) => Address::IPv6(addr),
+                    Socks5Address::Domain(domain, port) => Address::Domain(domain, port),
+                };
 
-                let packet = UdpPacket::read(&mut &buffer[..size]).await?;
-                let address = to_socket_address(packet.address).await?;
+                let datagram = Datagram::with(address, packet.data.len() as u16, packet.data);
 
-                outbound.send_to(&packet.data, address).await?;
+                if sender.send(datagram).await.is_err() {
+                    return Ok(());
+                }
             }
         }
 
-        pub async fn relay(inbound: UdpSocket, outbound: UdpSocket) -> Result<((), ())> {
-            tokio::try_join!(
-                handle_udp_request(&inbound, &outbound),
-                handle_udp_response(&inbound, &outbound)
-            )
+        async fn handle_response(
+            inbound: &UdpSocket,
+            receiver: &mut Receiver<Datagram>,
+        ) -> Result<()> {
+            while let Some(datagram) = receiver.recv().await {
+                let address = match datagram.address {
+                    Address::IPv4(addr) => Socks5Address::IPv4(addr),
+                    Address::IPv6(addr) => Socks5Address::IPv6(addr),
+                    Address::Domain(domain, port) => Socks5Address::Domain(domain, port),
+                };
+
+                inbound
+                    .send(&Socks5UdpPacket::un_frag(address, datagram.data).to_bytes())
+                    .await?;
+            }
+
+            Ok(())
         }
     }
 }
