@@ -56,7 +56,10 @@ where
             #[cfg(feature = "udp")]
             Request::UdpAssociate(datagram) => {
                 if let Some((sender, receiver)) = datagram {
-                    udp_associate::relay(remote, sender, receiver).await?
+                    tokio::select! {
+                        _ = local.read_u8() => {}
+                        _ = udp_associate::relay(remote, sender, receiver) => {}
+                    }
                 }
             }
         }
