@@ -3,7 +3,7 @@ use std::marker::PhantomData;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, Result};
 
 use crate::request::Request;
-use crate::Provider;
+use crate::{IntoSplit, Provider};
 
 pub struct Client<L, R, LS, RS> {
     local: L,
@@ -17,7 +17,7 @@ where
     L: Provider<(LS, Request)>,
     R: Provider<RS>,
     LS: AsyncReadExt + AsyncWriteExt + Unpin + Send + 'static,
-    RS: AsyncReadExt + AsyncWriteExt + Unpin + Send + 'static,
+    RS: IntoSplit + AsyncReadExt + AsyncWriteExt + Unpin + Send + 'static,
 {
     pub fn with(local: L, remote: R) -> Self {
         Self {
@@ -44,12 +44,71 @@ where
 
         Streamable::write(&request, &mut remote).await?;
 
-        let response = <Response as Streamable>::read(&mut remote).await?;
+        match request {
+            Request::TcpConnect(_) => {
+                let response = <Response as Streamable>::read(&mut remote).await?;
 
-        if let Response::Succeed = response {
-            copy_bidirectional(&mut local, &mut remote).await?;
-        };
+                if let Response::Succeed = response {
+                    copy_bidirectional(&mut local, &mut remote).await?;
+                };
+            }
+
+            #[cfg(feature = "udp")]
+            Request::UdpAssociate(datagram) => {
+                if let Some((sender, receiver)) = datagram {
+                    udp_associate::relay(remote, sender, receiver).await?
+                }
+            }
+        }
 
         Ok(())
+    }
+}
+
+#[cfg(feature = "udp")]
+mod udp_associate {
+    use tokio::sync::mpsc::{Receiver, Sender};
+
+    use crate::request::udp::Datagram;
+    use crate::Streamable;
+
+    use super::*;
+
+    pub async fn relay(
+        stream: impl IntoSplit,
+        response_sender: Sender<Datagram>,
+        mut request_receiver: Receiver<Datagram>,
+    ) -> Result<()> {
+        let (read_stream, write_stream) = stream.into_split();
+
+        tokio::try_join!(
+            relay_request(write_stream, &mut request_receiver),
+            relay_response(read_stream, &response_sender),
+        )?;
+
+        Ok(())
+    }
+
+    async fn relay_request<S>(mut stream: S, receiver: &mut Receiver<Datagram>) -> Result<()>
+    where
+        S: AsyncWriteExt + Unpin + Send,
+    {
+        while let Some(datagram) = receiver.recv().await {
+            <Datagram as Streamable>::write(&datagram, &mut stream).await?
+        }
+
+        Ok(())
+    }
+
+    async fn relay_response<S>(mut stream: S, sender: &Sender<Datagram>) -> Result<()>
+    where
+        S: AsyncReadExt + Unpin + Send,
+    {
+        loop {
+            let datagram = <Datagram as Streamable>::read(&mut stream).await?;
+            if sender.send(datagram).await.is_err() {
+                return Ok(());
+            }
+        }
     }
 }

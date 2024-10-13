@@ -36,3 +36,31 @@ pub trait Provider<T> {
 pub trait Resolver {
     fn lookup(&self, domain: &str, port: u16) -> impl Future<Output = Result<SocketAddr>> + Send;
 }
+
+pub trait IntoSplit {
+    fn into_split(
+        self,
+    ) -> (
+        impl AsyncReadExt + Unpin + Send,
+        impl AsyncWriteExt + Unpin + Send,
+    );
+}
+
+#[cfg(feature = "s2n-quic")]
+mod s2n_quic {
+    use s2n_quic::stream::BidirectionalStream;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    use super::IntoSplit;
+
+    impl IntoSplit for BidirectionalStream {
+        fn into_split(
+            self,
+        ) -> (
+            impl AsyncReadExt + Unpin + Send,
+            impl AsyncWriteExt + Unpin + Send,
+        ) {
+            self.split()
+        }
+    }
+}

@@ -4,11 +4,17 @@ use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
 use bytes::{BufMut, BytesMut};
 use tokio::io::AsyncReadExt;
 
+#[cfg(feature = "udp")]
+use tokio::sync::mpsc::{Receiver, Sender};
+
 use crate::{Resolver, Streamable, ToBytes};
 
 #[rustfmt::skip]
 mod consts {
     pub const REQUEST_TYPE_TCP_CONNECT:         u8 = 0x01;
+
+    #[cfg(feature = "udp")]
+    pub const REQUEST_TYPE_UDP_ASSOCIATE:       u8 = 0x02;
 
     pub const ADDRESS_TYPE_DOMAIN:              u8 = 0x01;
     pub const ADDRESS_TYPE_IPV4:                u8 = 0x02;
@@ -16,20 +22,31 @@ mod consts {
 }
 
 /// # Request
-///
-/// ## Bytes
-///
-/// ```text
-///      +------+------+----------+------+
-///      | RTYP | ATYP |   ADDR   | PORT |
-///      +------+------+----------+------+
-///      |  1   |  1   | Variable |  2   |
-///      +------+------+----------+------+
-/// ```
-///
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum Request {
+    /// ## Bytes
+    ///
+    /// ```text
+    ///      +------+------+----------+------+
+    ///      | RTYP | ATYP |   ADDR   | PORT |
+    ///      +------+------+----------+------+
+    ///      |  1   |  1   | Variable |  2   |
+    ///      +------+------+----------+------+
+    /// ```
+    ///
     TcpConnect(Address),
+
+    /// ## Bytes
+    ///
+    /// ```text
+    ///      +------+
+    ///      | RTYP |
+    ///      +------+
+    ///      |  1   |
+    ///      +------+
+    /// ```
+    #[cfg(feature = "udp")]
+    UdpAssociate(Option<(Sender<udp::Datagram>, Receiver<udp::Datagram>)>),
 }
 
 impl ToBytes for Request {
@@ -40,6 +57,11 @@ impl ToBytes for Request {
             Self::TcpConnect(value) => {
                 bytes.put_u8(consts::REQUEST_TYPE_TCP_CONNECT);
                 bytes.extend(value.to_bytes());
+            }
+
+            #[cfg(feature = "udp")]
+            Self::UdpAssociate(_) => {
+                bytes.put_u8(consts::REQUEST_TYPE_UDP_ASSOCIATE);
             }
         };
 
@@ -56,6 +78,9 @@ impl Streamable for Request {
 
         let request = match request_type {
             consts::REQUEST_TYPE_TCP_CONNECT => Request::TcpConnect(Address::read(stream).await?),
+
+            #[cfg(feature = "udp")]
+            consts::REQUEST_TYPE_UDP_ASSOCIATE => Request::UdpAssociate(None),
 
             _ => {
                 return Err(Error::new(
@@ -88,6 +113,13 @@ impl Address {
         };
 
         Ok(socket_address)
+    }
+
+    pub fn from_socket_address(addr: SocketAddr) -> Self {
+        match addr {
+            SocketAddr::V4(addr) => Self::IPv4(addr),
+            SocketAddr::V6(addr) => Self::IPv6(addr),
+        }
     }
 }
 
@@ -184,5 +216,72 @@ impl ToBytes for Address {
         }
 
         bytes
+    }
+}
+
+#[cfg(feature = "udp")]
+pub mod udp {
+    use super::*;
+
+    #[derive(Debug, Clone)]
+    pub struct Datagram {
+        pub address: Address,
+        pub length: u16,
+        pub data: BytesMut,
+    }
+
+    impl ToBytes for Datagram {
+        fn to_bytes(&self) -> BytesMut {
+            let mut bytes = BytesMut::new();
+            bytes.extend_from_slice(&self.address.to_bytes());
+
+            bytes.put_u16(self.length);
+            bytes.extend_from_slice(&self.data);
+
+            bytes
+        }
+    }
+
+    impl Streamable for Datagram {
+        async fn read<T>(stream: &mut T) -> Result<Self>
+        where
+            Self: Sized,
+            T: AsyncReadExt + Unpin + Send,
+        {
+            let address = <Address as Streamable>::read(stream).await?;
+
+            let length = stream.read_u16().await?;
+
+            let mut data = BytesMut::with_capacity(length as usize);
+            stream.read_exact(&mut data).await?;
+
+            Ok(Self {
+                address,
+                length,
+                data,
+            })
+        }
+    }
+
+    impl Datagram {
+        pub fn with(address: Address, length: u16, data: BytesMut) -> Self {
+            Self {
+                address,
+                length,
+                data,
+            }
+        }
+
+        pub fn address(&self) -> &Address {
+            &self.address
+        }
+
+        pub fn length(&self) -> u16 {
+            self.length
+        }
+
+        pub fn data(&self) -> &BytesMut {
+            &self.data
+        }
     }
 }

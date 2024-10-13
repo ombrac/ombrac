@@ -18,5 +18,8 @@ jobs:
     - name: Build
       run: cargo build --verbose
 
+    - name: Build with disable default features
+      run: cargo build --verbose --no-default-features
+
     - name: Run tests
       run: cargo test --verbose

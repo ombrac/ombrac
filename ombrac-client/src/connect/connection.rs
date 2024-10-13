@@ -70,12 +70,12 @@ mod s2n_quic {
         let connect = NoiseConnect::new(server_addr).with_server_name(server_name);
         let mut connection = match client.connect(connect).await {
             Ok(value) => value,
-            Err(error) => {
+            Err(_error) => {
                 error!(
                     "{:?} failed to establish connection with {}. {}",
                     client.local_addr(),
                     server_name,
-                    error
+                    _error
                 );
                 return None;
             }

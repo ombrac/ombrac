@@ -4,12 +4,13 @@ version = "0.1.0"
 edition = "2021"
 
 [features]
-default = ["trace", "aws-lc-rs", "limit-connection-reuses"]
+default = ["udp", "trace", "aws-lc-rs", "limit-connection-reuses"]
+udp = ["ombrac-protocol/udp"]
 trace = ["tracing", "tracing-subscriber"]
 limit-connection-reuses = []
 
 [dependencies]
-ombrac-protocol = { path = "../ombrac-protocol" }
+ombrac-protocol = { path = "../ombrac-protocol", features = ["s2n-quic"], default-features = false }
 socks = { git = "https://github.com/ombrac/socks.git" }
 
 clap = { version = "4", features = ["derive", "color", "help", "usage", "error-context", "suggestions"], default-features = false }
