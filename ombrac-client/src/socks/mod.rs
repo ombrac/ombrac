@@ -105,7 +105,7 @@ mod socks5 {
                 Socks5Request::Associate(_address) => {
                     use tokio::net::UdpSocket;
 
-                    let inbound = UdpSocket::bind("[::]:0").await?;
+                    let inbound = UdpSocket::bind("0.0.0.0:0").await?;
                     let address = Socks5Address::from_socket_address(inbound.local_addr()?);
 
                     let (request_sender, request_receiver) = mpsc::channel(1);
