@@ -252,13 +252,13 @@ pub mod udp {
 
             let length = stream.read_u16().await?;
 
-            let mut data = BytesMut::with_capacity(length as usize);
+            let mut data = vec![0u8; length as usize];
             stream.read_exact(&mut data).await?;
 
             Ok(Self {
                 address,
                 length,
-                data,
+                data: BytesMut::from(data.as_slice()),
             })
         }
     }
