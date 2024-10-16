@@ -1,9 +1,10 @@
+use std::io::{Error, Result};
 use std::marker::PhantomData;
 
-use tokio::io::{AsyncReadExt, AsyncWriteExt, Result};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::request::Request;
-use crate::{IntoSplit, Provider};
+use crate::{IntoSplit, Provider, Streamable};
 
 pub struct Client<L, R, LS, RS> {
     local: L,
@@ -31,34 +32,27 @@ where
     pub async fn start(&mut self) {
         while let Some((local, request)) = self.local.fetch().await {
             if let Some(remote) = self.remote.fetch().await {
-                tokio::spawn(async move { Self::handle(local, remote, request).await });
+                tokio::spawn(async move { Self::handler(local, remote, request).await });
             }
         }
     }
 
-    async fn handle(mut local: LS, mut remote: RS, request: Request) -> Result<()> {
+    async fn handler(mut local: LS, mut remote: RS, request: Request) -> Result<()> {
         use tokio::io::copy_bidirectional;
-
-        use crate::response::Response;
-        use crate::Streamable;
 
         Streamable::write(&request, &mut remote).await?;
 
         match request {
             Request::TcpConnect(_) => {
-                let response = <Response as Streamable>::read(&mut remote).await?;
-
-                if let Response::Succeed = response {
-                    copy_bidirectional(&mut local, &mut remote).await?;
-                };
+                copy_bidirectional(&mut local, &mut remote).await?;
             }
 
             #[cfg(feature = "udp")]
-            Request::UdpAssociate(datagram) => {
-                if let Some((sender, receiver)) = datagram {
+            Request::UdpAssociate(channel) => {
+                if let Some((sender, receiver)) = channel {
                     tokio::select! {
-                        _ = local.read_u8() => {}
-                        _ = udp_associate::relay(remote, sender, receiver) => {}
+                        result = local.read_u8() => { result?; }
+                        result = udp_associate::relay(remote, sender, receiver) => { result?; }
                     }
                 }
             }
@@ -72,10 +66,8 @@ where
 mod udp_associate {
     use tokio::sync::mpsc::{Receiver, Sender};
 
-    use crate::request::udp::Datagram;
-    use crate::Streamable;
-
     use super::*;
+    use crate::request::udp::Datagram;
 
     pub async fn relay(
         stream: impl IntoSplit,
@@ -109,8 +101,8 @@ mod udp_associate {
     {
         loop {
             let datagram = <Datagram as Streamable>::read(&mut stream).await?;
-            if sender.send(datagram).await.is_err() {
-                return Ok(());
+            if let Err(_err) = sender.send(datagram).await {
+                return Err(Error::other("failed to send datagram"));
             }
         }
     }

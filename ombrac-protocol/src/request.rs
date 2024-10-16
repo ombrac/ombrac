@@ -94,7 +94,7 @@ impl Streamable for Request {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Address {
     Domain(String, u16),
     IPv4(SocketAddrV4),
@@ -282,6 +282,132 @@ pub mod udp {
 
         pub fn data(&self) -> &BytesMut {
             &self.data
+        }
+    }
+}
+
+#[cfg(test)]
+mod request_tests {
+    use super::*;
+    use std::io::Cursor;
+
+    #[tokio::test]
+    async fn test_request_tcp_connect_serialization() {
+        let address = Address::IPv4(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 8080));
+        let request = Request::TcpConnect(address.clone());
+
+        // Serialize
+        let mut buffer = vec![];
+        request.write(&mut Cursor::new(&mut buffer)).await.unwrap();
+
+        // Deserialize
+        let mut cursor = Cursor::new(&buffer);
+        let deserialized_request = Request::read(&mut cursor).await.unwrap();
+
+        // Assertions
+        match deserialized_request {
+            Request::TcpConnect(ref addr) => assert_eq!(addr, &address),
+            _ => panic!("Expected TcpConnect request"),
+        }
+    }
+
+    #[cfg(feature = "udp")]
+    #[tokio::test]
+    async fn test_request_udp_associate_serialization() {
+        let request = Request::UdpAssociate(None);
+
+        // Serialize
+        let mut buffer = vec![];
+        request.write(&mut Cursor::new(&mut buffer)).await.unwrap();
+
+        // Deserialize
+        let mut cursor = Cursor::new(&buffer);
+        let deserialized_request = Request::read(&mut cursor).await.unwrap();
+
+        // Assertions
+        match deserialized_request {
+            Request::UdpAssociate(None) => {}
+            _ => panic!("Expected UdpAssociate request"),
+        }
+    }
+}
+
+#[cfg(test)]
+mod address_tests {
+    use super::*;
+    use std::io::Cursor;
+
+    #[tokio::test]
+    async fn test_address_serialization() {
+        let address = Address::Domain("example.com".to_string(), 80);
+
+        // Serialize
+        let mut buffer = vec![];
+        address.write(&mut Cursor::new(&mut buffer)).await.unwrap();
+
+        // Deserialize
+        let mut cursor = Cursor::new(&buffer);
+        let deserialized_address = Address::read(&mut cursor).await.unwrap();
+
+        // Assertions
+        match deserialized_address {
+            Address::Domain(ref domain, port) => {
+                assert_eq!(domain, "example.com");
+                assert_eq!(port, 80);
+            }
+            _ => panic!("Expected Domain address"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_address_ipv4_serialization() {
+        let address = Address::IPv4(SocketAddrV4::new(Ipv4Addr::new(192, 168, 1, 1), 8080));
+
+        // Serialize
+        let mut buffer = vec![];
+        address.write(&mut Cursor::new(&mut buffer)).await.unwrap();
+
+        // Deserialize
+        let mut cursor = Cursor::new(&buffer);
+        let deserialized_address = Address::read(&mut cursor).await.unwrap();
+
+        // Assertions
+        match deserialized_address {
+            Address::IPv4(ref addr) => {
+                assert_eq!(addr.ip(), &Ipv4Addr::new(192, 168, 1, 1));
+                assert_eq!(addr.port(), 8080);
+            }
+            _ => panic!("Expected IPv4 address"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_address_ipv6_serialization() {
+        let address = Address::IPv6(SocketAddrV6::new(
+            Ipv6Addr::new(0x20, 0x1a, 0x11, 0x11, 0, 0, 0, 1),
+            8080,
+            0,
+            0,
+        ));
+
+        // Serialize
+        let mut buffer = vec![];
+        address.write(&mut Cursor::new(&mut buffer)).await.unwrap();
+
+        // Deserialize
+        let mut cursor = Cursor::new(&buffer);
+        let deserialized_address = Address::read(&mut cursor).await.unwrap();
+
+        // Assertions
+        match deserialized_address {
+            Address::IPv6(ref addr) => {
+                assert_eq!(
+                    addr.ip(),
+                    &Ipv6Addr::new(0x20, 0x1a, 0x11, 0x11, 0, 0, 0, 1)
+                );
+                assert_eq!(addr.port(), 8080);
+            }
+            _ => panic!("Expected IPv6 address"),
         }
     }
 }

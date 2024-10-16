@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [features]
+default = []
 udp = ["tokio/sync"]
 s2n-quic = ["dep:s2n-quic"]
 
@@ -12,3 +13,6 @@ bytes = { version = "1", default-features = false }
 tokio = { version = "1",  features = ["rt", "net", "io-util"], default-features = false }
 
 s2n-quic = { version = "1", default-features = false, optional = true }
+
+[dev-dependencies]
+tokio = { version = "1",  features = ["full"] }
