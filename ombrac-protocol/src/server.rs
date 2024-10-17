@@ -1,9 +1,11 @@
+use std::io::Result;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-use tokio::io::{AsyncReadExt, AsyncWriteExt, Result};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-use crate::{IntoSplit, Provider, Resolver};
+use crate::request::Request;
+use crate::{IntoSplit, Provider, Resolver, Streamable};
 
 pub struct Server<R, RE, RS> {
     accept: R,
@@ -28,26 +30,20 @@ where
     pub async fn start(&mut self) {
         while let Some(stream) = self.accept.fetch().await {
             let resolver = self.resolver.clone();
-            tokio::spawn(async move { Self::handle(stream, &resolver).await });
+            tokio::spawn(async move { Self::handler(stream, &resolver).await });
         }
     }
 
-    async fn handle(mut stream: RS, resolver: &RE) -> Result<()> {
-        use crate::request::Request;
-        use crate::response::Response;
-        use crate::Streamable;
+    async fn handler(mut stream: RS, resolver: &RE) -> Result<()> {
+        use tokio::io::copy_bidirectional;
+        use tokio::net::TcpStream;
 
         let request = <Request as Streamable>::read(&mut stream).await?;
 
         match request {
             Request::TcpConnect(address) => {
-                use tokio::io::copy_bidirectional;
-                use tokio::net::TcpStream;
-
-                let address = address.to_socket_address(resolver).await?;
-                let mut connect = TcpStream::connect(address).await?;
-
-                Streamable::write(&Response::Succeed, &mut stream).await?;
+                let addr = address.to_socket_address(resolver).await?;
+                let mut connect = TcpStream::connect(addr).await?;
 
                 copy_bidirectional(&mut stream, &mut connect).await?;
             }
@@ -62,6 +58,7 @@ where
 
 #[cfg(feature = "udp")]
 mod udp_associate {
+    use std::io::Error;
     use std::net::SocketAddr;
 
     use tokio::net::UdpSocket;
@@ -69,7 +66,6 @@ mod udp_associate {
 
     use crate::request::udp::Datagram;
     use crate::request::Address;
-    use crate::Streamable;
 
     use super::*;
 
@@ -118,13 +114,7 @@ mod udp_associate {
                 SocketAddr::V6(_) => outbound_v6,
             };
 
-            if outbound
-                .send_to(&datagram.data, target_address)
-                .await
-                .is_err()
-            {
-                return Ok(());
-            }
+            outbound.send_to(&datagram.data, target_address).await?;
         }
 
         Ok(())
@@ -154,8 +144,8 @@ mod udp_associate {
                 data,
             };
 
-            if sender.send(datagram).await.is_err() {
-                return Ok(());
+            if let Err(_err) = sender.send(datagram).await {
+                return Err(Error::other("failed to send datagram"));
             }
         }
     }
