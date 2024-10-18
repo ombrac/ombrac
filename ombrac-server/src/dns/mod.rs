@@ -1,19 +1,15 @@
 use std::io::{Error, Result};
 use std::net::SocketAddr;
 
+use hickory_resolver::config::{ResolverConfig, ResolverOpts};
 use hickory_resolver::TokioAsyncResolver;
 use ombrac_protocol::Resolver as OmbracResolver;
 
 pub struct Resolver(TokioAsyncResolver);
 
-impl Default for Resolver {
-    fn default() -> Self {
-        use hickory_resolver::config::{ResolverConfig, ResolverOpts};
-
-        Self(TokioAsyncResolver::tokio(
-            ResolverConfig::default(),
-            ResolverOpts::default(),
-        ))
+impl From<(ResolverConfig, ResolverOpts)> for Resolver {
+    fn from(value: (ResolverConfig, ResolverOpts)) -> Self {
+        Self(TokioAsyncResolver::tokio(value.0, value.1))
     }
 }
 
