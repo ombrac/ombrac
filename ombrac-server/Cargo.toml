@@ -10,9 +10,9 @@ udp = ["ombrac-protocol/udp"]
 [dependencies]
 ombrac-protocol = { path = "../ombrac-protocol", features = ["s2n-quic"], default-features = false }
 
-clap = { version = "4", features = ["std", "derive", "help", "usage"], default-features = false }
+clap = { version = "4", features = ["std", "derive", "color", "help", "usage", "error-context", "suggestions"], default-features = false }
 tokio = { version = "1", features = ["rt-multi-thread"], default-features = false }
-hickory-resolver = { version = "0.24", features = ["tokio-runtime"], default-features = false }
+hickory-resolver = { version = "0.24", features = ["tokio-runtime", "dns-over-rustls", "native-certs"], default-features = false }
 
 # QUIC protocol impl
 # https://aws.github.io/aws-lc-rs/platform_support.html
