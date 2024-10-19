@@ -1,11 +1,10 @@
-name: release-binary
+name: release
 
 on:
-  workflow_call:
-    inputs:
-      PACKAGE_NAME:
-        required: true
-        type: string
+  push:
+    # Pattern matched against refs/tags
+    tags:
+      - '*'
 
 jobs:
   release-binary:
@@ -117,44 +116,29 @@ jobs:
       - name: Install toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: nightly
+          toolchain: stable
           target: ${{ matrix.target }}
 
-      - name: Build
-        uses: actions-rs/cargo@v1
-        with:
-          use-cross: ${{ matrix.cross }}
-          command: build
-          args: --release -p ${{ inputs.PACKAGE_NAME }} --target ${{ matrix.target }}
-
-      - name: Get package version on Unix-like system
-        if: runner.os != 'Windows'
+      - name: Build release
         run: |
-          echo "version=$(sed -rn 's/^version = \"(.*)\"/\1/p' ${{ inputs.PACKAGE_NAME }}/Cargo.toml)" >> $GITHUB_ENV
-          echo "prerelease=$((sed -rn 's/^version = \"(.*)\"/\1/p' ${{ inputs.PACKAGE_NAME }}/Cargo.toml | grep -qF '-') && echo "true" || echo "false")" >> $GITHUB_ENV
-
-      - name: Get package version on Windows
-        if: runner.os == 'Windows'
-        run: |
-          echo "version=$(Get-Content ${{ inputs.PACKAGE_NAME }}/Cargo.toml | Select-String -Pattern '^version = \"(.*)\"' | ForEach-Object { $_.Matches.Groups[1].Value })" >> $env:GITHUB_ENV
-          echo "prerelease=$((Get-Content ${{ inputs.PACKAGE_NAME }}/Cargo.toml | Select-String -Pattern '^version = \"(.*)\"' | ForEach-Object { $_.Matches.Groups[1].Value } | Select-String -Quiet '-') && echo "false" || echo "true")" >> $env:GITHUB_ENV
+          cargo install cross
+          cross build --release --target ${{ matrix.target }}
 
       - name: Move binaries
         run: |
-          mkdir artifacts/
-          mv target/${{ matrix.target }}/release/${{ inputs.PACKAGE_NAME }}${{ matrix.file-ext }} artifacts/${{ inputs.PACKAGE_NAME }}-${{ env.version }}-${{ matrix.arch-name }}${{ matrix.file-ext }}
+          mkdir -p artifacts/
+          binaries=("ombrac-client" "ombrac-server")
+          for binary in "${binaries[@]}"; do
+            mv target/${{ matrix.target }}/release/$binary${{ matrix.file-ext }} artifacts/
+          done
 
-      - name: Calculate SHA256
+      - name: Create a compressed package
         run: |
-          cd artifacts/
-          openssl dgst -sha256 -r ${{ inputs.PACKAGE_NAME }}-${{ env.version }}-${{ matrix.arch-name }}${{ matrix.file-ext }} > ${{ inputs.PACKAGE_NAME }}-${{ env.version }}-${{ matrix.arch-name }}${{ matrix.file-ext }}.sha256sum
+          cd artifacts
+          tar -czvf ombrac-${{ matrix.arch-name }}.tar.gz ombrac-client${{ matrix.file-ext }} ombrac-server${{ matrix.file-ext }}
+          openssl dgst -sha256 -r ombrac-${{ matrix.arch-name }}.tar.gz > ombrac-${{ matrix.arch-name }}.tar.gz.sha256sum
 
       - name: Release binaries
         uses: ncipollo/release-action@main
         with:
           artifacts: "artifacts/*"
-          name: ${{ inputs.PACKAGE_NAME }}-${{ env.version }}
-          tag: ${{ inputs.PACKAGE_NAME }}-${{ env.version }}
-          commit: ${{ github.sha }}
-          allowUpdates: true
-          prerelease: ${{ env.prerelease }}
