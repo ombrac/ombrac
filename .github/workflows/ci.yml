@@ -14,12 +14,16 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@main
-    - name: Build
-      run: cargo build --verbose
+      - name: Checkout repository
+        uses: actions/checkout@main
+        with:
+          fetch-depth: 0
 
-    - name: Build with disable default features
-      run: cargo build --verbose --no-default-features
+      - name: Build
+        run: cargo build --verbose
 
-    - name: Run tests
-      run: cargo test --verbose
+      - name: Build with disable default features
+        run: cargo build --verbose --no-default-features
+
+      - name: Run tests
+        run: cargo test --verbose

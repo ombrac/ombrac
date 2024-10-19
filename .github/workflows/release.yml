@@ -1,0 +1,81 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - '*'
+
+jobs:
+  release-binary:
+    permissions:
+      contents: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch-name: aarch64-apple-darwin
+            os: macos-latest
+            target: aarch64-apple-darwin
+            file-ext:
+
+          - arch-name: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            file-ext:
+
+          - arch-name: x86_64-apple-darwin
+            os: macos-latest
+            target: x86_64-apple-darwin
+            file-ext:
+
+          - arch-name: x86_64-pc-windows-gnu
+            os: ubuntu-latest
+            target: x86_64-pc-windows-gnu
+            file-ext: .exe
+
+          - arch-name: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            file-ext:
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@main
+        with:
+          fetch-depth: 0
+
+      - name: Install toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          target: ${{ matrix.target }}
+
+      - name: Build
+        run: |
+          cargo install cross
+          cross build --release --target ${{ matrix.target }}
+
+      - name: Move binaries
+        run: |
+          mkdir -p artifacts/
+          binaries=("ombrac-client" "ombrac-server")
+          for binary in "${binaries[@]}"; do
+            mv target/${{ matrix.target }}/release/$binary${{ matrix.file-ext }} artifacts/
+          done
+
+      - name: Compressed
+        run: |
+          cd artifacts
+          tar -czvf ombrac-${{ matrix.arch-name }}.tar.gz ./*
+          openssl dgst -sha256 -r ombrac-${{ matrix.arch-name }}.tar.gz > ombrac-${{ matrix.arch-name }}.tar.gz.sha256sum
+
+      - name: Release
+        uses: ncipollo/release-action@main
+        with:
+          artifacts: |
+            artifacts/ombrac-${{ matrix.arch-name }}.tar.gz
+            artifacts/ombrac-${{ matrix.arch-name }}.tar.gz.sha256sum
+          allowUpdates: true
