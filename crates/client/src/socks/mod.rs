@@ -184,6 +184,7 @@ mod socks5 {
                 let (size, client_addr) = inbound.recv_from(&mut buffer).await?;
 
                 inbound.connect(client_addr).await?;
+
                 let packet = Socks5UdpPacket::read(&mut &buffer[..size]).await?;
                 let address = match packet.address {
                     Socks5Address::IPv4(addr) => Address::IPv4(addr),
@@ -194,9 +195,11 @@ mod socks5 {
                 let datagram = Datagram::with(address, packet.data.len() as u16, packet.data);
 
                 if sender.send(datagram).await.is_err() {
-                    return Ok(());
+                    break;
                 }
             }
+
+            Err(Error::other("failed to send datagram"))
         }
 
         async fn handle_response(
@@ -215,7 +218,7 @@ mod socks5 {
                     .await?;
             }
 
-            Ok(())
+            Err(Error::other("failed to receive datagram"))
         }
     }
 }
