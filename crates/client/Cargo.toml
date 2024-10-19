@@ -1,0 +1,35 @@
+[package]
+name = "ombrac-client"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[features]
+default = [
+    "udp",
+    "trace",
+    "aws-lc-rs",
+    "limit-connection-reuses"
+]
+
+udp = ["ombrac-protocol/udp"]
+trace = ["tracing", "tracing-subscriber"]
+limit-connection-reuses = []
+
+
+[dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread"] }
+clap = { workspace = true, features = ["std", "derive", "color", "help", "usage", "error-context", "suggestions"] }
+s2n-quic = { workspace = true, features = ["provider-tls-default", "provider-address-token-default"] }
+aws-lc-rs = { workspace = true, features = ["bindgen"], optional = true }
+tracing = { workspace = true, optional = true }
+tracing-subscriber = { workspace = true, features = ["ansi"], optional = true }
+ombrac-protocol = { workspace = true, features = ["s2n-quic"] }
+socks.workspace = true
+
+
+[lints]
+workspace = true

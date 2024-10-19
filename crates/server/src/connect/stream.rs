@@ -35,7 +35,9 @@ mod s2n_quic {
                     tokio::spawn(async move {
                         while let Ok(Some(stream)) = connection.accept_bidirectional_stream().await
                         {
-                            let _ = stream_sender.send(stream).await;
+                            if stream_sender.send(stream).await.is_err() {
+                                break;
+                            }
                         }
                     });
                 }

@@ -38,7 +38,7 @@ enum DomainNameSystem {
     Google,
     GoogleTLS,
     Quad9,
-    Quad9TLS
+    Quad9TLS,
 }
 
 #[tokio::main]

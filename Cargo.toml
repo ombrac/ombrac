@@ -1,6 +1,40 @@
 [workspace]
 members = [
-    "ombrac-client",
-    "ombrac-protocol",
-    "ombrac-server",
+    "crates/client",
+    "crates/server",
+    "crates/protocol"
 ]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["contributors"]
+license = "Apache-2.0"
+rust-version = "1.74"
+repository = "https://github.com/ombrac/ombrac"
+
+[workspace.dependencies]
+# ombrac
+ombrac-client = { version = "*", path = "crates/client", default-features = false }
+ombrac-server = { version = "*", path = "crates/server", default-features = false }
+ombrac-protocol = { version = "*", path = "crates/protocol", default-features = false }
+
+tokio = { version = "1", default-features = false }
+bytes = { version = "1", default-features = false }
+
+# bin
+clap = { version = "4", default-features = false }
+
+# quic
+s2n-quic = { version = "1", default-features = false }
+aws-lc-rs = { version = "1", default-features = false }
+
+# socks
+socks = { git = "https://github.com/ombrac/socks.git" }
+
+# logging
+tracing = { version = "0.1", default-features = false }
+tracing-subscriber = { version = "0.3", default-features = false }
+
+[workspace.lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(nightly)'] }
