@@ -8,9 +8,8 @@ members = [
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-authors = ["contributors"]
 license = "Apache-2.0"
-rust-version = "1.74"
+authors = ["Contributors"]
 repository = "https://github.com/ombrac/ombrac"
 
 [workspace.dependencies]
@@ -28,9 +27,6 @@ clap = { version = "4", default-features = false }
 # quic
 s2n-quic = { version = "1", default-features = false }
 aws-lc-rs = { version = "1", default-features = false }
-
-# socks
-socks = { git = "https://github.com/ombrac/socks.git" }
 
 # logging
 tracing = { version = "0.1", default-features = false }

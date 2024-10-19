@@ -1,4 +1,4 @@
-use std::io::{Error, Result};
+use std::io::Result;
 use std::marker::PhantomData;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -64,6 +64,8 @@ where
 
 #[cfg(feature = "udp")]
 mod udp_associate {
+    use std::io::Error;
+
     use tokio::sync::mpsc::{Receiver, Sender};
 
     use super::*;
