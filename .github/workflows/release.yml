@@ -79,3 +79,4 @@ jobs:
             artifacts/ombrac-${{ matrix.arch-name }}.tar.gz
             artifacts/ombrac-${{ matrix.arch-name }}.tar.gz.sha256sum
           allowUpdates: true
+          generateReleaseNotes: true
