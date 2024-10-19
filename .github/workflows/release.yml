@@ -1,8 +1,7 @@
-name: release
+name: Release
 
 on:
   push:
-    # Pattern matched against refs/tags
     tags:
       - '*'
 
@@ -15,94 +14,29 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - arch-name: i686-unknown-linux-gnu
-            os: ubuntu-latest
-            target: i686-unknown-linux-gnu
-            cross: true
-            file-ext:
-
-          - arch-name: i686-unknown-linux-musl
-            os: ubuntu-latest
-            target: i686-unknown-linux-musl
-            cross: true
-            file-ext:
-
-          - arch-name: x86_64-unknown-linux-gnu
-            os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-            cross: true
-            file-ext:
-
-          - arch-name: x86_64-unknown-linux-musl
-            os: ubuntu-latest
-            target: x86_64-unknown-linux-musl
-            cross: true
-            file-ext:
-
-          - arch-name: armv7-unknown-linux-gnueabi
-            os: ubuntu-latest
-            target: armv7-unknown-linux-gnueabi
-            cross: true
-            file-ext:
-
-          - arch-name: armv7-unknown-linux-gnueabihf
-            os: ubuntu-latest
-            target: armv7-unknown-linux-gnueabihf
-            cross: true
-            file-ext:
-
-          - arch-name: armv7-unknown-linux-musleabi
-            os: ubuntu-latest
-            target: armv7-unknown-linux-musleabi
-            cross: true
-            file-ext:
-
-          - arch-name: armv7-unknown-linux-musleabihf
-            os: ubuntu-latest
-            target: armv7-unknown-linux-musleabihf
-            cross: true
+          - arch-name: aarch64-apple-darwin
+            os: macos-latest
+            target: aarch64-apple-darwin
             file-ext:
 
           - arch-name: aarch64-unknown-linux-gnu
             os: ubuntu-latest
             target: aarch64-unknown-linux-gnu
-            cross: true
             file-ext:
 
-          - arch-name: aarch64-unknown-linux-musl
-            os: ubuntu-latest
-            target: aarch64-unknown-linux-musl
-            cross: true
-            file-ext:
-
-          - arch-name: aarch64-linux-android
-            os: ubuntu-latest
-            target: aarch64-linux-android
-            cross: true
+          - arch-name: x86_64-apple-darwin
+            os: macos-latest
+            target: x86_64-apple-darwin
             file-ext:
 
           - arch-name: x86_64-pc-windows-gnu
             os: ubuntu-latest
             target: x86_64-pc-windows-gnu
-            cross: true
             file-ext: .exe
 
-          - arch-name: x86_64-pc-windows-msvc
-            os: windows-latest
-            target: x86_64-pc-windows-msvc
-            cross: false
-            file-ext: .exe
-
-          - arch-name: x86_64-apple-darwin
-            os: macos-latest
-            target: x86_64-apple-darwin
-            cross: false
-            file-ext:
-
-          - arch-name: aarch64-apple-darwin
-            os: macos-latest
-            target: aarch64-apple-darwin
-            cross: false
+          - arch-name: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
             file-ext:
 
     runs-on: ${{ matrix.os }}
@@ -119,7 +53,7 @@ jobs:
           toolchain: stable
           target: ${{ matrix.target }}
 
-      - name: Build release
+      - name: Build
         run: |
           cargo install cross
           cross build --release --target ${{ matrix.target }}
@@ -132,13 +66,16 @@ jobs:
             mv target/${{ matrix.target }}/release/$binary${{ matrix.file-ext }} artifacts/
           done
 
-      - name: Create a compressed package
+      - name: Compressed
         run: |
           cd artifacts
-          tar -czvf ombrac-${{ matrix.arch-name }}.tar.gz ombrac-client${{ matrix.file-ext }} ombrac-server${{ matrix.file-ext }}
+          tar -czvf ombrac-${{ matrix.arch-name }}.tar.gz ./*
           openssl dgst -sha256 -r ombrac-${{ matrix.arch-name }}.tar.gz > ombrac-${{ matrix.arch-name }}.tar.gz.sha256sum
 
-      - name: Release binaries
+      - name: Release
         uses: ncipollo/release-action@main
         with:
-          artifacts: "artifacts/*"
+          artifacts: |
+            artifacts/ombrac-${{ matrix.arch-name }}.tar.gz
+            artifacts/ombrac-${{ matrix.arch-name }}.tar.gz.sha256sum
+          allowUpdates: true

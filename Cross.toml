@@ -13,38 +13,11 @@ pre-build = [
     "apt install --assume-yes libclang-10-dev clang-10"
 ]
 
-[target.i686-unknown-linux-gnu]
-image = "ghcr.io/cross-rs/i686-unknown-linux-gnu:main"
-
-[target.i686-unknown-linux-musl]
-image = "ghcr.io/cross-rs/i686-unknown-linux-musl:main"
+[target.x86_64-pc-windows-gnu]
+image = "ghcr.io/cross-rs/x86_64-pc-windows-gnu:main"
 
 [target.x86_64-unknown-linux-gnu]
 image = "ghcr.io/cross-rs/x86_64-unknown-linux-gnu:main"
 
-[target.x86_64-unknown-linux-musl]
-image = "ghcr.io/cross-rs/x86_64-unknown-linux-musl:main"
-
-[target.armv7-unknown-linux-gnueabi]
-image = "ghcr.io/cross-rs/armv7-unknown-linux-gnueabi:main"
-
-[target.armv7-unknown-linux-gnueabihf]
-image = "ghcr.io/cross-rs/armv7-unknown-linux-gnueabihf:main"
-
-[target.armv7-unknown-linux-musleabi]
-image = "ghcr.io/cross-rs/armv7-unknown-linux-musleabi:main"
-
-[target.armv7-unknown-linux-musleabihf]
-image = "ghcr.io/cross-rs/armv7-unknown-linux-musleabihf:main"
-
 [target.aarch64-unknown-linux-gnu]
 image = "ghcr.io/cross-rs/aarch64-unknown-linux-gnu:main"
-
-[target.aarch64-unknown-linux-musl]
-image = "ghcr.io/cross-rs/aarch64-unknown-linux-musl:main"
-
-[target.aarch64-linux-android]
-image = "ghcr.io/cross-rs/aarch64-linux-android:main"
-
-[target.x86_64-pc-windows-gnu]
-image = "ghcr.io/cross-rs/x86_64-pc-windows-gnu:main"
