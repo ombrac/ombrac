@@ -26,7 +26,7 @@ mod s2n_quic {
 
             tokio::spawn(async move {
                 while let Some(connection) = server.accept().await {
-                    if let Err(_error) = connection_sender.send(connection).await {
+                    if connection_sender.send(connection).await.is_err() {
                         break;
                     }
                 }
