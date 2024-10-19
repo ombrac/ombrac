@@ -95,9 +95,11 @@ mod udp_associate {
         loop {
             let datagram = <Datagram as Streamable>::read(&mut stream).await?;
             if sender.send(datagram).await.is_err() {
-                return Ok(());
+                break;
             }
         }
+
+        Err(Error::other("failed to send datagram"))
     }
 
     async fn handle_request(
@@ -117,7 +119,7 @@ mod udp_associate {
             outbound.send_to(&datagram.data, target_address).await?;
         }
 
-        Ok(())
+        Err(Error::other("failed to receive datagram"))
     }
 
     async fn relay_response<S>(mut stream: S, receiver: &mut Receiver<Datagram>) -> Result<()>
@@ -128,7 +130,7 @@ mod udp_associate {
             <Datagram as Streamable>::write(&datagram, &mut stream).await?;
         }
 
-        Ok(())
+        Err(Error::other("failed to receive datagram"))
     }
 
     async fn handle_response(outbound: &UdpSocket, sender: &Sender<Datagram>) -> Result<()> {
@@ -144,9 +146,11 @@ mod udp_associate {
                 data,
             };
 
-            if let Err(_err) = sender.send(datagram).await {
-                return Err(Error::other("failed to send datagram"));
+            if sender.send(datagram).await.is_err() {
+                break;
             }
         }
+
+        Err(Error::other("failed to send datagram"))
     }
 }
