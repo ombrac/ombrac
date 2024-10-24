@@ -1534,6 +1534,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "tests-integration"
+version = "0.1.1"
+dependencies = [
+ "ombrac-client",
+ "ombrac-protocol",
+ "ombrac-server",
+ "tokio",
+]
+
+[[package]]
 name = "thiserror"
 version = "1.0.64"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -3,7 +3,7 @@ members = [
     "crates/client",
     "crates/server",
     "crates/protocol"
-]
+, "tests/integration"]
 
 [workspace.package]
 version = "0.1.1"

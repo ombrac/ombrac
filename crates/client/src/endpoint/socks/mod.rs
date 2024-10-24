@@ -59,7 +59,6 @@ impl Provider<(TcpStream, Request)> for SocksServer {
 }
 
 mod socks5 {
-
     use socks::socks5::{Address as Socks5Address, Method as Socks5Method};
     use socks::socks5::{Request as Socks5Request, Response as Socks5Response};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};

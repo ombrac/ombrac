@@ -1,14 +1,10 @@
-mod connect;
-mod macros;
-mod socks;
-
 use std::net::ToSocketAddrs;
 
 use clap::Parser;
-use connect::connection::Builder as ConnectionBuilder;
-use connect::stream::Builder as StreamBuilder;
-use ombrac_protocol::client::Client;
-use socks::SocksServer;
+use ombrac_client::endpoint::socks::SocksServer;
+use ombrac_client::transport::quic::connection::Builder as ConnectionBuilder;
+use ombrac_client::transport::quic::stream::Builder as StreamBuilder;
+use ombrac_client::Client;
 
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
@@ -42,7 +38,6 @@ struct Args {
     #[arg(long, default_value = None, value_name = "VALUE")]
     limit_concurrent_instances: Option<usize>,
 
-    #[cfg(feature = "limit-connection-reuses")]
     /// Limit on the number of connection reuses.
     #[arg(long, default_value = None, value_name = "VALUE")]
     limit_connection_reuses: Option<usize>,
@@ -87,7 +82,7 @@ struct Args {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
 
-    #[cfg(feature = "trace")]
+    #[cfg(feature = "tracing")]
     tracing_subscriber::fmt()
         .with_thread_ids(true)
         .with_max_level(args.tracing_level)
@@ -119,7 +114,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let connection = ConnectionBuilder::new(client, server_name, server_address).build();
     let stream_builder = StreamBuilder::new(connection);
 
-    #[cfg(feature = "limit-connection-reuses")]
     let stream_builder = stream_builder.with_connection_reuses(args.limit_connection_reuses);
 
     let stream = stream_builder.build();
