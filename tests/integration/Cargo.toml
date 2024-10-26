@@ -1,0 +1,18 @@
+[package]
+name = "tests-integration"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+ombrac-client.workspace = true
+ombrac-server.workspace = true
+ombrac-protocol.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["full"] }
+
+[lints]
+workspace = true

@@ -3,19 +3,20 @@ use std::io::{Error, Result};
 
 use ombrac_protocol::request::{Address, Request};
 use ombrac_protocol::Provider;
-
-use tokio::net::{TcpListener, TcpStream, ToSocketAddrs};
+use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc::{self, Receiver};
 
 use crate::{error, info};
+
+use super::Config;
 
 pub struct SocksServer {
     inner: Receiver<(TcpStream, Request)>,
 }
 
 impl SocksServer {
-    pub async fn with(addr: impl ToSocketAddrs) -> Result<Self> {
-        let listener = TcpListener::bind(addr).await?;
+    pub async fn with(config: Config) -> Result<Self> {
+        let listener = TcpListener::bind(config.listen).await?;
 
         let (sender, receiver) = mpsc::channel(1);
 
@@ -59,7 +60,6 @@ impl Provider<(TcpStream, Request)> for SocksServer {
 }
 
 mod socks5 {
-
     use socks::socks5::{Address as Socks5Address, Method as Socks5Method};
     use socks::socks5::{Request as Socks5Request, Response as Socks5Response};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};

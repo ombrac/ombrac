@@ -888,6 +888,8 @@ dependencies = [
  "ombrac-protocol",
  "s2n-quic",
  "tokio",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -1531,6 +1533,16 @@ dependencies = [
  "proc-macro2",
  "quote",
  "unicode-ident",
+]
+
+[[package]]
+name = "tests-integration"
+version = "0.1.1"
+dependencies = [
+ "ombrac-client",
+ "ombrac-protocol",
+ "ombrac-server",
+ "tokio",
 ]
 
 [[package]]
