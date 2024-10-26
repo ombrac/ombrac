@@ -888,6 +888,8 @@ dependencies = [
  "ombrac-protocol",
  "s2n-quic",
  "tokio",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
