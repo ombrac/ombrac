@@ -40,7 +40,7 @@ s2n-quic = { workspace = true, features = ["provider-tls-default", "provider-add
 aws-lc-rs = { workspace = true, features = ["bindgen"], optional = true }
 tracing = { workspace = true, optional = true }
 tracing-subscriber = { workspace = true, features = ["ansi"], optional = true }
-hickory-resolver = { version = "0.24", features = ["tokio-runtime", "dns-over-rustls", "native-certs"], default-features = false }
+hickory-resolver = { workspace = true, features = ["tokio-runtime", "dns-over-rustls", "native-certs"], default-features = false }
 
 [lints]
 workspace = true

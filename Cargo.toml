@@ -28,6 +28,9 @@ clap = { version = "4", default-features = false }
 s2n-quic = { version = "1", default-features = false }
 aws-lc-rs = { version = "1", default-features = false }
 
+# dns
+hickory-resolver = { version = "0.24", default-features = false }
+
 # logging
 tracing = { version = "0.1", default-features = false }
 tracing-subscriber = { version = "0.3", default-features = false }
