@@ -14,14 +14,12 @@ It will starts the ombrac server listening on port 443, using the provided TLS c
 
 ### Client
 ```shell
-ombrac-client -l 127.0.0.1:1080 -r example.com:443
+ombrac-client --socks 127.0.0.1:1080 --server-address example.com:443
 ```
 It will starts a SOCKS5 server on 127.0.0.1:1080, forwarding traffic to example.com:443.
 
 ## Contributing
 Contributions are welcome! Feel free to fork the repository, submit issues, or send pull requests to help improve Ombrac.
-
-
 
 ## License
 This project is licensed under the [Apache-2.0 License](./LICENSE).
