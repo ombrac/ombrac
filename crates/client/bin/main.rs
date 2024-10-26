@@ -1,79 +1,112 @@
-use std::net::ToSocketAddrs;
+use std::error::Error;
+use std::net::SocketAddr;
+use std::time::Duration;
 
 use clap::Parser;
-use ombrac_client::endpoint::socks::SocksServer;
-use ombrac_client::transport::quic::connection::Builder as ConnectionBuilder;
-use ombrac_client::transport::quic::stream::Builder as StreamBuilder;
+use ombrac_client::endpoint::socks::{Config as SocksConfig, SocksServer};
+use ombrac_client::transport::quic::{Config as QuicConfig, NoiseQuic};
 use ombrac_client::Client;
 
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
 struct Args {
-    /// Remote server IP address or domain name
-    /// e.g., example.com:port
-    #[arg(short, long, verbatim_doc_comment, value_name = "ADDRESS")]
-    remote: String,
-
+    // Endpoint SOCKS
     /// Listening address for the SOCKS server.
-    #[arg(short, long, default_value = "127.0.0.1:1080", value_name = "ADDRESS")]
-    listen: String,
+    #[clap(
+        long,
+        default_value = "127.0.0.1:1080",
+        value_name = "ADDR",
+        help_heading = "Endpoint SOCKS"
+    )]
+    socks: String,
 
-    /// IO provider address for the client.
-    #[arg(long, default_value = "0.0.0.0:0", value_name = "ADDRESS")]
-    bind: String,
+    // Transport QUIC
+    /// Bind local address
+    #[clap(long, help_heading = "Transport QUIC", value_name = "ADDR")]
+    bind: Option<SocketAddr>,
 
-    /// TLS SNI (Server Name Indication); defaults to remote address if not provided.
-    #[arg(long, default_value = None, value_name = "PATH")]
-    tls_sni: Option<String>,
+    /// Name of the server to connect to.
+    #[clap(long, help_heading = "Transport QUIC", value_name = "STR")]
+    server_name: Option<String>,
 
-    /// Path to the TLS certificate file.
-    #[arg(long, default_value = None, value_name = "PATH")]
+    /// Address of the server to connect to.
+    #[clap(long, help_heading = "Transport QUIC", value_name = "ADDR")]
+    server_address: String,
+
+    /// Path to the TLS certificate file for secure connections.
+    #[clap(long, help_heading = "Transport QUIC", value_name = "FILE")]
     tls_cert: Option<String>,
 
-    /// Initial congestion window size in bytes.
-    #[arg(long, default_value = None, value_name = "VALUE")]
-    initial_congestion_window: Option<u32>,
+    /// Initial congestion window in bytes
+    #[clap(
+        long,
+        help_heading = "Transport QUIC",
+        value_name = "NUM",
+        default_value = "32"
+    )]
+    initial_congestion_window: u32,
 
-    /// Limit on the number of concurrent client instances.
-    #[arg(long, default_value = None, value_name = "VALUE")]
-    limit_concurrent_instances: Option<usize>,
+    /// Handshake timeout in millisecond.
+    #[clap(
+        long,
+        help_heading = "Transport QUIC",
+        value_name = "TIME",
+        default_value = "3000"
+    )]
+    max_handshake_duration: u64,
 
-    /// Limit on the number of connection reuses.
-    #[arg(long, default_value = None, value_name = "VALUE")]
-    limit_connection_reuses: Option<usize>,
+    /// Connection idle timeout in millisecond.
+    #[clap(
+        long,
+        help_heading = "Transport QUIC",
+        value_name = "TIME",
+        default_value = "600000"
+    )]
+    max_idle_timeout: u64,
 
-    /// Maximum amount of data that can be sent without acknowledgment.
-    #[arg(long, default_value = None, value_name = "VALUE")]
-    limit_bidirectional_local_data_window: Option<u64>,
+    /// Connection keep alive period in millisecond.
+    #[clap(
+        long,
+        help_heading = "Transport QUIC",
+        value_name = "TIME",
+        default_value = "8000"
+    )]
+    max_keep_alive_period: u64,
 
-    /// Maximum amount of data the remote peer can send before needing acknowledgment.
-    #[arg(long, default_value = None, value_name = "VALUE")]
-    limit_bidirectional_remote_data_window: Option<u64>,
+    /// Connection max open bidirectional streams.
+    #[clap(
+        long,
+        help_heading = "Transport QUIC",
+        value_name = "NUM",
+        default_value = "100"
+    )]
+    max_open_bidirectional_streams: u64,
 
-    /// Restriction on the number of concurrent streams initiated by the local peer.
-    #[arg(long, default_value = None, value_name = "VALUE")]
-    limit_max_open_local_bidirectional_streams: Option<u64>,
+    /// Bidirectional stream local data window.
+    #[clap(
+        long,
+        help_heading = "Transport QUIC",
+        value_name = "NUM",
+        default_value = "3750000"
+    )]
+    bidirectional_local_data_window: u64,
 
-    /// Restriction on the number of concurrent streams initiated by the remote peer.
-    #[arg(long, default_value = None, value_name = "VALUE")]
-    limit_max_open_remote_bidirectional_streams: Option<u64>,
+    /// Bidirectional stream remote data window.
+    #[clap(
+        long,
+        help_heading = "Transport QUIC",
+        value_name = "NUM",
+        default_value = "3750000"
+    )]
+    bidirectional_remote_data_window: u64,
 
-    /// Maximum duration (in seconds) allowed for connection establishment before timing out.
-    #[arg(long, default_value = "4", value_name = "VALUE")]
-    limit_max_handshake_duration: Option<u64>,
-
-    /// Maximum interval (in seconds) for sending keep-alive packets to maintain the connection.
-    #[arg(long, default_value = "8", value_name = "VALUE")]
-    limit_max_keep_alive_period: Option<u64>,
-
-    /// Logging level
-    /// e.g., INFO, WARN, ERROR
+    /// Logging level e.g., INFO, WARN, ERROR
     #[cfg(feature = "tracing")]
-    #[arg(
+    #[clap(
         long,
         default_value = "WARN",
-        verbatim_doc_comment,
-        value_name = "LEVEL"
+        value_name = "TRACE",
+        help_heading = "Logging"
     )]
     tracing_level: tracing::Level,
 }
@@ -88,109 +121,43 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_max_level(args.tracing_level)
         .init();
 
-    let client = match args.limit_concurrent_instances {
-        Some(num) => (0..num)
-            .map(|_| s2n_quic_client::build(&args))
-            .collect::<Result<Vec<_>, _>>()?,
+    let endpoint = SocksServer::with(socks_config_from_args(&args)?).await?;
+    let transport = NoiseQuic::with(quic_config_from_args(&args)?).await?;
 
-        None => vec![s2n_quic_client::build(&args)?],
-    };
-
-    let server_name = match args.tls_sni {
-        Some(value) => value,
-        None => {
-            let address = args.remote.clone();
-            let pos = address.rfind(':').ok_or("invalid remote address")?;
-            address[..pos].to_string()
-        }
-    };
-
-    let server_address = args
-        .remote
-        .to_socket_addrs()?
-        .nth(0)
-        .ok_or(format!("unable to resolve address {}", args.remote))?;
-
-    let connection = ConnectionBuilder::new(client, server_name, server_address).build();
-    let stream_builder = StreamBuilder::new(connection);
-
-    let stream_builder = stream_builder.with_connection_reuses(args.limit_connection_reuses);
-
-    let stream = stream_builder.build();
-
-    let socks_server = SocksServer::with(args.listen).await?;
-
-    Client::with(socks_server, stream).start().await;
+    Client::with(endpoint, transport).start().await;
 
     Ok(())
 }
 
-mod s2n_quic_client {
-    use std::error::Error;
-    use std::time::Duration;
+fn socks_config_from_args(args: &Args) -> Result<SocksConfig, Box<dyn Error>> {
+    let listen: SocketAddr = args.socks.parse()?;
 
-    use s2n_quic::provider::{congestion_controller, limits};
-    use s2n_quic::Client as NoiseClient;
-    use std::path::Path;
+    Ok(SocksConfig::new(listen))
+}
 
-    use super::Args;
+fn quic_config_from_args(args: &Args) -> Result<QuicConfig, Box<dyn Error>> {
+    let mut config = QuicConfig::with_address(args.server_address.to_string())?;
 
-    pub fn build(args: &Args) -> Result<NoiseClient, Box<dyn Error>> {
-        let limits = {
-            let limits = limits::Limits::new();
-
-            let limits = match args.limit_bidirectional_local_data_window {
-                Some(value) => limits.with_bidirectional_local_data_window(value)?,
-                None => limits,
-            };
-
-            let limits = match args.limit_bidirectional_remote_data_window {
-                Some(value) => limits.with_bidirectional_remote_data_window(value)?,
-                None => limits,
-            };
-
-            let limits = match args.limit_max_open_local_bidirectional_streams {
-                Some(value) => limits.with_max_open_local_bidirectional_streams(value)?,
-                None => limits,
-            };
-
-            let limits = match args.limit_max_open_remote_bidirectional_streams {
-                Some(value) => limits.with_max_open_remote_bidirectional_streams(value)?,
-                None => limits,
-            };
-
-            let limits = match args.limit_max_handshake_duration {
-                Some(value) => limits.with_max_handshake_duration(Duration::from_secs(value))?,
-                None => limits,
-            };
-
-            let limits = match args.limit_max_keep_alive_period {
-                Some(value) => limits.with_max_keep_alive_period(Duration::from_secs(value))?,
-                None => limits,
-            };
-
-            limits
-        };
-
-        let controller = {
-            let controller = congestion_controller::bbr::Builder::default();
-            let controller = match args.initial_congestion_window {
-                Some(value) => controller.with_initial_congestion_window(value),
-                None => controller,
-            };
-            controller.build()
-        };
-
-        let client = NoiseClient::builder()
-            .with_io(args.bind.as_str())?
-            .with_limits(limits)?
-            .with_congestion_controller(controller)?;
-
-        let client = match &args.tls_cert {
-            Some(path) => client.with_tls(Path::new(path.as_str()))?.start()?,
-            None => client.start()?,
-        };
-
-        Ok(client)
+    if let Some(bind) = args.bind {
+        config = config.with_bind(bind);
     }
+
+    if let Some(name) = args.server_name.clone() {
+        config = config.with_server_name(name);
+    }
+
+    if let Some(tls_cert) = args.tls_cert.clone() {
+        config = config.with_tls_cert(tls_cert);
+    }
+
+    config = config
+        .with_initial_congestion_window(args.initial_congestion_window)
+        .with_max_handshake_duration(Duration::from_millis(args.max_handshake_duration))
+        .with_max_idle_timeout(Duration::from_millis(args.max_idle_timeout))
+        .with_max_keep_alive_period(Duration::from_millis(args.max_keep_alive_period))
+        .with_max_open_bidirectional_streams(args.max_open_bidirectional_streams)
+        .with_bidirectional_local_data_window(args.bidirectional_local_data_window)
+        .with_bidirectional_remote_data_window(args.bidirectional_remote_data_window);
+
+    Ok(config)
 }
