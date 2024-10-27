@@ -117,8 +117,16 @@ enum DomainNameSystem {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
 
+    #[cfg(feature = "tracing")]
+    tracing_subscriber::fmt()
+        .with_thread_ids(true)
+        .with_max_level(args.tracing_level)
+        .init();
+
     let domain_name_system = dns_from_args(&args)?;
     let transport = NoiseQuic::with(quic_config_from_args(&args)?).await?;
+
+    tracing::info!("server listening on {}", args.listen);
 
     Server::with(transport, domain_name_system).start().await;
 
