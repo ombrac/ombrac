@@ -1,3 +1,5 @@
+mod macros;
+
 pub mod dns;
 pub mod transport;
 
