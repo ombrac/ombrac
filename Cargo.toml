@@ -2,8 +2,8 @@
 members = [
     "crates/client",
     "crates/server",
-    "crates/protocol"
-, "tests/integration"]
+    "crates/protocol",
+]
 
 [workspace.package]
 version = "0.1.2"
