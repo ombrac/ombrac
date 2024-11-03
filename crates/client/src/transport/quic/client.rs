@@ -7,6 +7,7 @@ use super::{connection, stream, Config};
 
 pub mod impl_s2n_quic {
     use std::path::Path;
+    use std::time::Duration;
 
     use s2n_quic::provider::congestion_controller;
     use s2n_quic::provider::limits;
@@ -85,7 +86,15 @@ pub mod impl_s2n_quic {
             };
 
             let connection = connection(client, config.server_name, config.server_address).await;
-            let stream = stream(connection, config.max_multiplex.unwrap_or(0)).await;
+
+            let stream = stream(
+                connection,
+                config.max_multiplex.unwrap_or(0),
+                config
+                    .max_multiplex_interval
+                    .unwrap_or((16, Duration::from_secs(60))),
+            )
+            .await;
 
             Ok(Self { stream })
         }
