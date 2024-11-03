@@ -55,6 +55,24 @@ struct Args {
     )]
     max_multiplex: u64,
 
+    /// Connection multiplexing interval in millisecond
+    #[clap(
+        long,
+        help_heading = "Transport QUIC",
+        value_name = "TIME",
+        default_value = "60000"
+    )]
+    max_multiplex_interval: u64,
+
+    /// Connection multiplexing allowed within a specific interval 
+    #[clap(
+        long,
+        help_heading = "Transport QUIC",
+        value_name = "NUM",
+        default_value = "16"
+    )]
+    max_multiplex_per_interval: u64,
+
     /// Handshake timeout in millisecond.
     #[clap(
         long,
@@ -163,6 +181,7 @@ fn quic_config_from_args(args: &Args) -> Result<QuicConfig, Box<dyn Error>> {
         .with_initial_congestion_window(args.initial_congestion_window)
         .with_max_handshake_duration(Duration::from_millis(args.max_handshake_duration))
         .with_max_multiplex(args.max_multiplex)
+        .with_max_max_multiplex_interval((args.max_multiplex_per_interval, Duration::from_millis(args.max_multiplex_interval)))
         .with_max_idle_timeout(Duration::from_millis(args.max_idle_timeout))
         .with_max_keep_alive_period(Duration::from_millis(args.max_keep_alive_period))
         .with_max_open_bidirectional_streams(args.max_open_bidirectional_streams)
