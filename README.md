@@ -4,6 +4,7 @@
 
 [![Apache 2.0 Licensed][license-badge]][license-url]
 [![Build Status][actions-badge]][actions-url]
+[![Telegram Group][telegram-group-badge]][telegram-group-url]
 
 ## Example
 ### Server
@@ -28,3 +29,5 @@ This project is licensed under the [Apache-2.0 License](./LICENSE).
 [license-url]: https://github.com/ombrac/ombrac/blob/main/LICENSE
 [actions-badge]: https://github.com/ombrac/ombrac/workflows/CI/badge.svg
 [actions-url]: https://github.com/ombrac/ombrac/actions/workflows/ci.yml?query=branch%3Amain
+[telegram-group-badge]: https://img.shields.io/badge/Telegram-2CA5E0?style=flat-squeare&logo=telegram&logoColor=white
+[telegram-group-url]: https://t.me/ombrac_group
