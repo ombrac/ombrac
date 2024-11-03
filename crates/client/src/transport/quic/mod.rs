@@ -19,6 +19,7 @@ pub struct Config {
 
     initial_congestion_window: Option<u32>,
 
+    max_multiplex: Option<u64>,
     max_handshake_duration: Option<Duration>,
     max_idle_timeout: Option<Duration>,
     max_keep_alive_period: Option<Duration>,
@@ -39,6 +40,7 @@ impl Config {
             server_address: address.into(),
             tls_cert: None,
             initial_congestion_window: None,
+            max_multiplex: None,
             max_handshake_duration: None,
             max_idle_timeout: None,
             max_keep_alive_period: None,
@@ -87,6 +89,11 @@ impl Config {
 
     pub fn with_initial_congestion_window(mut self, window: u32) -> Self {
         self.initial_congestion_window = Some(window);
+        self
+    }
+
+    pub fn with_max_multiplex(mut self, multiplex: u64) -> Self {
+        self.max_multiplex = Some(multiplex);
         self
     }
 

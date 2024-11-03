@@ -85,7 +85,7 @@ pub mod impl_s2n_quic {
             };
 
             let connection = connection(client, config.server_name, config.server_address).await;
-            let stream = stream(connection).await;
+            let stream = stream(connection, config.max_multiplex.unwrap_or(0)).await;
 
             Ok(Self { stream })
         }

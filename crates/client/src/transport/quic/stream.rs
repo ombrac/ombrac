@@ -8,12 +8,17 @@ pub mod impl_s2n_quic {
 
     use super::*;
 
-    pub async fn stream(mut connection: Receiver<NoiseConnection>) -> Receiver<NoiseStream> {
+    pub async fn stream(
+        mut connection: Receiver<NoiseConnection>,
+        max_multiplex: u64,
+    ) -> Receiver<NoiseStream> {
         let (sender, receiver) = mpsc::channel(1);
 
         tokio::spawn(async move {
-            'connection: loop {
-                if let Some(mut connection) = connection.recv().await {
+            'connection: while let Some(mut connection) = connection.recv().await {
+                let mut multiplex = 1;
+
+                'stream: loop {
                     let stream = match connection.open_bidirectional_stream().await {
                         Ok(stream) => stream,
                         Err(_error) => {
@@ -23,7 +28,7 @@ pub mod impl_s2n_quic {
                                 _error
                             );
 
-                            continue;
+                            break 'stream;
                         }
                     };
 
@@ -36,6 +41,13 @@ pub mod impl_s2n_quic {
 
                     if sender.send(stream).await.is_err() {
                         break 'connection;
+                    }
+
+                    if max_multiplex != 0 {
+                        if multiplex >= max_multiplex {
+                            break 'stream;
+                        }
+                        multiplex = multiplex.wrapping_add(1);
                     }
                 }
             }
