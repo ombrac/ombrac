@@ -25,21 +25,20 @@ impl SocksServer {
                 let sender = sender.clone();
                 match listener.accept().await {
                     Ok((stream, _address)) => {
-                        tokio::spawn(async move {
-                            let request = match Self::handle(stream).await {
-                                Ok(value) => value,
-                                Err(_error) => {
-                                    error!("{}", _error);
-                                    return;
-                                }
-                            };
+                        let request = match Self::handle(stream).await {
+                            Ok(value) => value,
+                            Err(_error) => {
+                                error!("{}", _error);
 
-                            if let Some(value) = request {
-                                if sender.send(value).await.is_err() {
-                                    return;
-                                }
+                                continue;
                             }
-                        });
+                        };
+
+                        if let Some(value) = request {
+                            if sender.send(value).await.is_err() {
+                                return;
+                            }
+                        }
                     }
 
                     Err(_error) => {
@@ -69,6 +68,7 @@ mod socks5 {
     impl SocksServer {
         pub async fn handle(mut stream: TcpStream) -> Result<Option<(TcpStream, Request)>> {
             use socks::Streamable;
+            use std::os::fd::AsRawFd;
 
             let methods = <Vec<Socks5Method> as Streamable>::read(&mut stream).await?;
 
@@ -84,7 +84,13 @@ mod socks5 {
             // Read Request
             let request = <Socks5Request as Streamable>::read(&mut stream).await?;
 
-            info!("SOCKS5 {:?}", request);
+            info!(
+                "SOCKS5 FD {:?}, {:?} -> {:?}, {:?}",
+                stream.as_raw_fd(),
+                stream.local_addr(),
+                stream.peer_addr(),
+                request
+            );
 
             match request {
                 Socks5Request::Connect(address) => {
