@@ -3,6 +3,8 @@ members = [
     "crates/client",
     "crates/server",
     "crates/protocol",
+    "tests/test-integration",
+    "tests/test-support",
 ]
 
 [workspace.package]
@@ -17,6 +19,8 @@ repository = "https://github.com/ombrac/ombrac"
 ombrac-client = { version = "*", path = "crates/client", default-features = false }
 ombrac-server = { version = "*", path = "crates/server", default-features = false }
 ombrac-protocol = { version = "*", path = "crates/protocol", default-features = false }
+
+test-support.path = "tests/test-support"
 
 tokio = { version = "1", default-features = false }
 bytes = { version = "1", default-features = false }
