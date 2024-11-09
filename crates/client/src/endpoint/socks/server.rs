@@ -85,16 +85,17 @@ mod socks5 {
 
             #[cfg(feature = "tracing")]
             {
-                let fd = if cfg!(unix) {
+                let mut _fd = String::new();
+
+                #[cfg(unix)]
+                {
                     use std::os::fd::AsRawFd;
-                    format!("FD {:?}", stream.as_raw_fd())
-                } else {
-                    String::new()
+                    _fd = format!("FD {:?}", stream.as_raw_fd())
                 };
 
                 info!(
                     "SOCKS5 {}, {:?} -> {:?}, {:?}",
-                    fd,
+                    _fd,
                     stream.peer_addr(),
                     stream.local_addr(),
                     request
