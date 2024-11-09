@@ -68,7 +68,6 @@ mod socks5 {
     impl SocksServer {
         pub async fn handle(mut stream: TcpStream) -> Result<Option<(TcpStream, Request)>> {
             use socks::Streamable;
-            use std::os::fd::AsRawFd;
 
             let methods = <Vec<Socks5Method> as Streamable>::read(&mut stream).await?;
 
@@ -84,13 +83,23 @@ mod socks5 {
             // Read Request
             let request = <Socks5Request as Streamable>::read(&mut stream).await?;
 
-            info!(
-                "SOCKS5 FD {:?}, {:?} -> {:?}, {:?}",
-                stream.as_raw_fd(),
-                stream.local_addr(),
-                stream.peer_addr(),
-                request
-            );
+            #[cfg(feature = "tracing")]
+            {
+                let fd = if cfg!(unix) {
+                    use std::os::fd::AsRawFd;
+                    format!("FD {:?}", stream.as_raw_fd())
+                } else {
+                    String::new()
+                };
+
+                info!(
+                    "SOCKS5 {}, {:?} -> {:?}, {:?}",
+                    fd,
+                    stream.peer_addr(),
+                    stream.local_addr(),
+                    request
+                );
+            }
 
             match request {
                 Socks5Request::Connect(address) => {
