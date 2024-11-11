@@ -7,7 +7,8 @@ use tokio::io::AsyncReadExt;
 #[cfg(feature = "udp")]
 use tokio::sync::mpsc::{Receiver, Sender};
 
-use crate::{Resolver, Streamable, ToBytes};
+use crate::io::{Streamable, ToBytes};
+use crate::Resolver;
 
 #[rustfmt::skip]
 mod consts {

@@ -25,20 +25,22 @@ impl SocksServer {
                 let sender = sender.clone();
                 match listener.accept().await {
                     Ok((stream, _address)) => {
-                        let request = match Self::handle(stream).await {
-                            Ok(value) => value,
-                            Err(_error) => {
-                                error!("{}", _error);
+                        tokio::spawn(async move {
+                            let request = match Self::handle(stream).await {
+                                Ok(value) => value,
+                                Err(_error) => {
+                                    error!("{}", _error);
 
-                                continue;
-                            }
-                        };
+                                    return;
+                                }
+                            };
 
-                        if let Some(value) = request {
-                            if sender.send(value).await.is_err() {
-                                return;
+                            if let Some(value) = request {
+                                if sender.send(value).await.is_err() {
+                                    return;
+                                }
                             }
-                        }
+                        });
                     }
 
                     Err(_error) => {
