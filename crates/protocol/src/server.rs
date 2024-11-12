@@ -35,7 +35,7 @@ where
     }
 
     async fn handler(mut stream: RS, resolver: &RE) -> Result<()> {
-        use crate::io::copy_bidirectional;
+        use crate::io::utils::copy_bidirectional;
         use tokio::net::TcpStream;
 
         let request = <Request as Streamable>::read(&mut stream).await?;

@@ -33,79 +33,85 @@ pub trait IntoSplit {
     );
 }
 
-pub async fn copy_bidirectional<A, B>(a: A, b: B) -> Result<()>
-where
-    A: IntoSplit,
-    B: IntoSplit,
-{
-    let (mut a_reader, mut a_writer) = a.into_split();
-    let (mut b_reader, mut b_writer) = b.into_split();
+pub(crate) mod utils {
+    use super::*;
 
-    let a_to_b = async {
-        let mut buffer = [0u8; DEFAULT_BUF_SIZE];
-        loop {
-            let n = match a_reader.read(&mut buffer).await {
-                Ok(0) => return Ok(()),
-                Ok(n) => n,
-                Err(err) => return Err(err),
-            };
-            b_writer.write_all(&buffer[..n]).await?;
-            b_writer.flush().await?;
-        }
-    };
+    pub(crate) async fn copy_bidirectional<A, B>(a: A, b: B) -> Result<()>
+    where
+        A: IntoSplit,
+        B: IntoSplit,
+    {
+        let (mut a_reader, mut a_writer) = a.into_split();
+        let (mut b_reader, mut b_writer) = b.into_split();
 
-    let b_to_a = async {
-        let mut buffer = [0u8; DEFAULT_BUF_SIZE];
-        loop {
-            let n = match b_reader.read(&mut buffer).await {
-                Ok(0) => return Ok(()),
-                Ok(n) => n,
-                Err(err) => return Err(err),
-            };
-            a_writer.write_all(&buffer[..n]).await?;
-            a_writer.flush().await?;
-        }
-    };
+        let a_to_b = async {
+            let mut buffer = [0u8; DEFAULT_BUF_SIZE];
+            loop {
+                let n = match a_reader.read(&mut buffer).await {
+                    Ok(0) => return Ok(()),
+                    Ok(n) => n,
+                    Err(err) => return Err(err),
+                };
+                b_writer.write_all(&buffer[..n]).await?;
+                b_writer.flush().await?;
+            }
+        };
 
-    tokio::select! {
-        result = a_to_b => {result},
-        result = b_to_a => {result},
-    }
-}
+        let b_to_a = async {
+            let mut buffer = [0u8; DEFAULT_BUF_SIZE];
+            loop {
+                let n = match b_reader.read(&mut buffer).await {
+                    Ok(0) => return Ok(()),
+                    Ok(n) => n,
+                    Err(err) => return Err(err),
+                };
+                a_writer.write_all(&buffer[..n]).await?;
+                a_writer.flush().await?;
+            }
+        };
 
-mod impl_tokio {
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    use tokio::net::TcpStream;
-
-    use super::IntoSplit;
-
-    impl IntoSplit for TcpStream {
-        fn into_split(
-            self,
-        ) -> (
-            impl AsyncReadExt + Unpin + Send,
-            impl AsyncWriteExt + Unpin + Send,
-        ) {
-            self.into_split()
+        tokio::select! {
+            result = a_to_b => {result},
+            result = b_to_a => {result},
         }
     }
 }
 
-#[cfg(feature = "s2n-quic")]
-mod impl_s2n_quic {
-    use s2n_quic::stream::BidirectionalStream;
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+mod impl_crates {
+    mod impl_tokio {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::net::TcpStream;
 
-    use super::IntoSplit;
+        use crate::io::IntoSplit;
 
-    impl IntoSplit for BidirectionalStream {
-        fn into_split(
-            self,
-        ) -> (
-            impl AsyncReadExt + Unpin + Send,
-            impl AsyncWriteExt + Unpin + Send,
-        ) {
-            self.split()
+        impl IntoSplit for TcpStream {
+            fn into_split(
+                self,
+            ) -> (
+                impl AsyncReadExt + Unpin + Send,
+                impl AsyncWriteExt + Unpin + Send,
+            ) {
+                self.into_split()
+            }
+        }
+    }
+
+    #[cfg(feature = "s2n-quic")]
+    mod impl_s2n_quic {
+        use s2n_quic::stream::BidirectionalStream;
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        use crate::io::IntoSplit;
+
+        impl IntoSplit for BidirectionalStream {
+            fn into_split(
+                self,
+            ) -> (
+                impl AsyncReadExt + Unpin + Send,
+                impl AsyncWriteExt + Unpin + Send,
+            ) {
+                self.split()
+            }
         }
     }
 }

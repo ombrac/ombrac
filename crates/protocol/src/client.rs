@@ -38,7 +38,7 @@ where
     }
 
     async fn handler(mut local: LS, mut remote: RS, request: Request) -> Result<()> {
-        use crate::io::copy_bidirectional;
+        use crate::io::utils::copy_bidirectional;
 
         <Request as Streamable>::write(&request, &mut remote).await?;
 
