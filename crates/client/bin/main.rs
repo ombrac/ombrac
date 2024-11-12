@@ -87,7 +87,7 @@ struct Args {
         long,
         help_heading = "Transport QUIC",
         value_name = "TIME",
-        default_value = "0"
+        default_value = "30000"
     )]
     max_idle_timeout: u64,
 
@@ -96,7 +96,7 @@ struct Args {
         long,
         help_heading = "Transport QUIC",
         value_name = "TIME",
-        default_value = "8000"
+        default_value = "3000"
     )]
     max_keep_alive_period: u64,
 
