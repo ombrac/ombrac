@@ -61,15 +61,15 @@ impl Provider<(TcpStream, Request)> for SocksServer {
 }
 
 mod socks5 {
-    use socks::socks5::{Address as Socks5Address, Method as Socks5Method};
-    use socks::socks5::{Request as Socks5Request, Response as Socks5Response};
+    use socks_lib::socks5::{Address as Socks5Address, Method as Socks5Method};
+    use socks_lib::socks5::{Request as Socks5Request, Response as Socks5Response};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     use super::*;
 
     impl SocksServer {
         pub async fn handle(mut stream: TcpStream) -> Result<Option<(TcpStream, Request)>> {
-            use socks::Streamable;
+            use socks_lib::Streamable;
 
             let methods = <Vec<Socks5Method> as Streamable>::read(&mut stream).await?;
 
@@ -175,8 +175,8 @@ mod socks5 {
     #[cfg(feature = "udp")]
     pub mod udp {
         use ombrac_protocol::request::udp::Datagram;
-        use socks::socks5::UdpPacket as Socks5UdpPacket;
-        use socks::{Streamable, ToBytes};
+        use socks_lib::socks5::UdpPacket as Socks5UdpPacket;
+        use socks_lib::{Streamable, ToBytes};
         use tokio::net::UdpSocket;
         use tokio::sync::mpsc::{Receiver, Sender};
 

@@ -23,7 +23,7 @@ udp = ["ombrac-protocol/udp"]
 tracing = ["dep:tracing"]
 
 endpoint-default = ["endpoint-socks"]
-endpoint-socks = ["socks"]
+endpoint-socks = ["socks-lib"]
 
 transport-default = ["transport-quic"]
 transport-quic = ["s2n-quic", "aws-lc-rs", "ombrac-protocol/s2n-quic"]
@@ -44,7 +44,7 @@ aws-lc-rs = { workspace = true, features = ["bindgen"], optional = true }
 tracing = { workspace = true, optional = true }
 tracing-subscriber = { workspace = true, features = ["ansi"], optional = true }
 
-socks = { git = "https://github.com/ombrac/socks.git", optional = true }
+socks-lib = { workspace = true, optional = true }
 
 [lints]
 workspace = true
