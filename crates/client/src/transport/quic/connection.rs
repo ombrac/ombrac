@@ -22,7 +22,7 @@ pub mod impl_s2n_quic {
                 NoiseClientConnect::new(server_address).with_server_name(server_name.as_str());
 
             loop {
-                let connection = match client.connect(connect.clone()).await {
+                let mut connection = match client.connect(connect.clone()).await {
                     Ok(value) => value,
                     Err(_error) => {
                         error!(
@@ -42,6 +42,12 @@ pub mod impl_s2n_quic {
                     connection.id(),
                     connection.remote_addr()
                 );
+
+                if let Err(_error) = connection.keep_alive(true) {
+                    error!("failed to keep alive the connection. {}", _error);
+
+                    continue;
+                }
 
                 if sender.send(connection).await.is_err() {
                     break;
