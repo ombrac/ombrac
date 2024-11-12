@@ -1,10 +1,10 @@
-use std::io::Result;
 use std::marker::PhantomData;
 
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncReadExt, AsyncWriteExt, Result};
 
+use crate::io::{IntoSplit, Streamable};
 use crate::request::Request;
-use crate::{IntoSplit, Provider, Streamable};
+use crate::Provider;
 
 pub struct Client<L, R, LS, RS> {
     local: L,
@@ -17,7 +17,7 @@ impl<L, R, LS, RS> Client<L, R, LS, RS>
 where
     L: Provider<(LS, Request)>,
     R: Provider<RS>,
-    LS: AsyncReadExt + AsyncWriteExt + Unpin + Send + 'static,
+    LS: IntoSplit + AsyncReadExt + AsyncWriteExt + Unpin + Send + 'static,
     RS: IntoSplit + AsyncReadExt + AsyncWriteExt + Unpin + Send + 'static,
 {
     pub fn with(local: L, remote: R) -> Self {
@@ -38,14 +38,12 @@ where
     }
 
     async fn handler(mut local: LS, mut remote: RS, request: Request) -> Result<()> {
-        use tokio::io::copy_bidirectional;
+        use crate::io::utils::copy_bidirectional;
 
-        Streamable::write(&request, &mut remote).await?;
+        <Request as Streamable>::write(&request, &mut remote).await?;
 
         match request {
-            Request::TcpConnect(_) => {
-                copy_bidirectional(&mut local, &mut remote).await?;
-            }
+            Request::TcpConnect(_) => copy_bidirectional(local, remote).await?,
 
             #[cfg(feature = "udp")]
             Request::UdpAssociate(channel) => {

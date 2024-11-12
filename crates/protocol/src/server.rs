@@ -1,11 +1,11 @@
-use std::io::Result;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncReadExt, AsyncWriteExt, Result};
 
+use crate::io::{IntoSplit, Streamable};
 use crate::request::Request;
-use crate::{IntoSplit, Provider, Resolver, Streamable};
+use crate::{Provider, Resolver};
 
 pub struct Server<R, RE, RS> {
     accept: R,
@@ -35,7 +35,7 @@ where
     }
 
     async fn handler(mut stream: RS, resolver: &RE) -> Result<()> {
-        use tokio::io::copy_bidirectional;
+        use crate::io::utils::copy_bidirectional;
         use tokio::net::TcpStream;
 
         let request = <Request as Streamable>::read(&mut stream).await?;
@@ -43,9 +43,9 @@ where
         match request {
             Request::TcpConnect(address) => {
                 let addr = address.to_socket_address(resolver).await?;
-                let mut connect = TcpStream::connect(addr).await?;
+                let connect = TcpStream::connect(addr).await?;
 
-                copy_bidirectional(&mut stream, &mut connect).await?;
+                copy_bidirectional(stream, connect).await?
             }
 
             #[cfg(feature = "udp")]
