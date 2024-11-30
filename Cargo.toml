@@ -1,8 +1,8 @@
 [workspace]
 members = [
-    "crates/client",
-    "crates/server",
-    "crates/protocol",
+    "crates/ombrac-client",
+    "crates/ombrac-server",
+    "crates/ombrac",
 ]
 
 [workspace.package]
@@ -11,12 +11,14 @@ edition = "2021"
 license = "Apache-2.0"
 authors = ["Contributors"]
 repository = "https://github.com/ombrac/ombrac"
+description = ""
+keywords = ["proxy", "firewall"]
 
 [workspace.dependencies]
 # ombrac
-ombrac-client = { version = "*", path = "crates/client", default-features = false }
-ombrac-server = { version = "*", path = "crates/server", default-features = false }
-ombrac-protocol = { version = "*", path = "crates/protocol", default-features = false }
+ombrac = { version = "*", path = "crates/ombrac", default-features = false }
+ombrac-client = { version = "*", path = "crates/ombrac-client", default-features = false }
+ombrac-server = { version = "*", path = "crates/ombrac-server", default-features = false }
 
 tokio = { version = "1", default-features = false }
 bytes = { version = "1", default-features = false }
@@ -29,9 +31,6 @@ clap = { version = "4", default-features = false }
 # quic
 s2n-quic = { version = "1", default-features = false }
 aws-lc-rs = { version = "1", default-features = false }
-
-# dns
-hickory-resolver = { version = "0.24", default-features = false }
 
 # logging
 tracing = { version = "0.1", default-features = false }
