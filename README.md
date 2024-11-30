@@ -1,6 +1,6 @@
 # Ombrac
 
-**Ombrac** is a high-performance, Rust-based TCP tunneling solution designed for secure communication between clients and servers. It is ideal for developers and network administrators seeking efficient and secure data transmission.
+**Ombrac** is a high-performance, Rust-based TCP tunneling solution designed for secure communication between clients and servers.
 
 ## Features
 - Optionally pass through SOCKS
@@ -9,8 +9,6 @@
 
 [![Apache 2.0 Licensed][license-badge]][license-url]
 [![Build Status][actions-badge]][actions-url]
-[![Telegram Group][telegram-group-badge]][telegram-group-url]
-
 
 ## Install
 ### Binaries
@@ -19,13 +17,13 @@ Download the latest release from the [releases page](https://github.com/ombrac/o
 ## Example
 ### Server
 ```shell
-ombrac-server -l [::]:443 --tls-cert ./cert.pem --tls-key ./key.pem
+ombrac-server --listen "[::]:443" --tls-cert "./cert.pem" --tls-key "./key.pem"
 ```
 This command starts the Ombrac server listening on port 443, using the provided TLS certificate and key for encrypted communication.
 
 ### Client
 ```shell
-ombrac-client --socks 127.0.0.1:1080 --server-address example.com:443
+ombrac-client --socks "127.0.0.1:1080" --server-address "example.com:443"
 ```
 This command sets up a SOCKS5 server on 127.0.0.1:1080, forwarding traffic to example.com:443.
 
@@ -40,29 +38,26 @@ Options:
   -V, --version  Print version
 
 Transport QUIC:
-  -l, --listen <ADDR>
+      --listen <ADDR>
           Transport server listening address
       --tls-cert <FILE>
           Path to the TLS certificate file for secure connections
       --tls-key <FILE>
           Path to the TLS private key file for secure connections
       --initial-congestion-window <NUM>
-          Initial congestion window in bytes [default: 32]
+          Initial congestion window in bytes
       --max-handshake-duration <TIME>
-          Handshake timeout in millisecond [default: 3000]
+          Handshake timeout in millisecond
       --max-idle-timeout <TIME>
-          Connection idle timeout in millisecond [default: 0]
+          Connection idle timeout in millisecond
       --max-keep-alive-period <TIME>
-          Connection keep alive period in millisecond [default: 8000]
+          Connection keep alive period in millisecond
       --max-open-bidirectional-streams <NUM>
-          Connection max open bidirectional streams [default: 100]
+          Connection max open bidirectional streams
       --bidirectional-local-data-window <NUM>
-          Bidirectional stream local data window [default: 3750000]
+          Bidirectional stream local data window
       --bidirectional-remote-data-window <NUM>
-          Bidirectional stream remote data window [default: 3750000]
-
-DNS:
-      --dns <ENUM>  Domain name system resolver [default: cloudflare] [possible values: cloudflare, cloudflare-tls, google, google-tls]
+          Bidirectional stream remote data window
 
 Logging:
       --tracing-level <TRACE>  Logging level e.g., INFO, WARN, ERROR [default: WARN]
@@ -71,7 +66,6 @@ Logging:
 ### Client
 ```shell
 Usage: ombrac-client [OPTIONS] --server-address <ADDR>
-
 Options:
   -h, --help     Print help
   -V, --version  Print version
@@ -89,25 +83,19 @@ Transport QUIC:
       --tls-cert <FILE>
           Path to the TLS certificate file for secure connections
       --initial-congestion-window <NUM>
-          Initial congestion window in bytes [default: 32]
-      --max-multiplex <NUM>
-          Connection multiplexing [default: 0]
-      --max-multiplex-interval <TIME>
-          Connection multiplexing interval in millisecond [default: 60000]
-      --max-multiplex-per-interval <NUM>
-          Connection multiplexing allowed within a specific interval [default: 16]
+          Initial congestion window in bytes
       --max-handshake-duration <TIME>
-          Handshake timeout in millisecond [default: 3000]
+          Handshake timeout in millisecond
       --max-idle-timeout <TIME>
-          Connection idle timeout in millisecond [default: 0]
+          Connection idle timeout in millisecond
       --max-keep-alive-period <TIME>
-          Connection keep alive period in millisecond [default: 8000]
+          Connection keep alive period in millisecond
       --max-open-bidirectional-streams <NUM>
-          Connection max open bidirectional streams [default: 100]
+          Connection max open bidirectional streams
       --bidirectional-local-data-window <NUM>
-          Bidirectional stream local data window [default: 3750000]
+          Bidirectional stream local data window
       --bidirectional-remote-data-window <NUM>
-          Bidirectional stream remote data window [default: 3750000]
+          Bidirectional stream remote data window
 
 Logging:
       --tracing-level <TRACE>  Logging level e.g., INFO, WARN, ERROR [default: WARN]
@@ -123,5 +111,3 @@ This project is licensed under the [Apache-2.0 License](./LICENSE).
 [license-url]: https://github.com/ombrac/ombrac/blob/main/LICENSE
 [actions-badge]: https://github.com/ombrac/ombrac/workflows/CI/badge.svg
 [actions-url]: https://github.com/ombrac/ombrac/actions/workflows/ci.yml?query=branch%3Amain
-[telegram-group-badge]: https://img.shields.io/badge/Telegram-2CA5E0?style=flat-squeare&logo=telegram&logoColor=white
-[telegram-group-url]: https://t.me/ombrac_group
