@@ -22,7 +22,7 @@ default = [
 tracing = ["dep:tracing"]
 
 transport-default = ["transport-quic"]
-transport-quic = ["s2n-quic", "aws-lc-rs", "ombrac/s2n-quic"]
+transport-quic = ["s2n-quic", "aws-lc-rs"]
 
 binary = [
     "clap",
@@ -39,6 +39,9 @@ s2n-quic = { workspace = true, features = ["provider-tls-default", "provider-add
 aws-lc-rs = { workspace = true, features = ["bindgen"], optional = true }
 tracing = { workspace = true, optional = true }
 tracing-subscriber = { workspace = true, features = ["ansi"], optional = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["full"] }
 
 [lints]
 workspace = true

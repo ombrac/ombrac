@@ -9,7 +9,7 @@ use tokio::net::TcpStream;
 
 use super::{Request, Server};
 
-impl<Transport, Stream> Server<Transport, Stream> {
+impl Server {
     pub(super) async fn handler_v5(mut stream: TcpStream) -> io::Result<Request> {
         use socks_lib::Streamable;
 
@@ -60,7 +60,7 @@ pub trait Authentication {
         S: AsyncReadExt + AsyncWriteExt + Unpin + Send;
 }
 
-impl<Transport, Stream> Authentication for Server<Transport, Stream> {
+impl Authentication for Server {
     async fn select(_methods: Vec<Socks5Method>) -> io::Result<Socks5Method> {
         Ok(Socks5Method::NoAuthentication)
     }

@@ -10,15 +10,19 @@ description.workspace = true
 
 [features]
 default = []
-s2n-quic = ["dep:s2n-quic"]
 
 [dependencies]
 bytes = { workspace = true }
-tokio = { workspace = true, features = ["rt", "net", "io-util"] }
-s2n-quic = { workspace = true, optional = true }
+tokio = { workspace = true, features = ["io-util", "macros"] }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["full"] }
+futures = { workspace = true, features = ["alloc"] }
+criterion = { workspace = true, features = ["html_reports"] }
+
+[[bench]]
+name = "request"
+harness = false
 
 [lints]
 workspace = true
