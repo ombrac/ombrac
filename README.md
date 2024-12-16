@@ -10,18 +10,34 @@
 [![Apache 2.0 Licensed][license-badge]][license-url]
 [![Build Status][actions-badge]][actions-url]
 
+## Architecture
+Ombrac is organized into three main crates
+
+- `ombrac`: Core library implementing the tunnel protocol
+- `ombrac-client`: Ombrac client implementation
+- `ombrac-server`: Ombrac server implementation
+
+
 ## Install
-### Binaries
+### From Binary Releases
 Download the latest release from the [releases page](https://github.com/ombrac/ombrac/releases).
 
-## Example
-### Server
+### From Source
+```shell
+cargo build --bin ombrac-client --bin ombrac-server --features binary
+```
+**NOTE**: On linux systems, [`aws-lc-rs`](https://github.com/aws/aws-lc-rs) will be used for cryptographic operations. A C compiler and CMake may be required on these systems for installation.
+
+When using a self-signed certificate, the client requires both the `--server-name` parameter and the `--tls-cert` path to be explicitly configured.
+
+## Quick Start
+### ServerSetup
 ```shell
 ombrac-server --listen "[::]:443" --tls-cert "./cert.pem" --tls-key "./key.pem"
 ```
 This command starts the Ombrac server listening on port 443, using the provided TLS certificate and key for encrypted communication.
 
-### Client
+### ClientSetup
 ```shell
 ombrac-client --socks "127.0.0.1:1080" --server-address "example.com:443"
 ```
@@ -77,9 +93,9 @@ Transport QUIC:
       --bind <ADDR>
           Bind local address
       --server-name <STR>
-          Name of the server to connect to
+          Name of the server to connect
       --server-address <ADDR>
-          Address of the server to connect to
+          Address of the server to connect
       --tls-cert <FILE>
           Path to the TLS certificate file for secure connections
       --initial-congestion-window <NUM>

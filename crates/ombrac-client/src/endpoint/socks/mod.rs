@@ -1,89 +1,81 @@
 mod v5;
 
 use std::error::Error;
-use std::marker::PhantomData;
+use std::net::SocketAddr;
 
-use ombrac::io::IntoSplit;
 use ombrac::request::Address;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use ombrac::Provider;
+use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{TcpListener, TcpStream};
 
+use crate::Client;
 use crate::{error, info};
 
-pub struct Config {
-    listen: String,
-}
-
-pub struct Server<Client, Stream> {
-    config: Config,
-    client: Client,
-    _stream: PhantomData<Stream>,
-}
+pub struct Server {}
 
 pub enum Request {
     TcpConnect(TcpStream, Address),
 }
 
-impl Config {
-    pub fn new(addr: String) -> Self {
-        Self { listen: addr }
-    }
-}
+impl Server {
+    pub async fn listen<T, S>(addr: SocketAddr, mut ombrac: Client<T>) -> Result<(), Box<dyn Error>>
+    where
+        T: Provider<Item = S> + Send + 'static,
+        S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+    {
+        let listener = TcpListener::bind(addr).await?;
 
-impl<Client, Stream> Server<Client, Stream> {
-    pub fn new(config: Config, client: Client) -> Self {
-        Self {
-            config,
-            client,
-            _stream: PhantomData,
-        }
-    }
-}
+        while let Ok((stream, _addr)) = listener.accept().await {
+            let mut outbound = match ombrac.outbound().await {
+                Ok(value) => value,
+                Err(_error) => {
+                    error!("{_error}");
 
-impl<Client, Stream> Server<Client, Stream>
-where
-    Client: ombrac::Client<Stream>,
-    Stream: IntoSplit + AsyncReadExt + AsyncWriteExt + Unpin + Send + 'static,
-{
-    pub async fn listen(mut self) -> Result<(), Box<dyn Error>> {
-        let listener = TcpListener::bind(self.config.listen).await?;
-
-        loop {
-            let outbound = match self.client.outbound().await {
-                Some(value) => value,
-                None => return Ok(()),
+                    continue;
+                }
             };
 
-            match listener.accept().await {
-                Ok((stream, _)) => {
-                    tokio::spawn(async move {
-                        let request = match Self::handler_v5(stream).await {
-                            Ok(value) => value,
+            tokio::spawn(async move {
+                let request = match Self::handler_v5(stream).await {
+                    Ok(value) => value,
+                    Err(_error) => {
+                        error!("{_error}");
+
+                        return;
+                    }
+                };
+
+                match request {
+                    Request::TcpConnect(mut inbound, address) => {
+                        if let Err(_error) =
+                            Client::<T>::tcp_connect(&mut outbound, address.clone()).await
+                        {
+                            error!("{_error}");
+
+                            return;
+                        };
+
+                        match ombrac::io::util::copy_bidirectional(&mut inbound, &mut outbound)
+                            .await
+                        {
+                            Ok(value) => {
+                                info!(
+                                    "TcpConnect {:?} send {}, receive {}",
+                                    address, value.0, value.1
+                                );
+                            }
+
                             Err(_error) => {
-                                error!("{_error}");
+                                error!("TcpConnect {:?} error, {}", address, _error);
 
                                 return;
                             }
-                        };
-
-                        match request {
-                            Request::TcpConnect(inbound, address) => {
-                                info!("TcpConnect {:?}", address);
-
-                                if let Err(_error) =
-                                    Client::warp_tcp(inbound, outbound, address).await
-                                {
-                                    error!("{_error}")
-                                }
-                            }
                         }
-                    });
-                }
-
-                Err(_error) => {
-                    error!("socks server failed to accept: {:?}", _error);
-                }
-            };
+                    }
+                };
+            });
         }
+
+        Ok(())
     }
 }

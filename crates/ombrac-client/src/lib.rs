@@ -1,8 +1,7 @@
 mod macros;
 
+pub mod client;
 pub mod endpoint;
 pub mod transport;
 
-pub struct Client<T> {
-    inner: T,
-}
+pub use client::Client;
