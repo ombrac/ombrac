@@ -28,8 +28,6 @@ cargo build --bin ombrac-client --bin ombrac-server --features binary
 ```
 **NOTE**: On linux systems, [`aws-lc-rs`](https://github.com/aws/aws-lc-rs) will be used for cryptographic operations. A C compiler and CMake may be required on these systems for installation.
 
-When using a self-signed certificate, the client requires both the `--server-name` parameter and the `--tls-cert` path to be explicitly configured.
-
 ## Quick Start
 ### ServerSetup
 ```shell
@@ -41,7 +39,9 @@ This command starts the Ombrac server listening on port 443, using the provided 
 ```shell
 ombrac-client --socks "127.0.0.1:1080" --server-address "example.com:443"
 ```
-This command sets up a SOCKS5 server on 127.0.0.1:1080, forwarding traffic to example.com:443.
+Will sets up a SOCKS5 server on 127.0.0.1:1080, forwarding traffic to example.com:443.
+
+When using a self-signed certificate, the client requires both the `--server-name` parameter and the `--tls-cert` path to be explicitly configured.
 
 ## Usage
 ### Server

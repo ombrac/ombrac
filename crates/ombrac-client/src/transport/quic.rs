@@ -262,7 +262,7 @@ async fn s2n_client_with_config(config: &Builder) -> Result<Client> {
         Some(value) => value,
         None => match config.server_address().await? {
             SocketAddr::V4(_) => "0.0.0.0:0",
-            SocketAddr::V6(_) => "[::]0",
+            SocketAddr::V6(_) => "[::]:0",
         },
     };
 
