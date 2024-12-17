@@ -11,14 +11,14 @@ edition = "2021"
 license = "Apache-2.0"
 authors = ["Contributors"]
 repository = "https://github.com/ombrac/ombrac"
-description = ""
+description = "Safe, fast, small TCP tunnel using Rust"
 keywords = ["proxy", "firewall"]
 
 [workspace.dependencies]
 # ombrac
-ombrac = { version = "*", path = "crates/ombrac", default-features = false }
-ombrac-client = { version = "*", path = "crates/ombrac-client", default-features = false }
-ombrac-server = { version = "*", path = "crates/ombrac-server", default-features = false }
+ombrac = { version = "0.2.0", path = "crates/ombrac", default-features = false }
+ombrac-client = { version = "0.2.0", path = "crates/ombrac-client", default-features = false }
+ombrac-server = { version = "0.2.0", path = "crates/ombrac-server", default-features = false }
 
 futures = { version = "0.3", default-features = false }
 tokio = { version = "1", default-features = false }
