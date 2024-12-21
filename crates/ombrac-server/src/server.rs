@@ -7,7 +7,7 @@ use ombrac::Provider;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpStream;
 
-use crate::error;
+use ombrac_macros::error;
 
 pub struct Server<T> {
     transport: T,

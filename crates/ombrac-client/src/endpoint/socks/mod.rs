@@ -9,7 +9,7 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{TcpListener, TcpStream};
 
 use crate::Client;
-use crate::{error, info};
+use ombrac_macros::{error, info};
 
 pub struct Server {}
 
