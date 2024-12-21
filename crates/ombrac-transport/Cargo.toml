@@ -17,7 +17,7 @@ quic = ["quinn", "rustls", "rustls-pemfile", "aws-lc-rs", "webpki-roots"]
 [dependencies]
 ombrac = { workspace = true }
 ombrac-macros = { workspace = true }
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["sync"] }
 quinn = { workspace = true, features = ["runtime-tokio", "rustls-aws-lc-rs"], optional = true }
 rustls = { workspace = true, optional = true }
 aws-lc-rs = { workspace = true, features = ["bindgen"], optional = true }
