@@ -16,6 +16,8 @@ Ombrac is organized into three main crates
 - `ombrac`: Core library implementing the tunnel protocol
 - `ombrac-client`: Ombrac client implementation
 - `ombrac-server`: Ombrac server implementation
+- `ombrac-macros`: Ombrac macros implementation
+- `ombrac-transport`: Ombrac transport implementation
 
 
 ## Install
@@ -33,7 +35,7 @@ cargo build --bin ombrac-client --bin ombrac-server --features binary
 ```shell
 ombrac-server --listen "[::]:443" --tls-cert "./cert.pem" --tls-key "./key.pem"
 ```
-This command starts the Ombrac server listening on port 443, using the provided TLS certificate and key for encrypted communication.
+Starts the Ombrac server listening on port 443, using the provided TLS certificate and key for encrypted communication.
 
 ### ClientSetup
 ```shell
@@ -60,20 +62,14 @@ Transport QUIC:
           Path to the TLS certificate file for secure connections
       --tls-key <FILE>
           Path to the TLS private key file for secure connections
-      --initial-congestion-window <NUM>
+      --congestion-initial-window <NUM>
           Initial congestion window in bytes
-      --max-handshake-duration <TIME>
-          Handshake timeout in millisecond
       --max-idle-timeout <TIME>
           Connection idle timeout in millisecond
       --max-keep-alive-period <TIME>
           Connection keep alive period in millisecond
       --max-open-bidirectional-streams <NUM>
           Connection max open bidirectional streams
-      --bidirectional-local-data-window <NUM>
-          Bidirectional stream local data window
-      --bidirectional-remote-data-window <NUM>
-          Bidirectional stream remote data window
 
 Logging:
       --tracing-level <TRACE>  Logging level e.g., INFO, WARN, ERROR [default: WARN]
@@ -82,6 +78,7 @@ Logging:
 ### Client
 ```shell
 Usage: ombrac-client [OPTIONS] --server-address <ADDR>
+
 Options:
   -h, --help     Print help
   -V, --version  Print version
@@ -91,27 +88,21 @@ Endpoint SOCKS:
 
 Transport QUIC:
       --bind <ADDR>
-          Bind local address
+          Bind address
       --server-name <STR>
           Name of the server to connect
       --server-address <ADDR>
           Address of the server to connect
       --tls-cert <FILE>
           Path to the TLS certificate file for secure connections
-      --initial-congestion-window <NUM>
+      --congestion-initial-window <NUM>
           Initial congestion window in bytes
-      --max-handshake-duration <TIME>
-          Handshake timeout in millisecond
       --max-idle-timeout <TIME>
           Connection idle timeout in millisecond
       --max-keep-alive-period <TIME>
           Connection keep alive period in millisecond
       --max-open-bidirectional-streams <NUM>
           Connection max open bidirectional streams
-      --bidirectional-local-data-window <NUM>
-          Bidirectional stream local data window
-      --bidirectional-remote-data-window <NUM>
-          Bidirectional stream remote data window
 
 Logging:
       --tracing-level <TRACE>  Logging level e.g., INFO, WARN, ERROR [default: WARN]
