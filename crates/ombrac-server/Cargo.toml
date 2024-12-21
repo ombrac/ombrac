@@ -7,7 +7,7 @@ license.workspace = true
 keywords.workspace = true
 repository.workspace = true
 description.workspace = true
-readme = "../README.md"
+readme = "../../README.md"
 
 [[bin]]
 name = "ombrac-server"
