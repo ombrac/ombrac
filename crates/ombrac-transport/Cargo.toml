@@ -1,0 +1,28 @@
+[package]
+name = "ombrac-transport"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description.workspace = true
+keywords.workspace = true
+readme = "../README.md"
+
+[features]
+tracing = ["dep:tracing"]
+
+quic = ["quinn", "rustls", "rustls-pemfile", "webpki-roots"]
+
+[dependencies]
+ombrac = { workspace = true }
+ombrac-macros = { workspace = true }
+tokio = { workspace = true }
+quinn = { workspace = true, features = ["runtime-tokio", "rustls-aws-lc-rs"], optional = true }
+rustls = { workspace = true, optional = true }
+webpki-roots = { workspace = true, optional = true }
+rustls-pemfile = { workspace = true, features = ["std"], optional = true }
+tracing = { workspace = true, optional = true }
+
+[lints]
+workspace = true

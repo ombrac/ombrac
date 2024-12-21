@@ -1,0 +1,13 @@
+[package]
+name = "ombrac-macros"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description.workspace = true
+keywords.workspace = true
+readme = "../README.md"
+
+[lints]
+workspace = true

@@ -68,6 +68,23 @@ macro_rules! try_or_continue {
 }
 
 #[macro_export]
+macro_rules! try_or_break {
+    ($expr:expr) => {
+        match $expr {
+            Ok(value) => value,
+            Err(_error) => {
+                #[cfg(feature = "tracing")]
+                {
+                    tracing::error!("{}", _error);
+                }
+
+                break;
+            }
+        }
+    };
+}
+
+#[macro_export]
 macro_rules! try_or_return {
     ($expr:expr) => {
         match $expr {
@@ -82,4 +99,21 @@ macro_rules! try_or_return {
             }
         }
     };
+}
+
+#[macro_export]
+macro_rules! debug_timer {
+    ($name:expr, $body:expr) => {{
+        #[cfg(debug_assertions)]
+        #[cfg(feature = "tracing")]
+        let start = std::time::Instant::now();
+
+        let result = $body;
+
+        #[cfg(debug_assertions)]
+        #[cfg(feature = "tracing")]
+        tracing::debug!("{} {:?}", $name, start.elapsed());
+
+        result
+    }};
 }
