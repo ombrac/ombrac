@@ -5,11 +5,11 @@ use std::net::SocketAddr;
 
 use ombrac::request::Address;
 use ombrac::Provider;
+use ombrac_macros::{info, try_or_continue, try_or_return};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{TcpListener, TcpStream};
 
 use crate::Client;
-use ombrac_macros::{error, info};
 
 pub struct Server {}
 
@@ -23,54 +23,29 @@ impl Server {
         T: Provider<Item = S> + Send + 'static,
         S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
     {
+        use ombrac::io::util::copy_bidirectional;
+
         let listener = TcpListener::bind(addr).await?;
 
         while let Ok((stream, _addr)) = listener.accept().await {
-            let mut outbound = match ombrac.outbound().await {
-                Ok(value) => value,
-                Err(_error) => {
-                    error!("{_error}");
-
-                    continue;
-                }
-            };
+            let mut outbound = try_or_continue!(ombrac.outbound().await);
 
             tokio::spawn(async move {
-                let request = match Self::handler_v5(stream).await {
-                    Ok(value) => value,
-                    Err(_error) => {
-                        error!("{_error}");
-
-                        return;
-                    }
-                };
+                let request = try_or_return!(Self::handler_v5(stream).await);
 
                 match request {
                     Request::TcpConnect(mut inbound, address) => {
-                        if let Err(_error) =
+                        try_or_return!(
                             Client::<T>::tcp_connect(&mut outbound, address.clone()).await
-                        {
-                            error!("{_error}");
+                        );
 
-                            return;
-                        };
+                        let bytes =
+                            try_or_return!(copy_bidirectional(&mut inbound, &mut outbound).await);
 
-                        match ombrac::io::util::copy_bidirectional(&mut inbound, &mut outbound)
-                            .await
-                        {
-                            Ok(value) => {
-                                info!(
-                                    "TcpConnect {:?} send {}, receive {}",
-                                    address, value.0, value.1
-                                );
-                            }
-
-                            Err(_error) => {
-                                error!("TcpConnect {:?} error, {}", address, _error);
-
-                                return;
-                            }
-                        }
+                        info!(
+                            "TcpConnect {:?} send {}, receive {}",
+                            address, bytes.0, bytes.1
+                        );
                     }
                 };
             });
