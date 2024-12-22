@@ -23,7 +23,7 @@ where
     }
 
     async fn handler(mut stream: Stream) -> io::Result<()> {
-        let request = <Request as Streamable>::read(&mut stream).await?;
+        let request = Request::read(&mut stream).await?;
 
         match request {
             Request::TcpConnect(address) => {
