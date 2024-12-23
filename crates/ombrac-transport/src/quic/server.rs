@@ -133,14 +133,14 @@ impl Connection {
         let (sender, receiver) = mpsc::channel(8);
 
         tokio::spawn(async move {
-            use ombrac_macros::{try_or_break, try_or_continue};
+            use ombrac_macros::{try_or_break, try_or_return};
 
             while let Some(connection) = endpoint.accept().await {
-                let connection = try_or_continue!(connection.await);
-
                 let sender = sender.clone();
 
                 tokio::spawn(async move {
+                    let connection = try_or_return!(connection.await);
+
                     loop {
                         let stream = try_or_break!(connection.accept_bi().await);
 
