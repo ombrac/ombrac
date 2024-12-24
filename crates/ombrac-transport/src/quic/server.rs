@@ -27,7 +27,7 @@ impl Builder {
             tls_key,
             congestion_initial_window: None,
             max_idle_timeout: None,
-            max_keep_alive_period: Some(Duration::from_millis(8000)),
+            max_keep_alive_period: None,
             max_open_bidirectional_streams: None,
         }
     }
@@ -66,8 +66,6 @@ impl Builder {
         Connection::with_server(self).await
     }
 }
-
-pub const ALPN_QUIC_HTTP: &[&[u8]] = &[b"h3"];
 
 impl Connection {
     async fn with_server(config: Builder) -> Result<Self> {
