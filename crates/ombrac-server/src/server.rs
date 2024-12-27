@@ -38,19 +38,15 @@ where
     }
 
     async fn resolve(address: Address) -> io::Result<SocketAddr> {
-        use tokio::net::lookup_host;
+        use crate::dns::lookup_ip;
 
-        match address {
-            Address::Domain(domain, port) => lookup_host(format!("{}:{}", domain, port))
-                .await?
-                .next()
-                .ok_or(io::Error::other(format!(
-                    "could not resolve domain '{}:{}'",
-                    domain, port
-                ))),
-            Address::IPv4(addr) => Ok(SocketAddr::V4(addr)),
-            Address::IPv6(addr) => Ok(SocketAddr::V6(addr)),
-        }
+        let result = match address {
+            Address::Domain(domain, port) => SocketAddr::new(lookup_ip(&domain).await?, port),
+            Address::IPv4(addr) => SocketAddr::V4(addr),
+            Address::IPv6(addr) => SocketAddr::V6(addr),
+        };
+
+        Ok(result)
     }
 
     pub async fn listen(&mut self) -> io::Result<()> {
