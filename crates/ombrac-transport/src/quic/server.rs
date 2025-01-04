@@ -90,7 +90,7 @@ impl Connection {
 
             if config.enable_zero_rtt {
                 tls_config.send_half_rtt_data = true;
-                tls_config.max_early_data_size = 64 * 1024;
+                tls_config.max_early_data_size = u32::MAX;
             }
 
             tls_config
