@@ -38,9 +38,13 @@ struct Args {
     #[clap(long, help_heading = "Transport QUIC", value_name = "FILE")]
     tls_cert: Option<PathBuf>,
 
+    /// Whether to enable 0-RTT or 0.5-RTT connections at the cost of weakened security
+    #[clap(long, help_heading = "Transport QUIC", value_name = "BOOL")]
+    enable_zero_rtt: Option<bool>,
+
     /// Whether to enable connection multiplexing
     #[clap(long, help_heading = "Transport QUIC", value_name = "BOOL")]
-    connection_multiplexing: Option<bool>,
+    enable_connection_multiplexing: Option<bool>,
 
     /// Initial congestion window in bytes
     #[clap(long, help_heading = "Transport QUIC", value_name = "NUM")]
@@ -51,7 +55,7 @@ struct Args {
     max_idle_timeout: Option<u64>,
 
     /// Connection keep alive period in millisecond
-    #[clap(long, help_heading = "Transport QUIC", value_name = "TIME")]
+    #[clap(long, help_heading = "Transport QUIC", value_name = "TIME", default_value = "8000")]
     max_keep_alive_period: Option<u64>,
 
     /// Connection max open bidirectional streams
@@ -103,8 +107,12 @@ async fn quic_from_args(args: &Args) -> Result<Connection, Box<dyn Error>> {
         builder = builder.with_tls_cert(value.clone());
     }
 
-    if let Some(value) = &args.connection_multiplexing {
-        builder = builder.with_connection_multiplexing(value.clone());
+    if let Some(value) = &args.enable_zero_rtt {
+        builder = builder.with_enable_zero_rtt(value.clone());
+    }
+
+    if let Some(value) = &args.enable_connection_multiplexing {
+        builder = builder.with_enable_connection_multiplexing(value.clone());
     }
 
     if let Some(value) = args.congestion_initial_window {

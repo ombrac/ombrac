@@ -52,6 +52,8 @@ Transport QUIC:
           Path to the TLS certificate file for secure connections
       --tls-key <FILE>
           Path to the TLS private key file for secure connections
+      --enable-zero-rtt <BOOL>
+          Whether to enable 0-RTT or 0.5-RTT connections at the cost of weakened security [default: false]
       --congestion-initial-window <NUM>
           Initial congestion window in bytes
       --max-idle-timeout <TIME>
@@ -85,14 +87,16 @@ Transport QUIC:
           Address of the server to connect
       --tls-cert <FILE>
           Path to the TLS certificate file for secure connections
-      --connection-multiplexing <BOOL>
+      --enable-zero-rtt <BOOL>
+          Whether to enable 0-RTT or 0.5-RTT connections at the cost of weakened security [default: false]
+      --enable-connection-multiplexing <BOOL>
           Whether to enable connection multiplexing [default: false]
       --congestion-initial-window <NUM>
           Initial congestion window in bytes
       --max-idle-timeout <TIME>
           Connection idle timeout in millisecond
       --max-keep-alive-period <TIME>
-          Connection keep alive period in millisecond
+          Connection keep alive period in millisecond [default: 8000]
       --max-open-bidirectional-streams <NUM>
           Connection max open bidirectional streams
 

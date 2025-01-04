@@ -12,6 +12,7 @@ pub struct Builder {
     tls_key: PathBuf,
     tls_cert: PathBuf,
 
+    enable_zero_rtt: bool,
     congestion_initial_window: Option<u64>,
 
     max_idle_timeout: Option<Duration>,
@@ -25,6 +26,7 @@ impl Builder {
             listen,
             tls_cert,
             tls_key,
+            enable_zero_rtt: false,
             congestion_initial_window: None,
             max_idle_timeout: None,
             max_keep_alive_period: None,
@@ -39,6 +41,11 @@ impl Builder {
 
     pub fn with_tls_key(mut self, value: PathBuf) -> Self {
         self.tls_key = value;
+        self
+    }
+
+    pub fn with_enable_zero_rtt(mut self, value: bool) -> Self {
+        self.enable_zero_rtt = value;
         self
     }
 
@@ -75,13 +82,18 @@ impl Connection {
             let key = super::load_private_key(&config.tls_key)?;
             let certs = super::load_certificates(&config.tls_cert)?;
 
-            let mut config = ServerConfig::builder()
+            let mut tls_config = ServerConfig::builder()
                 .with_no_client_auth()
                 .with_single_cert(certs, key)?;
 
-            config.alpn_protocols = [b"h3"].iter().map(|&x| x.into()).collect();
+            tls_config.alpn_protocols = [b"h3"].iter().map(|&x| x.into()).collect();
 
-            config
+            if config.enable_zero_rtt {
+                tls_config.send_half_rtt_data = true;
+                tls_config.max_early_data_size = 64 * 1024;
+            }
+
+            tls_config
         };
 
         let quic_config = {
