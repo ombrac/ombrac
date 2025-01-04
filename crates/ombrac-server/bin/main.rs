@@ -23,6 +23,10 @@ struct Args {
     #[clap(long, help_heading = "Transport QUIC", value_name = "FILE")]
     tls_key: PathBuf,
 
+    /// Whether to enable 0-RTT or 0.5-RTT connections at the cost of weakened security
+    #[clap(long, help_heading = "Transport QUIC", value_name = "BOOL")]
+    enable_zero_rtt: Option<bool>,
+
     /// Initial congestion window in bytes
     #[clap(long, help_heading = "Transport QUIC", value_name = "NUM")]
     congestion_initial_window: Option<u64>,
@@ -75,6 +79,10 @@ async fn quic_config_from_args(args: &Args) -> Result<Connection, Box<dyn Error>
         args.tls_cert.clone(),
         args.tls_key.clone(),
     );
+
+    if let Some(value) = args.enable_zero_rtt {
+        builder = builder.with_enable_zero_rtt(value);
+    }
 
     if let Some(value) = args.congestion_initial_window {
         builder = builder.with_congestion_initial_window(value);
