@@ -34,9 +34,13 @@ struct Args {
     #[clap(long, help_heading = "Transport QUIC", value_name = "ADDR")]
     server_address: String,
 
-    /// Path to the TLS certificate file for secure connections.
+    /// Path to the TLS certificate file for secure connections
     #[clap(long, help_heading = "Transport QUIC", value_name = "FILE")]
     tls_cert: Option<PathBuf>,
+
+    /// Whether to enable connection multiplexing
+    #[clap(long, help_heading = "Transport QUIC", value_name = "BOOL")]
+    connection_multiplexing: Option<bool>,
 
     /// Initial congestion window in bytes
     #[clap(long, help_heading = "Transport QUIC", value_name = "NUM")]
@@ -97,6 +101,10 @@ async fn quic_from_args(args: &Args) -> Result<Connection, Box<dyn Error>> {
 
     if let Some(value) = &args.tls_cert {
         builder = builder.with_tls_cert(value.clone());
+    }
+
+    if let Some(value) = &args.connection_multiplexing {
+        builder = builder.with_connection_multiplexing(value.clone());
     }
 
     if let Some(value) = args.congestion_initial_window {

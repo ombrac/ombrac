@@ -10,7 +10,7 @@ static RESOLVER: LazyLock<AsyncResolver<GenericConnector<TokioRuntimeProvider>>>
     LazyLock::new(|| {
         let config = ResolverConfig::google_h3();
         let options = ResolverOpts::default();
-        
+
         TokioAsyncResolver::tokio(config, options)
     });
 

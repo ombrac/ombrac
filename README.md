@@ -10,16 +10,6 @@
 [![Apache 2.0 Licensed][license-badge]][license-url]
 [![Build Status][actions-badge]][actions-url]
 
-## Architecture
-Ombrac is organized into three main crates
-
-- `ombrac`: Core library implementing the tunnel protocol
-- `ombrac-client`: Ombrac client implementation
-- `ombrac-server`: Ombrac server implementation
-- `ombrac-macros`: Ombrac macros implementation
-- `ombrac-transport`: Ombrac transport implementation
-
-
 ## Install
 ### From Binary Releases
 Download the latest release from the [releases page](https://github.com/ombrac/ombrac/releases).
@@ -95,6 +85,8 @@ Transport QUIC:
           Address of the server to connect
       --tls-cert <FILE>
           Path to the TLS certificate file for secure connections
+      --connection-multiplexing <BOOL>
+          Whether to enable connection multiplexing [default: false]
       --congestion-initial-window <NUM>
           Initial congestion window in bytes
       --max-idle-timeout <TIME>

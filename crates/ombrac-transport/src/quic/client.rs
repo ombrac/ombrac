@@ -15,6 +15,7 @@ pub struct Builder {
 
     tls_cert: Option<PathBuf>,
 
+    connection_multiplexing: bool,
     congestion_initial_window: Option<u64>,
 
     max_idle_timeout: Option<Duration>,
@@ -29,6 +30,7 @@ impl Builder {
             server_name: None,
             server_address,
             tls_cert: None,
+            connection_multiplexing: false,
             congestion_initial_window: None,
             max_idle_timeout: None,
             max_keep_alive_period: None,
@@ -48,6 +50,11 @@ impl Builder {
 
     pub fn with_tls_cert(mut self, value: PathBuf) -> Self {
         self.tls_cert = Some(value);
+        self
+    }
+
+    pub fn with_connection_multiplexing(mut self, value: bool) -> Self {
+        self.connection_multiplexing = value;
         self
     }
 
@@ -195,20 +202,30 @@ impl Connection {
         let server_name = config.server_name()?.to_string();
         let server_address = config.server_address().await?;
 
+        let is_multiplexing = config.connection_multiplexing;
+
         let (sender, receiver) = mpsc::channel(1);
 
         tokio::spawn(async move {
             use ombrac_macros::{try_or_break, try_or_continue};
 
             'connection: loop {
+                let permit = try_or_break!(sender.clone().reserve_owned().await);
+
                 let connection = try_or_continue!(endpoint.connect(server_address, &server_name));
                 let connection = try_or_continue!(connection.await);
 
-                loop {
+                let sender = permit.release();
+
+                'stream: loop {
                     let stream = try_or_break!(connection.open_bi().await);
 
                     if sender.send(Stream(stream.0, stream.1)).await.is_err() {
                         break 'connection;
+                    }
+
+                    if !is_multiplexing {
+                        break 'stream;
                     }
                 }
             }
