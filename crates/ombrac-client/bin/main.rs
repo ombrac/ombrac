@@ -55,7 +55,7 @@ struct Args {
     max_idle_timeout: Option<u64>,
 
     /// Connection keep alive period in millisecond
-    #[clap(long, help_heading = "Transport QUIC", value_name = "TIME")]
+    #[clap(long, help_heading = "Transport QUIC", value_name = "TIME", default_value = "8000")]
     max_keep_alive_period: Option<u64>,
 
     /// Connection max open bidirectional streams
