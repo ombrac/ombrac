@@ -210,8 +210,12 @@ impl Connection {
             use ombrac_macros::{try_or_break, try_or_continue};
 
             'connection: loop {
+                let permit = try_or_break!(sender.clone().reserve_owned().await);
+
                 let connection = try_or_continue!(endpoint.connect(server_address, &server_name));
                 let connection = try_or_continue!(connection.await);
+
+                let sender = permit.release();
 
                 'stream: loop {
                     let stream = try_or_break!(connection.open_bi().await);
