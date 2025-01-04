@@ -1047,7 +1047,7 @@ dependencies = [
 
 [[package]]
 name = "ombrac"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "bytes",
  "criterion",
@@ -1057,7 +1057,7 @@ dependencies = [
 
 [[package]]
 name = "ombrac-client"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "clap",
  "ombrac",
@@ -1071,11 +1071,11 @@ dependencies = [
 
 [[package]]
 name = "ombrac-macros"
-version = "0.2.2"
+version = "0.2.3"
 
 [[package]]
 name = "ombrac-server"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "clap",
  "hickory-resolver",
@@ -1089,7 +1089,7 @@ dependencies = [
 
 [[package]]
 name = "ombrac-transport"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "aws-lc-rs",
  "ombrac",
