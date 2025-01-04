@@ -15,7 +15,8 @@ pub struct Builder {
 
     tls_cert: Option<PathBuf>,
 
-    connection_multiplexing: bool,
+    enable_zero_rtt: bool,
+    enable_connection_multiplexing: bool,
     congestion_initial_window: Option<u64>,
 
     max_idle_timeout: Option<Duration>,
@@ -30,7 +31,8 @@ impl Builder {
             server_name: None,
             server_address,
             tls_cert: None,
-            connection_multiplexing: false,
+            enable_zero_rtt: false,
+            enable_connection_multiplexing: false,
             congestion_initial_window: None,
             max_idle_timeout: None,
             max_keep_alive_period: None,
@@ -53,8 +55,13 @@ impl Builder {
         self
     }
 
-    pub fn with_connection_multiplexing(mut self, value: bool) -> Self {
-        self.connection_multiplexing = value;
+    pub fn with_enable_zero_rtt(mut self, value: bool) -> Self {
+        self.enable_zero_rtt = value;
+        self
+    }
+
+    pub fn with_enable_connection_multiplexing(mut self, value: bool) -> Self {
+        self.enable_connection_multiplexing = value;
         self
     }
 
@@ -141,13 +148,17 @@ impl Connection {
                 roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
             }
 
-            let mut config = ClientConfig::builder()
+            let mut tls_config = ClientConfig::builder()
                 .with_root_certificates(roots)
                 .with_no_client_auth();
 
-            config.alpn_protocols = [b"h3"].iter().map(|&x| x.into()).collect();
+            tls_config.alpn_protocols = [b"h3"].iter().map(|&x| x.into()).collect();
 
-            config
+            if config.enable_zero_rtt {
+                tls_config.enable_early_data = true;
+            }
+
+            tls_config
         };
 
         let quic_config = {
@@ -202,7 +213,8 @@ impl Connection {
         let server_name = config.server_name()?.to_string();
         let server_address = config.server_address().await?;
 
-        let is_multiplexing = config.connection_multiplexing;
+        let enable_zero_rtt = config.enable_zero_rtt;
+        let enable_connection_multiplexing = config.enable_connection_multiplexing;
 
         let (sender, receiver) = mpsc::channel(1);
 
@@ -213,7 +225,23 @@ impl Connection {
                 let permit = try_or_break!(sender.clone().reserve_owned().await);
 
                 let connection = try_or_continue!(endpoint.connect(server_address, &server_name));
-                let connection = try_or_continue!(connection.await);
+
+                let connection = if enable_zero_rtt {
+                    match connection.into_0rtt() {
+                        Ok((conn, zero_rtt_accepted)) => {
+                            if !zero_rtt_accepted.await {
+                                continue 'connection;
+                            };
+
+                            conn
+                        }
+                        Err(conn) => {
+                            try_or_continue!(conn.await)
+                        }
+                    }
+                } else {
+                    try_or_continue!(connection.await)
+                };
 
                 let sender = permit.release();
 
@@ -224,7 +252,7 @@ impl Connection {
                         break 'connection;
                     }
 
-                    if !is_multiplexing {
+                    if !enable_connection_multiplexing {
                         break 'stream;
                     }
                 }
