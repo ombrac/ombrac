@@ -41,7 +41,7 @@ where
         use crate::dns::lookup_ip;
 
         let result = match address {
-            Address::Domain(domain, port) => SocketAddr::new(lookup_ip(&domain).await?, port),
+            Address::Domain(domain, port) => lookup_ip(&format!("{}:{}", domain, port)).await?,
             Address::IPv4(addr) => SocketAddr::V4(addr),
             Address::IPv6(addr) => SocketAddr::V6(addr),
         };

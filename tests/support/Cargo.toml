@@ -1,5 +1,5 @@
 [package]
-name = "tests-integration"
+name = "tests-support"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -10,8 +10,7 @@ keywords.workspace = true
 readme = "../../README.md"
 
 [dependencies]
-curl = { workspace = true }
-tests-support = { path = "../support" }
+rcgen = { workspace = true, features = ["pem", "crypto", "aws_lc_rs"] }
 
 [lints]
 workspace = true
