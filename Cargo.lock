@@ -1088,7 +1088,7 @@ dependencies = [
  "rustls-pemfile 2.2.0",
  "tokio",
  "tracing",
- "webpki-roots 0.26.7",
+ "webpki-roots 0.26.8",
 ]
 
 [[package]]
@@ -1998,9 +1998,9 @@ checksum = "5f20c57d8d7db6d3b86154206ae5d8fba62dd39573114de97c2cb0578251f8e1"
 
 [[package]]
 name = "webpki-roots"
-version = "0.26.7"
+version = "0.26.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5d642ff16b7e79272ae451b7322067cdc17cadf68c23264be9d94a32319efe7e"
+checksum = "2210b291f7ea53617fbafcc4939f10914214ec15aace5ba62293a668f322c5c9"
 dependencies = [
  "rustls-pki-types",
 ]
