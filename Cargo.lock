@@ -426,7 +426,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "33d852cb9b869c2a9b3df2f71a3074817f01e1844f839a144f5fcef059a4eb5d"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -918,7 +918,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc2f4eb4bc735547cfed7c0a4922cbd04a4655978c09b54f1f7b228750664c34"
 dependencies = [
  "cfg-if",
- "windows-targets 0.48.5",
+ "windows-targets 0.52.6",
 ]
 
 [[package]]
@@ -1084,7 +1084,7 @@ dependencies = [
  "ombrac",
  "ombrac-macros",
  "quinn 0.11.6",
- "rustls 0.23.21",
+ "rustls 0.23.22",
  "rustls-pemfile 2.2.0",
  "tokio",
  "tracing",
@@ -1213,7 +1213,7 @@ dependencies = [
  "quinn-proto 0.11.9",
  "quinn-udp 0.5.9",
  "rustc-hash 2.1.0",
- "rustls 0.23.21",
+ "rustls 0.23.22",
  "socket2",
  "thiserror 2.0.8",
  "tokio",
@@ -1249,7 +1249,7 @@ dependencies = [
  "rand",
  "ring 0.17.8",
  "rustc-hash 2.1.0",
- "rustls 0.23.21",
+ "rustls 0.23.22",
  "rustls-pki-types",
  "slab",
  "thiserror 2.0.8",
@@ -1282,7 +1282,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -1420,7 +1420,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -1437,9 +1437,9 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.23.21"
+version = "0.23.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8f287924602bf649d949c63dc8ac8b235fa5387d394020705b80c4eb597ce5b8"
+checksum = "9fb9263ab4eb695e42321db096e3b8fbd715a59b154d5c88d82db2175b681ba7"
 dependencies = [
  "aws-lc-rs",
  "once_cell",
