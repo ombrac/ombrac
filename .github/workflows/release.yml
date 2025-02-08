@@ -104,7 +104,12 @@ jobs:
             artifacts/ombrac-${{ matrix.arch-name }}.tar.gz
             artifacts/ombrac-${{ matrix.arch-name }}.tar.gz.sha256sum
           allowUpdates: true
-
+          artifactErrorsFailBuild: true
+          omitName: true
+          omitBody: true
+          omitNameDuringUpdate: true
+          omitBodyDuringUpdate: true
+          omitDraftDuringUpdate: true
 
   publish:
     needs: release
