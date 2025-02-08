@@ -45,7 +45,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@main
         with:
-          fetch-depth: 0
+          fetch-depth: 1
           submodules: recursive
 
       - name: Install toolchain
@@ -89,3 +89,38 @@ jobs:
           matrix.target == 'x86_64-unknown-linux-gnu'
         run: |
           cargo test --verbose --target ${{ matrix.target }}
+
+  dry-publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@main
+        with:
+          fetch-depth: 1
+          submodules: recursive
+
+      - name: Install toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Publish ombrac
+        working-directory: crates/ombrac
+        run: cargo publish --dry-run
+
+      - name: Publish ombrac-macros
+        working-directory: crates/ombrac-macros
+        run: cargo publish --dry-run
+
+      - name: Publish ombrac-transport
+        working-directory: crates/ombrac-transport
+        run: cargo publish --dry-run
+
+      - name: Publish ombrac-server
+        working-directory: crates/ombrac-server
+        run: cargo publish --dry-run
+
+      - name: Publish ombrac-client
+        working-directory: crates/ombrac-client
+        run: cargo publish --dry-run
