@@ -82,6 +82,7 @@ jobs:
           cargo build --release --bin ombrac-server --features binary --target ${{ matrix.target }}
 
       - name: Move binaries
+        shell: bash
         run: |
           mkdir -p artifacts/
           binaries=("ombrac-client" "ombrac-server")
@@ -90,6 +91,7 @@ jobs:
           done
 
       - name: Compressed
+        shell: bash
         run: |
           cd artifacts
           tar -czvf ombrac-${{ matrix.arch-name }}.tar.gz ./*
