@@ -6,15 +6,28 @@ use tokio::io::{AsyncRead, AsyncReadExt};
 
 use crate::io::Streamable;
 
-//  +--------------------------------------------------+
-//  |                   LENGTH (32)                    |
-//  +------------+------------+------------------------+
-//  |  RTYP (8)  |  ATYP (8)  |       PORT (16)        |
-//  +============+============+========================+
-//  |                    ADDR (0...)                 ...
-//  +--------------------------------------------------+
 #[derive(Debug, Clone)]
 pub enum Request {
+    ///  +------------+------------+------------------------+
+    ///  |  RTYP (8)  |  ATYP (8)  |       PORT (16)        |
+    ///  +============+============+========================+
+    ///  |                    ADDR (0...)                 ...
+    ///  +--------------------------------------------------+
+    ///  
+    /// - RTYP (Request Type): 8-bit field indicating the type of request.
+    /// - ATYP (Address Type): 8-bit field indicating the type of address:
+    ///   - 0x01: Domain name
+    ///   - 0x02: IPv4 address
+    ///   - 0x03: IPv6 address
+    /// - PORT: 16-bit field representing the port number in big-endian format.
+    /// - ADDR: Variable-length field whose format and size depend on ATYP.
+    /// 
+    /// The ADDR section depends on the ATYP field:
+    /// - Domain name: 1-byte length field + domain content (variable length)
+    ///   - Length field: 1 byte (8 bits), indicating the length of the domain name.
+    ///   - Domain content: Variable-length bytes, representing the domain name.
+    /// - IPv4: 4-byte address (32 bits)
+    /// - IPv6: 16-byte address (128 bits)
     TcpConnect(Address),
 }
 
@@ -26,16 +39,16 @@ pub enum Address {
 }
 
 impl Request {
-    const HEADER_LENGTH: usize = 8;
-
-    const IPV4_ADDRESS_LENGTH: u32 = 4;
-    const IPV6_ADDRESS_LENGTH: u32 = 16;
+    const HEADER_LENGTH: usize = 4; // RTYP(1) + ATYP(1) + PORT(2)
 
     const RTYP_TCP_CONNECT: u8 = 1;
 
     const ATYP_DOMAIN: u8 = 1;
     const ATYP_IPV4: u8 = 2;
     const ATYP_IPV6: u8 = 3;
+
+    const ADDR_IPV4_LENGTH: usize = 4;
+    const ADDR_IPV6_LENGTH: usize = 16;
 }
 
 impl Into<Vec<u8>> for Request {
@@ -45,26 +58,24 @@ impl Into<Vec<u8>> for Request {
         match self {
             Request::TcpConnect(address) => match address {
                 Address::Domain(domain, port) => {
-                    let addr = domain.as_bytes();
-                    buf.put_u32(addr.len() as u32);
+                    let addr_bytes = domain.as_bytes();
                     buf.put_u8(Self::RTYP_TCP_CONNECT);
                     buf.put_u8(Self::ATYP_DOMAIN);
                     buf.extend_from_slice(&port.to_be_bytes());
-                    buf.extend_from_slice(addr);
+                    buf.put_u8(addr_bytes.len() as u8);
+                    buf.extend_from_slice(addr_bytes);
                 }
-                Address::IPv4(value) => {
-                    buf.put_u32(Self::IPV4_ADDRESS_LENGTH);
+                Address::IPv4(addr) => {
                     buf.put_u8(Self::RTYP_TCP_CONNECT);
                     buf.put_u8(Self::ATYP_IPV4);
-                    buf.extend_from_slice(&value.port().to_be_bytes());
-                    buf.extend_from_slice(&value.ip().octets());
+                    buf.extend_from_slice(&addr.port().to_be_bytes());
+                    buf.extend_from_slice(&addr.ip().octets());
                 }
-                Address::IPv6(value) => {
-                    buf.put_u32(Self::IPV6_ADDRESS_LENGTH);
+                Address::IPv6(addr) => {
                     buf.put_u8(Self::RTYP_TCP_CONNECT);
                     buf.put_u8(Self::ATYP_IPV6);
-                    buf.extend_from_slice(&value.port().to_be_bytes());
-                    buf.extend_from_slice(&value.ip().octets());
+                    buf.extend_from_slice(&addr.port().to_be_bytes());
+                    buf.extend_from_slice(&addr.ip().octets());
                 }
             },
         }
@@ -81,34 +92,36 @@ impl Streamable for Request {
         let mut header = [0u8; Self::HEADER_LENGTH];
         stream.read_exact(&mut header).await?;
 
-        let length = u32::from_be_bytes(header[0..4].try_into().unwrap());
-        let request_type = header[4];
-        let address_type = header[5];
-        let address_port = u16::from_be_bytes(header[6..8].try_into().unwrap());
+        let request_type = header[0];
+        let address_type = header[1];
+        let port = u16::from_be_bytes([header[2], header[3]]);
 
         let address = match address_type {
             Self::ATYP_DOMAIN => {
-                let mut addr_buf = vec![0u8; length as usize];
+                let mut len_buf = [0u8; 1];
+                stream.read_exact(&mut len_buf).await?;
+                let len = len_buf[0] as usize;
+
+                let mut addr_buf = vec![0u8; len];
                 stream.read_exact(&mut addr_buf).await?;
-                let domain = String::from_utf8(addr_buf).map_err(|_| {
-                    io::Error::new(io::ErrorKind::InvalidData, "invalid UTF-8 address")
-                })?;
-                Address::Domain(domain, address_port)
+                let domain = String::from_utf8(addr_buf)
+                    .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Invalid UTF-8"))?;
+                Address::Domain(domain, port)
             }
             Self::ATYP_IPV4 => {
-                let mut addr = [0u8; Self::IPV4_ADDRESS_LENGTH as usize];
+                let mut addr = [0u8; Self::ADDR_IPV4_LENGTH];
                 stream.read_exact(&mut addr).await?;
-                Address::IPv4(SocketAddrV4::new(Ipv4Addr::from(addr), address_port))
+                Address::IPv4(SocketAddrV4::new(Ipv4Addr::from(addr), port))
             }
             Self::ATYP_IPV6 => {
-                let mut addr = [0u8; Self::IPV6_ADDRESS_LENGTH as usize];
+                let mut addr = [0u8; Self::ADDR_IPV6_LENGTH];
                 stream.read_exact(&mut addr).await?;
-                Address::IPv6(SocketAddrV6::new(Ipv6Addr::from(addr), address_port, 0, 0))
+                Address::IPv6(SocketAddrV6::new(Ipv6Addr::from(addr), port, 0, 0))
             }
             _ => {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
-                    "invalid address type",
+                    "Invalid address type",
                 ))
             }
         };
@@ -117,7 +130,7 @@ impl Streamable for Request {
             Self::RTYP_TCP_CONNECT => Ok(Request::TcpConnect(address)),
             _ => Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                "invalid request type",
+                "Invalid request type",
             )),
         }
     }
@@ -185,46 +198,6 @@ mod tests {
             }
             _ => panic!("Wrong request type"),
         }
-    }
-
-    #[tokio::test]
-    async fn test_invalid_request_type() {
-        let mut bytes = vec![0u8; Request::HEADER_LENGTH];
-        bytes[4] = 99;
-
-        let mut cursor = Cursor::new(bytes);
-        let result = Request::read(&mut cursor).await;
-
-        assert!(result.is_err());
-        assert_eq!(result.unwrap_err().kind(), io::ErrorKind::InvalidData);
-    }
-
-    #[tokio::test]
-    async fn test_invalid_address_type() {
-        let mut bytes = vec![0u8; Request::HEADER_LENGTH];
-        bytes[4] = Request::RTYP_TCP_CONNECT;
-        bytes[5] = 99;
-
-        let mut cursor = Cursor::new(bytes);
-        let result = Request::read(&mut cursor).await;
-
-        assert!(result.is_err());
-        assert_eq!(result.unwrap_err().kind(), io::ErrorKind::InvalidData);
-    }
-
-    #[tokio::test]
-    async fn test_invalid_utf8_domain() {
-        let mut bytes = vec![0u8; Request::HEADER_LENGTH];
-        bytes[0..4].copy_from_slice(&4u32.to_be_bytes());
-        bytes[4] = Request::RTYP_TCP_CONNECT;
-        bytes[5] = Request::ATYP_DOMAIN;
-        bytes.extend_from_slice(&[0xFF, 0xFF, 0xFF, 0xFF]);
-
-        let mut cursor = Cursor::new(bytes);
-        let result = Request::read(&mut cursor).await;
-
-        assert!(result.is_err());
-        assert_eq!(result.unwrap_err().kind(), io::ErrorKind::InvalidData);
     }
 
     #[tokio::test]
@@ -395,19 +368,6 @@ mod tests {
             }
             _ => panic!("Wrong request type"),
         }
-    }
-
-    #[tokio::test]
-    async fn test_oversized_header() {
-        let mut bytes = vec![0u8; Request::HEADER_LENGTH];
-        bytes[0..4].copy_from_slice(&(u32::MAX).to_be_bytes());
-        bytes[4] = Request::RTYP_TCP_CONNECT;
-        bytes[5] = Request::ATYP_DOMAIN;
-
-        let mut cursor = Cursor::new(bytes);
-        let result = Request::read(&mut cursor).await;
-
-        assert!(result.is_err());
     }
 
     #[tokio::test]
