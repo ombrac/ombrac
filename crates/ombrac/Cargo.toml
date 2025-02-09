@@ -19,11 +19,6 @@ tokio = { workspace = true, features = ["io-util", "sync", "macros"] }
 [dev-dependencies]
 tokio = { workspace = true, features = ["full"] }
 futures = { workspace = true, features = ["alloc"] }
-criterion = { workspace = true, features = ["html_reports"] }
-
-[[bench]]
-name = "request"
-harness = false
 
 [lints]
 workspace = true
