@@ -14,7 +14,7 @@ default = []
 
 [dependencies]
 bytes = { workspace = true }
-tokio = { workspace = true, features = ["io-util", "sync", "macros"] }
+tokio = { workspace = true, features = ["io-util", "sync", "macros", "net"] }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["full"] }

@@ -846,6 +846,7 @@ dependencies = [
  "quinn",
  "rustls",
  "rustls-pemfile",
+ "tests-support",
  "tokio",
  "tracing",
  "webpki-roots",
