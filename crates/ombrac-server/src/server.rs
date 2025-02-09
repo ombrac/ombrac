@@ -1,5 +1,4 @@
 use std::io;
-use std::net::SocketAddr;
 
 use ombrac::io::Streamable;
 use ombrac::request::{Address, Request};
@@ -26,30 +25,25 @@ where
         let request = Request::read(&mut stream).await?;
 
         match request {
-            Request::TcpConnect(address) => {
-                let address = Self::resolve(address).await?;
-                let mut outbound = TcpStream::connect(address).await?;
-
-                ombrac::io::util::copy_bidirectional(&mut stream, &mut outbound).await?
-            }
+            Request::TcpConnect(addr) => Self::handle_tcp_connect(stream, addr).await?,
         };
 
         Ok(())
     }
 
-    async fn resolve(address: Address) -> io::Result<SocketAddr> {
-        use crate::dns::lookup_ip;
+    async fn handle_tcp_connect<A>(mut stream: Stream, addr: A) -> io::Result<Stream>
+    where
+        A: Into<Address>,
+    {
+        let addr = addr.into().to_socket_addr().await?;
+        let mut outbound = TcpStream::connect(addr).await?;
 
-        let result = match address {
-            Address::Domain(domain, port) => lookup_ip(&format!("{}:{}", domain, port)).await?,
-            Address::IPv4(addr) => SocketAddr::V4(addr),
-            Address::IPv6(addr) => SocketAddr::V6(addr),
-        };
+        ombrac::io::util::copy_bidirectional(&mut stream, &mut outbound).await?;
 
-        Ok(result)
+        Ok(stream)
     }
 
-    pub async fn listen(&mut self) -> io::Result<()> {
+    pub async fn listen(&self) -> io::Result<()> {
         while let Some(stream) = self.transport.fetch().await {
             tokio::spawn(async move {
                 if let Err(_error) = Self::handler(stream).await {

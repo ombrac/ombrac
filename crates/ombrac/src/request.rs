@@ -1,10 +1,35 @@
 use std::io;
-use std::net::{Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6};
+use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
 
 use bytes::BufMut;
 use tokio::io::{AsyncRead, AsyncReadExt};
 
 use crate::io::Streamable;
+
+#[derive(Debug, Clone)]
+pub enum Address {
+    Domain(String, u16),
+    IPv4(SocketAddrV4),
+    IPv6(SocketAddrV6),
+}
+
+impl Address {
+    pub async fn to_socket_addr(self) -> io::Result<SocketAddr> {
+        use tokio::net::lookup_host;
+
+        match self {
+            Address::IPv4(addr) => Ok(SocketAddr::V4(addr)),
+            Address::IPv6(addr) => Ok(SocketAddr::V6(addr)),
+            Address::Domain(domain, port) => lookup_host((domain.as_str(), port))
+                .await?
+                .next()
+                .ok_or(io::Error::other(format!(
+                    "Failed to resolve domain {}",
+                    domain
+                ))),
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub enum Request {
@@ -21,7 +46,7 @@ pub enum Request {
     ///   - 0x03: IPv6 address
     /// - PORT: 16-bit field representing the port number in big-endian format.
     /// - ADDR: Variable-length field whose format and size depend on ATYP.
-    /// 
+    ///
     /// The ADDR section depends on the ATYP field:
     /// - Domain name: 1-byte length field + domain content (variable length)
     ///   - Length field: 1 byte (8 bits), indicating the length of the domain name.
@@ -29,13 +54,6 @@ pub enum Request {
     /// - IPv4: 4-byte address (32 bits)
     /// - IPv6: 16-byte address (128 bits)
     TcpConnect(Address),
-}
-
-#[derive(Debug, Clone)]
-pub enum Address {
-    Domain(String, u16),
-    IPv4(SocketAddrV4),
-    IPv6(SocketAddrV6),
 }
 
 impl Request {
