@@ -1,12 +1,13 @@
 use std::path::PathBuf;
 use std::{fs, io};
 
+use async_channel::Receiver;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
 
 pub mod client;
 pub mod server;
 
-pub struct Connection(tokio::sync::mpsc::Receiver<Stream>);
+pub struct Connection(Receiver<Stream>);
 pub struct Stream(quinn::SendStream, quinn::RecvStream);
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
@@ -14,8 +15,8 @@ type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 impl ombrac::Provider for Connection {
     type Item = Stream;
 
-    async fn fetch(&mut self) -> Option<Self::Item> {
-        self.0.recv().await
+    async fn fetch(&self) -> Option<Self::Item> {
+        self.0.recv().await.ok()
     }
 }
 

@@ -31,6 +31,7 @@ ombrac-transport = { version = "0.2.6", path = "crates/ombrac-transport", defaul
 futures = { version = "0.3", default-features = false }
 tokio = { version = "1", default-features = false }
 bytes = { version = "1", default-features = false }
+async-channel = { version = "2", default-features = false }
 
 # socks
 socks-lib = { version = "0.1", default-features = false }
