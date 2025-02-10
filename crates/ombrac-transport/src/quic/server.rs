@@ -2,8 +2,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use tokio::sync::mpsc;
-
 use super::{Connection, Result, Stream};
 
 pub struct Builder {
@@ -140,7 +138,7 @@ impl Connection {
             Endpoint::server(server_config, config.listen.parse()?)?
         };
 
-        let (sender, receiver) = mpsc::channel(8);
+        let (sender, receiver) = async_channel::bounded(8);
 
         tokio::spawn(async move {
             use ombrac_macros::{try_or_break, try_or_return};
