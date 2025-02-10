@@ -3,8 +3,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use tokio::sync::mpsc;
-
 use super::{Connection, Result, Stream};
 
 pub struct Builder {
@@ -216,14 +214,12 @@ impl Connection {
         let enable_zero_rtt = config.enable_zero_rtt;
         let enable_connection_multiplexing = config.enable_connection_multiplexing;
 
-        let (sender, receiver) = mpsc::channel(1);
+        let (sender, receiver) = async_channel::bounded(1);
 
         tokio::spawn(async move {
             use ombrac_macros::{try_or_break, try_or_continue};
 
             'connection: loop {
-                let permit = try_or_break!(sender.clone().reserve_owned().await);
-
                 let connection = try_or_continue!(endpoint.connect(server_address, &server_name));
 
                 let connection = if enable_zero_rtt {
@@ -243,7 +239,7 @@ impl Connection {
                     try_or_continue!(connection.await)
                 };
 
-                let sender = permit.release();
+                let sender = sender.clone();
 
                 'stream: loop {
                     let stream = try_or_break!(connection.open_bi().await);

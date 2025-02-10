@@ -83,6 +83,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "async-channel"
+version = "2.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "89b47800b0be77592da0afd425cc03468052844aff33b84e33cc696f64e77b6a"
+dependencies = [
+ "concurrent-queue",
+ "event-listener-strategy",
+ "futures-core",
+ "pin-project-lite",
+]
+
+[[package]]
 name = "autocfg"
 version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -329,6 +341,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5b63caa9aa9397e2d9480a9b13673856c78d8ac123288526c37d7839f2a86990"
 
 [[package]]
+name = "concurrent-queue"
+version = "2.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4ca0197aee26d1ae37445ee532fefce43251d24cc7c166799f4d46817f1d3973"
+dependencies = [
+ "crossbeam-utils",
+]
+
+[[package]]
 name = "criterion"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -361,6 +382,12 @@ dependencies = [
  "cast",
  "itertools 0.10.5",
 ]
+
+[[package]]
+name = "crossbeam-utils"
+version = "0.8.21"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d0a5c400df2834b80a4c3327b3aad3a4c4cd4de0629063962b03235697506a28"
 
 [[package]]
 name = "crunchy"
@@ -424,6 +451,26 @@ checksum = "33d852cb9b869c2a9b3df2f71a3074817f01e1844f839a144f5fcef059a4eb5d"
 dependencies = [
  "libc",
  "windows-sys 0.59.0",
+]
+
+[[package]]
+name = "event-listener"
+version = "5.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3492acde4c3fc54c845eaab3eed8bd00c7a7d881f78bfc801e43a93dec1331ae"
+dependencies = [
+ "concurrent-queue",
+ "pin-project-lite",
+]
+
+[[package]]
+name = "event-listener-strategy"
+version = "0.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3c3e4e0dd3673c1139bf041f3008816d9cf2946bbfac2945c09e523b8d7b05b2"
+dependencies = [
+ "event-listener",
+ "pin-project-lite",
 ]
 
 [[package]]
@@ -749,7 +796,7 @@ dependencies = [
 
 [[package]]
 name = "ombrac"
-version = "0.2.5"
+version = "0.2.6"
 dependencies = [
  "bytes",
  "criterion",
@@ -759,7 +806,7 @@ dependencies = [
 
 [[package]]
 name = "ombrac-client"
-version = "0.2.5"
+version = "0.2.6"
 dependencies = [
  "clap",
  "ombrac",
@@ -773,11 +820,11 @@ dependencies = [
 
 [[package]]
 name = "ombrac-macros"
-version = "0.2.5"
+version = "0.2.6"
 
 [[package]]
 name = "ombrac-server"
-version = "0.2.5"
+version = "0.2.6"
 dependencies = [
  "clap",
  "ombrac",
@@ -790,8 +837,9 @@ dependencies = [
 
 [[package]]
 name = "ombrac-transport"
-version = "0.2.5"
+version = "0.2.6"
 dependencies = [
+ "async-channel",
  "aws-lc-rs",
  "ombrac",
  "ombrac-macros",
@@ -1297,7 +1345,7 @@ dependencies = [
 
 [[package]]
 name = "tests-integration"
-version = "0.2.5"
+version = "0.2.6"
 dependencies = [
  "curl",
  "tests-support",
@@ -1305,7 +1353,7 @@ dependencies = [
 
 [[package]]
 name = "tests-support"
-version = "0.2.5"
+version = "0.2.6"
 dependencies = [
  "rcgen",
 ]

@@ -27,5 +27,5 @@ pub trait Provider {
     /// - This method is expected to be non-blocking
     /// - The returned future must be `Send` to support usage across thread boundaries
     /// - Implementations should return `None` when they have no more items to provide
-    fn fetch(&mut self) -> impl Future<Output = Option<Self::Item>> + Send;
+    fn fetch(&self) -> impl Future<Output = Option<Self::Item>> + Send;
 }
