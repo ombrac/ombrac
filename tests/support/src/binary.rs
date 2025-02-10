@@ -1,6 +1,6 @@
 use std::process::Command;
 
-use tests_support::{path::BinaryLocator, process::ProcessGuard};
+use crate::{path::BinaryLocator, process::ProcessGuard};
 
 #[derive(Debug, Default, Clone)]
 pub struct ClientBuilder {

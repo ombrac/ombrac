@@ -1,5 +1,3 @@
-pub mod binary;
-
 #[cfg(test)]
 mod tests {
     use std::{net::SocketAddr, time::Duration};
@@ -9,7 +7,7 @@ mod tests {
     use tests_support::net::http::MockServer;
     use tests_support::net::*;
 
-    use crate::binary::{ClientBuilder, ServerBuilder};
+    use tests_support::binary::{ClientBuilder, ServerBuilder};
 
     fn curl_proxy_connection(proxy_type: &str, socks_addr: SocketAddr, server_addr: SocketAddr) {
         let mut handle = Easy::new();
