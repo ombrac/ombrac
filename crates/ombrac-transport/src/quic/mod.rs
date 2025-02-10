@@ -97,7 +97,7 @@ mod tests {
 
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-    const TIMEOUT: Duration = Duration::from_secs(1);
+    const TIMEOUT: Duration = Duration::from_millis(300);
     const STARTUP_WAIT: Duration = Duration::from_millis(300);
 
     async fn setup_connections(
@@ -105,13 +105,12 @@ mod tests {
         zero_rtt: bool,
         enable_multiplexing: bool,
     ) -> (Connection, Connection) {
-        eprintln!("{}", listen_addr.to_string());
         tokio::time::sleep(STARTUP_WAIT).await;
 
         let addr_str = listen_addr.to_string();
         let (cert_path, key_path) = CertificateGenerator::generate();
 
-        let server_conn = server::Builder::new(addr_str.clone(), cert_path.clone(), key_path)
+        let server_conn = server::Builder::new(addr_str.clone(), cert_path.clone(), key_path.clone())
             .with_enable_zero_rtt(zero_rtt)
             .build()
             .await
@@ -121,7 +120,7 @@ mod tests {
 
         let client_conn = client::Builder::new(addr_str)
             .with_server_name("localhost".to_string())
-            .with_tls_cert(cert_path)
+            .with_tls_cert(cert_path.clone())
             .with_enable_zero_rtt(zero_rtt)
             .with_enable_connection_multiplexing(enable_multiplexing)
             .build()
