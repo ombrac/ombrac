@@ -1,0 +1,19 @@
+[package]
+name = "benches"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+ombrac = { workspace = true }
+tests-support = { path = "../tests/support" }
+criterion = { workspace = true, features = ["default"] }
+
+[[bench]]
+name = "request"
+path = "request.rs"
+harness = false
+
+[lints]
+workspace = true
