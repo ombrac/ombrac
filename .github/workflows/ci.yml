@@ -88,6 +88,32 @@ jobs:
           cargo test --verbose --target ${{ matrix.target }}
 
 
+  build-ios:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@main
+        with:
+          fetch-depth: 1
+          submodules: recursive
+
+      - name: Install toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Install dependencies
+        run: |
+          rustup target add aarch64-apple-ios
+          rustup target add x86_64-apple-ios
+
+      - name: Build
+        run: |
+          cargo build --verbose --target aarch64-apple-ios
+          cargo build --verbose --target x86_64-apple-ios
+
+
   build-android:
     runs-on: ubuntu-latest
 
@@ -130,6 +156,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
+          targets: ${{ matrix.target }}
 
       - name: Publish ombrac
         working-directory: crates/ombrac
