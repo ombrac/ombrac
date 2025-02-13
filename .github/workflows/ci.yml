@@ -12,7 +12,7 @@ env:
 jobs:
   build:
     strategy:
-      fail-fast: true
+      fail-fast: false
       matrix:
         include:
           - arch-name: aarch64-apple-darwin
@@ -54,9 +54,6 @@ jobs:
           toolchain: stable
           targets: ${{ matrix.target }}
 
-      - name: Install dependencies
-        run: mkdir -p .cargo
-
       - name: Install dependencies for Windows
         if: matrix.os == 'windows-latest'
         run: | 
@@ -68,8 +65,8 @@ jobs:
         run: | 
           sudo apt update
           sudo apt install -y gcc-aarch64-linux-gnu
-          echo '[target.aarch64-unknown-linux-gnu]' > .cargo/config.toml
-          echo 'linker = "aarch64-linux-gnu-gcc"' >> .cargo/config.toml
+          sudo apt install -y g++-aarch64-linux-gnu
+          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
 
       - name: Build
         run: |
@@ -90,6 +87,61 @@ jobs:
         run: |
           cargo test --verbose --target ${{ matrix.target }}
 
+
+  build-ios:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@main
+        with:
+          fetch-depth: 1
+          submodules: recursive
+
+      - name: Install toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Install dependencies
+        run: |
+          rustup target add aarch64-apple-ios
+          rustup target add x86_64-apple-ios
+
+      - name: Build
+        run: |
+          cargo build --verbose --target aarch64-apple-ios
+          cargo build --verbose --target x86_64-apple-ios
+
+
+  build-android:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@main
+        with:
+          fetch-depth: 1
+          submodules: recursive
+
+      - name: Install toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y gcc-multilib
+          cargo install cargo-ndk
+          rustup target add aarch64-linux-android
+          rustup target add x86_64-linux-android
+
+      - name: Build
+        run: |
+          cargo ndk -t arm64-v8a -t x86_64 build --verbose
+          cargo ndk -t arm64-v8a -t x86_64 build --verbose --all-features
+
   dry-publish:
     runs-on: ubuntu-latest
 
@@ -104,6 +156,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
+          targets: ${{ matrix.target }}
 
       - name: Publish ombrac
         working-directory: crates/ombrac

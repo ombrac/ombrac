@@ -4,7 +4,7 @@ use ombrac::request::{Address, Request};
 
 // Benchmark tests using criterion
 pub fn request_serialization_benchmark(c: &mut Criterion) {
-    let request = Request::TcpConnect(Address::Domain("example.com".to_string(), 80));
+    let request = Request::TcpConnect([0u8; 32], Address::Domain("example.com".to_string(), 80));
 
     c.bench_function("serialize domain request", |b| {
         b.iter(|| {
