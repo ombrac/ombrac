@@ -10,6 +10,10 @@ use ombrac_transport::quic::Connection;
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Args {
+    /// Protocol Secret
+    #[clap(long, help_heading = "Service Secret", value_name = "STR")]
+    secret: String,
+
     // Transport QUIC
     /// Transport server listening address
     #[clap(long, help_heading = "Transport QUIC", value_name = "ADDR")]
@@ -64,11 +68,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .with_max_level(args.tracing_level)
         .init();
 
-    let mut server = Server::new(quic_config_from_args(&args).await?);
+    let secret = blake3::hash(args.secret.as_bytes());
+    let ombrac_server = Server::new(*secret.as_bytes(), quic_config_from_args(&args).await?);
 
+    #[cfg(feature = "tracing")]
     tracing::info!("Server listening on {}", args.listen);
 
-    server.listen().await?;
+    ombrac_server.listen().await?;
 
     Ok(())
 }

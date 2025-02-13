@@ -11,6 +11,10 @@ use ombrac_transport::quic::Connection;
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
 struct Args {
+    /// Protocol Secret
+    #[clap(long, help_heading = "Service Secret", value_name = "STR")]
+    secret: String,
+
     // Endpoint SOCKS
     /// Listening address for the SOCKS server.
     #[clap(
@@ -88,7 +92,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .with_max_level(args.tracing_level)
         .init();
 
-    let ombrac_client = Client::new(quic_from_args(&args).await?);
+    let secret = blake3::hash(args.secret.as_bytes());
+    let ombrac_client = Client::new(*secret.as_bytes(), quic_from_args(&args).await?);
 
     SocksServer::listen(args.socks, ombrac_client).await?;
 

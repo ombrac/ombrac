@@ -4,6 +4,7 @@ use crate::{path::BinaryLocator, process::ProcessGuard};
 
 #[derive(Debug, Default, Clone)]
 pub struct ClientBuilder {
+    pub secret: Option<String>,
     pub socks: Option<String>,
     pub tls_cert: Option<String>,
     pub server_name: Option<String>,
@@ -11,6 +12,11 @@ pub struct ClientBuilder {
 }
 
 impl ClientBuilder {
+    pub fn secret(mut self, secret: String) -> Self {
+        self.secret = Some(secret);
+        self
+    }
+
     pub fn socks(mut self, socks: String) -> Self {
         self.socks = Some(socks);
         self
@@ -43,6 +49,9 @@ impl Client {
         let args = options
             .map(|opts| {
                 let mut args = Vec::new();
+                if let Some(secret) = opts.secret {
+                    args.extend_from_slice(&["--secret".to_string(), secret]);
+                }
                 if let Some(socks) = opts.socks {
                     args.extend_from_slice(&["--socks".to_string(), socks]);
                 }
@@ -72,12 +81,18 @@ impl Client {
 
 #[derive(Debug, Default)]
 pub struct ServerBuilder {
+    pub secret: Option<String>,
     pub listen: Option<String>,
     pub tls_cert: Option<String>,
     pub tls_key: Option<String>,
 }
 
 impl ServerBuilder {
+    pub fn secret(mut self, secret: String) -> Self {
+        self.secret = Some(secret);
+        self
+    }
+
     pub fn listen(mut self, listen: String) -> Self {
         self.listen = Some(listen);
         self
@@ -105,6 +120,9 @@ impl Server {
         let args = options
             .map(|opts| {
                 let mut args = Vec::new();
+                if let Some(secret) = opts.secret {
+                    args.extend_from_slice(&["--secret".to_string(), secret]);
+                }
                 if let Some(listen) = opts.listen {
                     args.extend_from_slice(&["--listen".to_string(), listen]);
                 }

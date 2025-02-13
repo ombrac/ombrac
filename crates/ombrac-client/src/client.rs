@@ -5,6 +5,7 @@ use ombrac::Provider;
 use tokio::io::{AsyncRead, AsyncWrite};
 
 pub struct Client<T> {
+    auth: [u8; 32],
     transport: T,
 }
 
@@ -13,8 +14,8 @@ where
     Transport: Provider<Item = Stream>,
     Stream: AsyncRead + AsyncWrite + Unpin,
 {
-    pub fn new(transport: Transport) -> Self {
-        Self { transport }
+    pub fn new(auth: [u8; 32], transport: Transport) -> Self {
+        Self { auth, transport }
     }
 
     async fn outbound(&self) -> io::Result<Stream> {
@@ -33,7 +34,7 @@ where
     {
         use tokio::io::AsyncWriteExt;
 
-        let request: Vec<u8> = Request::TcpConnect(addr.into()).into();
+        let request: Vec<u8> = Request::TcpConnect(self.auth, addr.into()).into();
         let mut stream = self.outbound().await?;
 
         stream.write_all(&request).await?;
