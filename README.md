@@ -8,7 +8,8 @@
 - Employs QUIC multiplexing with bidirectional streams for efficient transmission
 
 [![Apache 2.0 Licensed][license-badge]][license-url]
-[![Build Status][actions-badge]][actions-url]
+[![Build Status][ci-badge]][ci-url]
+[![Build Status][release-badge]][release-url]
 
 ## Install
 ### Releases
@@ -117,5 +118,7 @@ This project is licensed under the [Apache-2.0 License](./LICENSE).
 
 [license-badge]: https://img.shields.io/badge/license-apache-blue.svg
 [license-url]: https://github.com/ombrac/ombrac/blob/main/LICENSE
-[actions-badge]: https://github.com/ombrac/ombrac/workflows/CI/badge.svg
-[actions-url]: https://github.com/ombrac/ombrac/actions/workflows/ci.yml?query=branch%3Amain
+[ci-badge]: https://github.com/ombrac/ombrac/workflows/CI/badge.svg
+[ci-url]: https://github.com/ombrac/ombrac/actions/workflows/ci.yml?query=branch%3Amain
+[release-badge]: https://github.com/ombrac/ombrac/workflows/Release/badge.svg
+[release-url]: https://github.com/ombrac/ombrac/actions/workflows/release.yml?query=branch%3Amain
