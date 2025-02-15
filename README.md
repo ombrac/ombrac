@@ -42,7 +42,7 @@ When using a self-signed certificate, the client requires both the `--server-nam
 ### Server
 
 ```shell
-Usage: ombrac-server [OPTIONS] --secret <STR> --listen <ADDR> --tls-cert <FILE> --tls-key <FILE>
+Usage: ombrac-server [OPTIONS] --secret <STR> --listen <ADDR>
 
 Options:
   -h, --help     Print help
@@ -58,8 +58,10 @@ Transport QUIC:
           Path to the TLS certificate file for secure connections
       --tls-key <FILE>
           Path to the TLS private key file for secure connections
+      --tls-skip <BOOL>
+          When enabled, a self-signed certificate and key will be generated, the cert and key will be disregarded [possible values: true, false] [default: false]
       --enable-zero-rtt <BOOL>
-          Whether to enable 0-RTT or 0.5-RTT connections at the cost of weakened security [possible values: true, false]
+          Whether to enable 0-RTT or 0.5-RTT connections at the cost of weakened security [possible values: true, false] [default: false]
       --congestion-initial-window <NUM>
           Initial congestion window in bytes
       --max-idle-timeout <TIME>

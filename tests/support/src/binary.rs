@@ -94,6 +94,7 @@ pub struct ServerBuilder {
     pub listen: Option<String>,
     pub tls_cert: Option<String>,
     pub tls_key: Option<String>,
+    pub tls_skip: Option<String>
 }
 
 impl ServerBuilder {
@@ -114,6 +115,11 @@ impl ServerBuilder {
 
     pub fn tls_key(mut self, key: String) -> Self {
         self.tls_key = Some(key);
+        self
+    }
+
+    pub fn tls_skip(mut self, skip: String) -> Self {
+        self.tls_skip = Some(skip);
         self
     }
 
@@ -140,6 +146,9 @@ impl Server {
                 }
                 if let Some(tls_key) = opts.tls_key {
                     args.extend_from_slice(&["--tls-key".to_string(), tls_key]);
+                }
+                if let Some(skip) = opts.tls_skip {
+                    args.extend_from_slice(&["--tls-skip".to_string(), skip]);
                 }
                 args
             })

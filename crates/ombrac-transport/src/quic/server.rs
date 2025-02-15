@@ -2,13 +2,16 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
+
+
 use super::{Connection, Result, Stream};
 
 pub struct Builder {
     listen: String,
 
-    tls_key: PathBuf,
-    tls_cert: PathBuf,
+    tls_key: Option<PathBuf>,
+    tls_cert: Option<PathBuf>,
+    tls_skip: bool,
 
     enable_zero_rtt: bool,
     congestion_initial_window: Option<u64>,
@@ -19,11 +22,12 @@ pub struct Builder {
 }
 
 impl Builder {
-    pub fn new(listen: String, tls_cert: PathBuf, tls_key: PathBuf) -> Self {
+    pub fn new(listen: String) -> Self {
         Builder {
             listen,
-            tls_cert,
-            tls_key,
+            tls_cert: None,
+            tls_key: None,
+            tls_skip: false,
             enable_zero_rtt: false,
             congestion_initial_window: None,
             max_idle_timeout: None,
@@ -33,12 +37,17 @@ impl Builder {
     }
 
     pub fn with_tls_cert(mut self, value: PathBuf) -> Self {
-        self.tls_cert = value;
+        self.tls_cert = Some(value);
         self
     }
 
     pub fn with_tls_key(mut self, value: PathBuf) -> Self {
-        self.tls_key = value;
+        self.tls_key = Some(value);
+        self
+    }
+
+    pub fn with_tls_skip(mut self, value: bool) -> Self {
+        self.tls_skip = value;
         self
     }
 
@@ -77,12 +86,30 @@ impl Connection {
         let tls_config = {
             use rustls::ServerConfig;
 
-            let key = super::load_private_key(&config.tls_key)?;
-            let certs = super::load_certificates(&config.tls_cert)?;
+            use rustls::pki_types::CertificateDer;
+            use rustls::pki_types::PrivatePkcs8KeyDer;
+
+            let (cert, key) = if config.tls_skip {
+                let signed = rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
+                let cert = vec![CertificateDer::from(signed.cert).into()];
+                let key = PrivatePkcs8KeyDer::from(signed.key_pair.serialize_der()).into();
+                (cert, key)
+            } else {
+                let (cert, key) = match (config.tls_cert, config.tls_key) {
+                    (Some(cert_path), Some(key_path)) => {
+                        let cert = super::load_certificates(&cert_path)?;
+                        let key = super::load_private_key(&key_path)?;
+                        (cert, key)
+                    }
+                    (Some(_), None) => return Err("Private key must be provided when certificate is specified".into()),
+                    (None, _) => return Err("Certificate must be provided when TLS is enabled".into()),
+                };
+                (cert, key)
+            };
 
             let mut tls_config = ServerConfig::builder()
                 .with_no_client_auth()
-                .with_single_cert(certs, key)?;
+                .with_single_cert(cert, key)?;
 
             tls_config.alpn_protocols = [b"h3"].iter().map(|&x| x.into()).collect();
 
