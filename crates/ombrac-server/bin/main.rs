@@ -16,7 +16,12 @@ struct Args {
 
     // Transport QUIC
     /// Transport server listening address
-    #[clap(long, short = 'l', help_heading = "Transport QUIC", value_name = "ADDR")]
+    #[clap(
+        long,
+        short = 'l',
+        help_heading = "Transport QUIC",
+        value_name = "ADDR"
+    )]
     listen: String,
 
     /// Path to the TLS certificate file for secure connections

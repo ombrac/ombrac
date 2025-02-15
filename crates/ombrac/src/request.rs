@@ -274,10 +274,7 @@ mod tests {
             let parsed_request = Request::read(&mut cursor).await.unwrap();
 
             match parsed_request {
-                Request::TcpConnect(
-                    parsed_secret,
-                    Address::Domain(parsed_domain, parsed_port),
-                ) => {
+                Request::TcpConnect(parsed_secret, Address::Domain(parsed_domain, parsed_port)) => {
                     assert_eq!(secret, parsed_secret);
                     assert_eq!(domain, parsed_domain);
                     assert_eq!(port, parsed_port);
@@ -518,10 +515,7 @@ mod advanced_tests {
             match (request, parsed_request) {
                 (
                     Request::TcpConnect(orig_secret, Address::Domain(orig_domain, orig_port)),
-                    Request::TcpConnect(
-                        parsed_secret,
-                        Address::Domain(parsed_domain, parsed_port),
-                    ),
+                    Request::TcpConnect(parsed_secret, Address::Domain(parsed_domain, parsed_port)),
                 ) => {
                     assert_eq!(orig_secret, parsed_secret);
                     assert_eq!(orig_domain, parsed_domain);

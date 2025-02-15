@@ -31,7 +31,12 @@ struct Args {
     bind: Option<String>,
 
     /// Address of the server to connect
-    #[clap(long, short = 's', help_heading = "Transport QUIC", value_name = "ADDR")]
+    #[clap(
+        long,
+        short = 's',
+        help_heading = "Transport QUIC",
+        value_name = "ADDR"
+    )]
     server: String,
 
     /// Name of the server to connect
