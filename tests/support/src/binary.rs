@@ -62,7 +62,7 @@ impl Client {
                     args.extend_from_slice(&["--server-name".to_string(), name]);
                 }
                 if let Some(addr) = opts.server_address {
-                    args.extend_from_slice(&["--server-address".to_string(), addr]);
+                    args.extend_from_slice(&["--server".to_string(), addr]);
                 }
                 args
             })

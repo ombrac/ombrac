@@ -11,7 +11,7 @@
 [![Build Status][actions-badge]][actions-url]
 
 ## Install
-### From Releases
+### Releases
 Download the latest release from the [releases page](https://github.com/ombrac/ombrac/releases).
 
 
