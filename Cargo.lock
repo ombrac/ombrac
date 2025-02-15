@@ -906,6 +906,7 @@ dependencies = [
  "ombrac",
  "ombrac-macros",
  "quinn",
+ "rcgen",
  "rustls",
  "rustls-pemfile",
  "tests-support",

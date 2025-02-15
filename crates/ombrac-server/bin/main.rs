@@ -26,11 +26,15 @@ struct Args {
 
     /// Path to the TLS certificate file for secure connections
     #[clap(long, help_heading = "Transport QUIC", value_name = "FILE")]
-    tls_cert: PathBuf,
+    tls_cert: Option<PathBuf>,
 
     /// Path to the TLS private key file for secure connections
     #[clap(long, help_heading = "Transport QUIC", value_name = "FILE")]
-    tls_key: PathBuf,
+    tls_key: Option<PathBuf>,
+
+    /// When enabled, a self-signed certificate and key will be generated, the cert and key will be disregarded
+    #[clap(long, help_heading = "Transport QUIC", value_name = "BOOL")]
+    tls_skip: Option<bool>,
 
     /// Whether to enable 0-RTT or 0.5-RTT connections at the cost of weakened security
     #[clap(long, help_heading = "Transport QUIC", value_name = "BOOL")]
@@ -85,11 +89,19 @@ async fn main() -> Result<(), Box<dyn Error>> {
 }
 
 async fn quic_config_from_args(args: &Args) -> Result<Connection, Box<dyn Error>> {
-    let mut builder = Builder::new(
-        args.listen.to_string(),
-        args.tls_cert.clone(),
-        args.tls_key.clone(),
-    );
+    let mut builder = Builder::new(args.listen.to_string());
+
+    if let Some(value) = &args.tls_cert {
+        builder = builder.with_tls_cert(value.clone())
+    }
+
+    if let Some(value) = &args.tls_key {
+        builder = builder.with_tls_key(value.clone())
+    }
+
+    if let Some(value) = args.tls_skip {
+        builder = builder.with_tls_skip(value)
+    }
 
     if let Some(value) = args.enable_zero_rtt {
         builder = builder.with_enable_zero_rtt(value);

@@ -111,7 +111,9 @@ mod tests {
         let (cert_path, key_path) = CertificateGenerator::generate();
 
         let server_conn =
-            server::Builder::new(addr_str.clone(), cert_path.clone(), key_path.clone())
+            server::Builder::new(addr_str.clone())
+                .with_tls_cert(cert_path.clone())
+                .with_tls_key(key_path.clone())
                 .with_enable_zero_rtt(zero_rtt)
                 .build()
                 .await
