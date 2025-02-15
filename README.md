@@ -24,13 +24,13 @@ cargo build --bin ombrac-client --bin ombrac-server --features binary
 ## Usage
 ### Server
 ```shell
-ombrac-server -l "[::]:443" --tls-cert "./cert.pem" --tls-key "./key.pem"
+ombrac-server -l "[::]:443" -k "secret" --tls-cert "./cert.pem" --tls-key "./key.pem"
 ```
 Starts the Ombrac server listening on port 443, using the provided TLS certificate and key for encrypted communication.
 
 ### Client
 ```shell
-ombrac-client -s "example.com:443"
+ombrac-client -s "example.com:443" -k "secret"
 ```
 Will sets up a SOCKS5 server on 127.0.0.1:1080, forwarding traffic to example.com:443.
 
