@@ -7,8 +7,9 @@ pub struct ClientBuilder {
     pub secret: Option<String>,
     pub socks: Option<String>,
     pub tls_cert: Option<String>,
+    pub tls_skip: Option<String>,
     pub server_name: Option<String>,
-    pub server_address: Option<String>,
+    pub server: Option<String>,
 }
 
 impl ClientBuilder {
@@ -27,13 +28,18 @@ impl ClientBuilder {
         self
     }
 
+    pub fn tls_skip(mut self, skip: String) -> Self {
+        self.tls_skip = Some(skip);
+        self
+    }
+
     pub fn server_name(mut self, name: String) -> Self {
         self.server_name = Some(name);
         self
     }
 
-    pub fn server_address(mut self, address: String) -> Self {
-        self.server_address = Some(address);
+    pub fn server(mut self, addr: String) -> Self {
+        self.server = Some(addr);
         self
     }
 
@@ -58,10 +64,13 @@ impl Client {
                 if let Some(cert) = opts.tls_cert {
                     args.extend_from_slice(&["--tls-cert".to_string(), cert]);
                 }
+                if let Some(skip) = opts.tls_skip {
+                    args.extend_from_slice(&["--tls-skip".to_string(), skip]);
+                }
                 if let Some(name) = opts.server_name {
                     args.extend_from_slice(&["--server-name".to_string(), name]);
                 }
-                if let Some(addr) = opts.server_address {
+                if let Some(addr) = opts.server {
                     args.extend_from_slice(&["--server".to_string(), addr]);
                 }
                 args

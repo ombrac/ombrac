@@ -47,6 +47,10 @@ struct Args {
     #[clap(long, help_heading = "Transport QUIC", value_name = "FILE")]
     tls_cert: Option<PathBuf>,
 
+    /// Skip TLS verification for connections
+    #[clap(long, help_heading = "Transport QUIC", value_name = "BOOL")]
+    tls_skip: Option<bool>,
+
     /// Whether to enable 0-RTT or 0.5-RTT connections at the cost of weakened security
     #[clap(long, help_heading = "Transport QUIC", value_name = "BOOL")]
     enable_zero_rtt: Option<bool>,
@@ -120,6 +124,10 @@ async fn quic_from_args(args: &Args) -> Result<Connection, Box<dyn Error>> {
 
     if let Some(value) = &args.tls_cert {
         builder = builder.with_tls_cert(value.clone());
+    }
+
+    if let Some(value) = &args.tls_skip {
+        builder = builder.with_tls_skip(value.clone());
     }
 
     if let Some(value) = &args.enable_zero_rtt {

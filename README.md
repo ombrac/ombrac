@@ -75,7 +75,7 @@ Logging:
 
 ### Client
 ```shell
-Usage: ombrac-client [OPTIONS] --secret <STR> --server-address <ADDR>
+Usage: ombrac-client [OPTIONS] --secret <STR> --server <ADDR>
 
 Options:
   -h, --help     Print help
@@ -96,10 +96,12 @@ Transport QUIC:
           Name of the server to connect
       --tls-cert <FILE>
           Path to the TLS certificate file for secure connections
+      --tls-skip <BOOL>
+          Skip TLS verification for connections [possible values: true, false] [default: false]
       --enable-zero-rtt <BOOL>
-          Whether to enable 0-RTT or 0.5-RTT connections at the cost of weakened security [possible values: true, false]
+          Whether to enable 0-RTT or 0.5-RTT connections at the cost of weakened security [possible values: true, false] [default: false]
       --enable-connection-multiplexing <BOOL>
-          Whether to enable connection multiplexing [possible values: true, false]
+          Whether to enable connection multiplexing [possible values: true, false] [default: false]
       --congestion-initial-window <NUM>
           Initial congestion window in bytes
       --max-idle-timeout <TIME>
