@@ -31,15 +31,18 @@ impl Address {
     }
 }
 
+type Secret = [u8; 32];
+
 #[derive(Debug, Clone)]
 pub enum Request {
-    ///  +------------+------------+------------------------+
-    ///  |  RTYP (8)  |  ATYP (8)  |       PORT (16)        |
-    ///  +============+============+========================+
-    ///  |                    ADDR (0...)                 ...
-    ///  +--------------------------------------------------+
+    ///  +------------------------------------------------+------------+
+    ///  |                   AUTH (256)                   |  RTYP (8)  |
+    ///  +------------+------------------------+----------+------------+
+    ///  |  ATYP (8)  |       PORT (16)        |     ADDR (0...)     ...
+    ///  +------------+------------------------+-----------------------+
     ///  
     /// - RTYP (Request Type): 8-bit field indicating the type of request.
+    ///
     /// - ATYP (Address Type): 8-bit field indicating the type of address:
     ///   - 0x01: Domain name
     ///   - 0x02: IPv4 address
@@ -53,7 +56,7 @@ pub enum Request {
     ///   - Domain content: Variable-length bytes, representing the domain name.
     /// - IPv4: 4-byte address (32 bits)
     /// - IPv6: 16-byte address (128 bits)
-    TcpConnect(Address),
+    TcpConnect(Secret, Address),
 }
 
 impl Request {
@@ -74,28 +77,32 @@ impl Into<Vec<u8>> for Request {
         let mut buf = Vec::new();
 
         match self {
-            Request::TcpConnect(address) => match address {
-                Address::Domain(domain, port) => {
-                    let addr_bytes = domain.as_bytes();
-                    buf.put_u8(Self::RTYP_TCP_CONNECT);
-                    buf.put_u8(Self::ATYP_DOMAIN);
-                    buf.extend_from_slice(&port.to_be_bytes());
-                    buf.put_u8(addr_bytes.len() as u8);
-                    buf.extend_from_slice(addr_bytes);
+            Request::TcpConnect(secret, address) => {
+                buf.extend_from_slice(&secret);
+
+                match address {
+                    Address::Domain(domain, port) => {
+                        buf.put_u8(Self::RTYP_TCP_CONNECT);
+                        buf.put_u8(Self::ATYP_DOMAIN);
+                        buf.extend_from_slice(&port.to_be_bytes());
+                        let addr_bytes = domain.as_bytes();
+                        buf.put_u8(addr_bytes.len() as u8);
+                        buf.extend_from_slice(addr_bytes);
+                    }
+                    Address::IPv4(addr) => {
+                        buf.put_u8(Self::RTYP_TCP_CONNECT);
+                        buf.put_u8(Self::ATYP_IPV4);
+                        buf.extend_from_slice(&addr.port().to_be_bytes());
+                        buf.extend_from_slice(&addr.ip().octets());
+                    }
+                    Address::IPv6(addr) => {
+                        buf.put_u8(Self::RTYP_TCP_CONNECT);
+                        buf.put_u8(Self::ATYP_IPV6);
+                        buf.extend_from_slice(&addr.port().to_be_bytes());
+                        buf.extend_from_slice(&addr.ip().octets());
+                    }
                 }
-                Address::IPv4(addr) => {
-                    buf.put_u8(Self::RTYP_TCP_CONNECT);
-                    buf.put_u8(Self::ATYP_IPV4);
-                    buf.extend_from_slice(&addr.port().to_be_bytes());
-                    buf.extend_from_slice(&addr.ip().octets());
-                }
-                Address::IPv6(addr) => {
-                    buf.put_u8(Self::RTYP_TCP_CONNECT);
-                    buf.put_u8(Self::ATYP_IPV6);
-                    buf.extend_from_slice(&addr.port().to_be_bytes());
-                    buf.extend_from_slice(&addr.ip().octets());
-                }
-            },
+            }
         }
 
         buf
@@ -107,6 +114,9 @@ impl Streamable for Request {
     where
         T: AsyncRead + Unpin + Send,
     {
+        let mut secret = [0u8; 32];
+        stream.read_exact(&mut secret).await?;
+
         let mut header = [0u8; Self::HEADER_LENGTH];
         stream.read_exact(&mut header).await?;
 
@@ -145,7 +155,7 @@ impl Streamable for Request {
         };
 
         match request_type {
-            Self::RTYP_TCP_CONNECT => Ok(Request::TcpConnect(address)),
+            Self::RTYP_TCP_CONNECT => Ok(Request::TcpConnect(secret, address)),
             _ => Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "Invalid request type",
@@ -157,22 +167,22 @@ impl Streamable for Request {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     use std::io::Cursor;
 
     #[tokio::test]
     async fn test_domain_request() {
+        let secret = [0u8; 32];
         let domain = "example.com".to_string();
         let port = 80;
-        let request = Request::TcpConnect(Address::Domain(domain.clone(), port));
+        let request = Request::TcpConnect(secret, Address::Domain(domain.clone(), port));
 
         let bytes: Vec<u8> = request.into();
-
         let mut cursor = Cursor::new(bytes);
         let parsed_request = Request::read(&mut cursor).await.unwrap();
 
         match parsed_request {
-            Request::TcpConnect(Address::Domain(parsed_domain, parsed_port)) => {
+            Request::TcpConnect(parsed_secret, Address::Domain(parsed_domain, parsed_port)) => {
+                assert_eq!(secret, parsed_secret);
                 assert_eq!(domain, parsed_domain);
                 assert_eq!(port, parsed_port);
             }
@@ -182,16 +192,17 @@ mod tests {
 
     #[tokio::test]
     async fn test_ipv4_request() {
+        let secret = [0u8; 32];
         let addr = SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 8080);
-        let request = Request::TcpConnect(Address::IPv4(addr));
+        let request = Request::TcpConnect(secret, Address::IPv4(addr));
 
         let bytes: Vec<u8> = request.into();
-
         let mut cursor = Cursor::new(bytes);
         let parsed_request = Request::read(&mut cursor).await.unwrap();
 
         match parsed_request {
-            Request::TcpConnect(Address::IPv4(parsed_addr)) => {
+            Request::TcpConnect(parsed_secret, Address::IPv4(parsed_addr)) => {
+                assert_eq!(secret, parsed_secret);
                 assert_eq!(addr.ip(), parsed_addr.ip());
                 assert_eq!(addr.port(), parsed_addr.port());
             }
@@ -201,16 +212,17 @@ mod tests {
 
     #[tokio::test]
     async fn test_ipv6_request() {
+        let secret = [0u8; 32];
         let addr = SocketAddrV6::new(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1), 8080, 0, 0);
-        let request = Request::TcpConnect(Address::IPv6(addr));
+        let request = Request::TcpConnect(secret, Address::IPv6(addr));
 
         let bytes: Vec<u8> = request.into();
-
         let mut cursor = Cursor::new(bytes);
         let parsed_request = Request::read(&mut cursor).await.unwrap();
 
         match parsed_request {
-            Request::TcpConnect(Address::IPv6(parsed_addr)) => {
+            Request::TcpConnect(parsed_secret, Address::IPv6(parsed_addr)) => {
+                assert_eq!(secret, parsed_secret);
                 assert_eq!(addr.ip(), parsed_addr.ip());
                 assert_eq!(addr.port(), parsed_addr.port());
             }
@@ -220,16 +232,18 @@ mod tests {
 
     #[tokio::test]
     async fn test_max_length_domain() {
+        let secret = [0u8; 32];
         let domain = format!("{}.{}", "a".repeat(63), "b".repeat(189));
         let port = 80;
-        let request = Request::TcpConnect(Address::Domain(domain.clone(), port));
+        let request = Request::TcpConnect(secret, Address::Domain(domain.clone(), port));
 
         let bytes: Vec<u8> = request.into();
         let mut cursor = Cursor::new(bytes);
         let parsed_request = Request::read(&mut cursor).await.unwrap();
 
         match parsed_request {
-            Request::TcpConnect(Address::Domain(parsed_domain, parsed_port)) => {
+            Request::TcpConnect(parsed_secret, Address::Domain(parsed_domain, parsed_port)) => {
+                assert_eq!(secret, parsed_secret);
                 assert_eq!(domain, parsed_domain);
                 assert_eq!(port, parsed_port);
                 assert_eq!(domain.len(), 253);
@@ -240,6 +254,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_special_chars_domain() {
+        let secret = [0u8; 32];
         let special_domains = vec![
             "hello-world.com",
             "test.domain.com",
@@ -252,14 +267,18 @@ mod tests {
 
         for domain in special_domains {
             let port = 443;
-            let request = Request::TcpConnect(Address::Domain(domain.to_string(), port));
+            let request = Request::TcpConnect(secret, Address::Domain(domain.to_string(), port));
 
             let bytes: Vec<u8> = request.into();
             let mut cursor = Cursor::new(bytes);
             let parsed_request = Request::read(&mut cursor).await.unwrap();
 
             match parsed_request {
-                Request::TcpConnect(Address::Domain(parsed_domain, parsed_port)) => {
+                Request::TcpConnect(
+                    parsed_secret,
+                    Address::Domain(parsed_domain, parsed_port),
+                ) => {
+                    assert_eq!(secret, parsed_secret);
                     assert_eq!(domain, parsed_domain);
                     assert_eq!(port, parsed_port);
                 }
@@ -270,31 +289,34 @@ mod tests {
 
     #[tokio::test]
     async fn test_edge_case_ports() {
+        let secret = [0u8; 32];
         let edge_ports = vec![0, 1, 80, 443, 8080, 65535];
         for port in edge_ports {
             let ipv4_addr = SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), port);
-            let request = Request::TcpConnect(Address::IPv4(ipv4_addr));
+            let request = Request::TcpConnect(secret, Address::IPv4(ipv4_addr));
 
             let bytes: Vec<u8> = request.into();
             let mut cursor = Cursor::new(bytes);
             let parsed_request = Request::read(&mut cursor).await.unwrap();
 
             match parsed_request {
-                Request::TcpConnect(Address::IPv4(parsed_addr)) => {
+                Request::TcpConnect(parsed_secret, Address::IPv4(parsed_addr)) => {
+                    assert_eq!(secret, parsed_secret);
                     assert_eq!(port, parsed_addr.port());
                 }
                 _ => panic!("Wrong request type"),
             }
 
             let ipv6_addr = SocketAddrV6::new(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1), port, 0, 0);
-            let request = Request::TcpConnect(Address::IPv6(ipv6_addr));
+            let request = Request::TcpConnect(secret, Address::IPv6(ipv6_addr));
 
             let bytes: Vec<u8> = request.into();
             let mut cursor = Cursor::new(bytes);
             let parsed_request = Request::read(&mut cursor).await.unwrap();
 
             match parsed_request {
-                Request::TcpConnect(Address::IPv6(parsed_addr)) => {
+                Request::TcpConnect(parsed_secret, Address::IPv6(parsed_addr)) => {
+                    assert_eq!(secret, parsed_secret);
                     assert_eq!(port, parsed_addr.port());
                 }
                 _ => panic!("Wrong request type"),
@@ -304,6 +326,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_special_ipv4_addresses() {
+        let secret = [0u8; 32];
         let special_ips = vec![
             Ipv4Addr::new(0, 0, 0, 0),
             Ipv4Addr::new(127, 0, 0, 1),
@@ -315,14 +338,15 @@ mod tests {
 
         for ip in special_ips {
             let addr = SocketAddrV4::new(ip, 80);
-            let request = Request::TcpConnect(Address::IPv4(addr));
+            let request = Request::TcpConnect(secret, Address::IPv4(addr));
 
             let bytes: Vec<u8> = request.into();
             let mut cursor = Cursor::new(bytes);
             let parsed_request = Request::read(&mut cursor).await.unwrap();
 
             match parsed_request {
-                Request::TcpConnect(Address::IPv4(parsed_addr)) => {
+                Request::TcpConnect(parsed_secret, Address::IPv4(parsed_addr)) => {
+                    assert_eq!(secret, parsed_secret);
                     assert_eq!(addr.ip(), parsed_addr.ip());
                     assert_eq!(addr.port(), parsed_addr.port());
                 }
@@ -333,6 +357,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_special_ipv6_addresses() {
+        let secret = [0u8; 32];
         let special_ips = vec![
             Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 0),          // ::
             Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1),          // ::1
@@ -344,14 +369,15 @@ mod tests {
 
         for ip in special_ips {
             let addr = SocketAddrV6::new(ip, 80, 0, 0);
-            let request = Request::TcpConnect(Address::IPv6(addr));
+            let request = Request::TcpConnect(secret, Address::IPv6(addr));
 
             let bytes: Vec<u8> = request.into();
             let mut cursor = Cursor::new(bytes);
             let parsed_request = Request::read(&mut cursor).await.unwrap();
 
             match parsed_request {
-                Request::TcpConnect(Address::IPv6(parsed_addr)) => {
+                Request::TcpConnect(parsed_secret, Address::IPv6(parsed_addr)) => {
+                    assert_eq!(secret, parsed_secret);
                     assert_eq!(addr.ip(), parsed_addr.ip());
                     assert_eq!(addr.port(), parsed_addr.port());
                 }
@@ -362,7 +388,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_partial_read() {
-        let request = Request::TcpConnect(Address::Domain("example.com".to_string(), 80));
+        let secret = [0u8; 32];
+        let request = Request::TcpConnect(secret, Address::Domain("example.com".to_string(), 80));
         let bytes: Vec<u8> = request.into();
 
         let partial_bytes = &bytes[..bytes.len() - 1];
@@ -374,13 +401,15 @@ mod tests {
 
     #[tokio::test]
     async fn test_empty_domain() {
-        let request = Request::TcpConnect(Address::Domain("".to_string(), 80));
+        let secret = [0u8; 32];
+        let request = Request::TcpConnect(secret, Address::Domain("".to_string(), 80));
         let bytes: Vec<u8> = request.into();
         let mut cursor = Cursor::new(bytes);
 
         let parsed_request = Request::read(&mut cursor).await.unwrap();
         match parsed_request {
-            Request::TcpConnect(Address::Domain(domain, port)) => {
+            Request::TcpConnect(parsed_secret, Address::Domain(domain, port)) => {
+                assert_eq!(secret, parsed_secret);
                 assert_eq!(domain, "");
                 assert_eq!(port, 80);
             }
@@ -390,18 +419,17 @@ mod tests {
 
     #[tokio::test]
     async fn test_request_roundtrip() {
+        let secret = [0u8; 32];
         let test_cases = vec![
-            Request::TcpConnect(Address::Domain("example.com".to_string(), 80)),
-            Request::TcpConnect(Address::IPv4(SocketAddrV4::new(
-                Ipv4Addr::new(127, 0, 0, 1),
-                8080,
-            ))),
-            Request::TcpConnect(Address::IPv6(SocketAddrV6::new(
-                Ipv6Addr::LOCALHOST,
-                443,
-                0,
-                0,
-            ))),
+            Request::TcpConnect(secret, Address::Domain("example.com".to_string(), 80)),
+            Request::TcpConnect(
+                secret,
+                Address::IPv4(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 8080)),
+            ),
+            Request::TcpConnect(
+                secret,
+                Address::IPv6(SocketAddrV6::new(Ipv6Addr::LOCALHOST, 443, 0, 0)),
+            ),
         ];
 
         for original_request in test_cases {
@@ -428,16 +456,19 @@ mod advanced_tests {
         use futures::future::join_all;
         use std::sync::Arc;
 
+        let secret = [0u8; 32];
+
         // Test data
         let requests = vec![
-            Request::TcpConnect(Address::Domain("example.com".to_string(), 80)),
-            Request::TcpConnect(Address::IPv4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 8080))),
-            Request::TcpConnect(Address::IPv6(SocketAddrV6::new(
-                Ipv6Addr::LOCALHOST,
-                443,
-                0,
-                0,
-            ))),
+            Request::TcpConnect(secret, Address::Domain("example.com".to_string(), 80)),
+            Request::TcpConnect(
+                secret,
+                Address::IPv4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 8080)),
+            ),
+            Request::TcpConnect(
+                secret,
+                Address::IPv6(SocketAddrV6::new(Ipv6Addr::LOCALHOST, 443, 0, 0)),
+            ),
         ];
 
         let requests = Arc::new(requests);
@@ -471,10 +502,12 @@ mod advanced_tests {
     // Stress testing with large data
     #[tokio::test]
     async fn test_large_domain_stress() {
+        let secret = [0u8; 32];
+
         // Create a large number of requests with varying domain lengths
         let domains = (1..100).map(|i| {
             let domain = format!("{}.example.com", "a".repeat(i));
-            Request::TcpConnect(Address::Domain(domain, 80))
+            Request::TcpConnect(secret, Address::Domain(domain, 80))
         });
 
         for request in domains {
@@ -484,9 +517,13 @@ mod advanced_tests {
 
             match (request, parsed_request) {
                 (
-                    Request::TcpConnect(Address::Domain(orig_domain, orig_port)),
-                    Request::TcpConnect(Address::Domain(parsed_domain, parsed_port)),
+                    Request::TcpConnect(orig_secret, Address::Domain(orig_domain, orig_port)),
+                    Request::TcpConnect(
+                        parsed_secret,
+                        Address::Domain(parsed_domain, parsed_port),
+                    ),
                 ) => {
+                    assert_eq!(orig_secret, parsed_secret);
                     assert_eq!(orig_domain, parsed_domain);
                     assert_eq!(orig_port, parsed_port);
                 }
@@ -529,7 +566,8 @@ mod advanced_tests {
 
         // Try to create and process a request with limited memory
         let result = std::panic::catch_unwind(|| {
-            let request = Request::TcpConnect(Address::Domain("test.com".to_string(), 80));
+            let request =
+                Request::TcpConnect([0u8; 32], Address::Domain("test.com".to_string(), 80));
             let _bytes: Vec<u8> = request.into();
         });
 
@@ -595,7 +633,8 @@ mod edge_case_tests {
 
     #[tokio::test]
     async fn test_slow_reader() {
-        let request = Request::TcpConnect(Address::Domain("example.com".to_string(), 80));
+        let secret = [0u8; 32];
+        let request = Request::TcpConnect(secret, Address::Domain("example.com".to_string(), 80));
         let bytes: Vec<u8> = request.into();
 
         // Create a slow reader with 10ms delay per read
@@ -605,7 +644,8 @@ mod edge_case_tests {
         let parsed_request = Request::read(&mut slow_reader).await.unwrap();
 
         match parsed_request {
-            Request::TcpConnect(Address::Domain(domain, port)) => {
+            Request::TcpConnect(parsed_secret, Address::Domain(domain, port)) => {
+                assert_eq!(secret, parsed_secret);
                 assert_eq!(domain, "example.com");
                 assert_eq!(port, 80);
             }
@@ -692,13 +732,14 @@ mod edge_case_tests {
 
         for port in edge_ports {
             // Test with domain address
-            let request = Request::TcpConnect(Address::Domain("example.com".to_string(), port));
+            let request =
+                Request::TcpConnect([0u8; 32], Address::Domain("example.com".to_string(), port));
             let bytes: Vec<u8> = request.clone().into();
             let mut cursor = Cursor::new(bytes);
             let parsed = Request::read(&mut cursor).await.unwrap();
 
             match parsed {
-                Request::TcpConnect(Address::Domain(_, parsed_port)) => {
+                Request::TcpConnect(_, Address::Domain(_, parsed_port)) => {
                     assert_eq!(port, parsed_port);
                 }
                 _ => panic!("Wrong address type"),
@@ -726,13 +767,13 @@ mod edge_case_tests {
 
         for ip in subnet_tests {
             let addr = SocketAddrV4::new(ip, 80);
-            let request = Request::TcpConnect(Address::IPv4(addr));
+            let request = Request::TcpConnect([0u8; 32], Address::IPv4(addr));
             let bytes: Vec<u8> = request.into();
             let mut cursor = Cursor::new(bytes);
             let parsed = Request::read(&mut cursor).await.unwrap();
 
             match parsed {
-                Request::TcpConnect(Address::IPv4(parsed_addr)) => {
+                Request::TcpConnect(_, Address::IPv4(parsed_addr)) => {
                     assert_eq!(addr, parsed_addr);
                 }
                 _ => panic!("Wrong address type"),
@@ -758,13 +799,13 @@ mod edge_case_tests {
 
         for ip in special_addrs {
             let addr = SocketAddrV6::new(ip, 80, 0, 0);
-            let request = Request::TcpConnect(Address::IPv6(addr));
+            let request = Request::TcpConnect([0u8; 32], Address::IPv6(addr));
             let bytes: Vec<u8> = request.into();
             let mut cursor = Cursor::new(bytes);
             let parsed = Request::read(&mut cursor).await.unwrap();
 
             match parsed {
-                Request::TcpConnect(Address::IPv6(parsed_addr)) => {
+                Request::TcpConnect(_, Address::IPv6(parsed_addr)) => {
                     assert_eq!(addr, parsed_addr);
                 }
                 _ => panic!("Wrong address type"),

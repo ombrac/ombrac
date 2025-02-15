@@ -44,12 +44,14 @@ mod tests {
         let (cert_path, key_path) = CertificateGenerator::generate();
 
         let _server = ServerBuilder::default()
+            .secret("secret".to_string())
             .listen(server_addr.to_string())
             .tls_cert(cert_path.display().to_string())
             .tls_key(key_path.display().to_string())
             .build();
 
         let _client = ClientBuilder::default()
+            .secret("secret".to_string())
             .socks(client_socks_addr.to_string())
             .server_address(server_addr.to_string())
             .tls_cert(cert_path.display().to_string())

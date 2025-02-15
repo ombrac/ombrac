@@ -1,8 +1,9 @@
-use std::{fs::File, sync::LazyLock};
+use std::fs::File;
 use std::io::Write;
 use std::net::IpAddr;
 use std::path::PathBuf;
 use std::str::FromStr;
+use std::sync::LazyLock;
 
 use rcgen::{Ia5String, SanType};
 
