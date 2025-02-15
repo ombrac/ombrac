@@ -30,13 +30,13 @@ struct Args {
     #[clap(long, help_heading = "Transport QUIC", value_name = "ADDR")]
     bind: Option<String>,
 
+    /// Address of the server to connect
+    #[clap(long, short = 's', help_heading = "Transport QUIC", value_name = "ADDR")]
+    server: String,
+
     /// Name of the server to connect
     #[clap(long, help_heading = "Transport QUIC", value_name = "STR")]
     server_name: Option<String>,
-
-    /// Address of the server to connect
-    #[clap(long, short = 's', help_heading = "Transport QUIC", value_name = "ADDR")]
-    server_address: String,
 
     /// Path to the TLS certificate file for secure connections
     #[clap(long, help_heading = "Transport QUIC", value_name = "FILE")]
@@ -103,7 +103,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 async fn quic_from_args(args: &Args) -> Result<Connection, Box<dyn Error>> {
     use std::time::Duration;
 
-    let mut builder = Builder::new(args.server_address.clone());
+    let mut builder = Builder::new(args.server.clone());
 
     if let Some(value) = &args.bind {
         builder = builder.with_bind(value.to_string());
