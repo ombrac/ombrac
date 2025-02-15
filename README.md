@@ -89,10 +89,10 @@ Endpoint SOCKS:
 Transport QUIC:
       --bind <ADDR>
           Bind address
+  -s, --server <ADDR>
+          Address of the server to connect
       --server-name <STR>
           Name of the server to connect
-  -s, --server-address <ADDR>
-          Address of the server to connect
       --tls-cert <FILE>
           Path to the TLS certificate file for secure connections
       --enable-zero-rtt <BOOL>
