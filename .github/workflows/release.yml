@@ -24,6 +24,10 @@ jobs:
             target: aarch64-unknown-linux-gnu
             file-ext:
 
+          - arch-name: aarch64-linux-android
+            os: ubuntu-latest
+            target: aarch64-linux-android
+
           - arch-name: aarch64-pc-windows-msvc
             os: windows-latest
             target: aarch64-pc-windows-msvc
@@ -75,6 +79,13 @@ jobs:
           sudo apt install -y gcc-aarch64-linux-gnu
           echo '[target.aarch64-unknown-linux-gnu]' > .cargo/config.toml
           echo 'linker = "aarch64-linux-gnu-gcc"' >> .cargo/config.toml
+
+      - name: Install dependencies for aarch64-linux-android
+        if: matrix.target == 'aarch64-linux-android'
+        uses: nttld/setup-ndk@main
+        with:
+          ndk-version: r26d
+          local-cache: true
 
       - name: Build binaries
         run: |

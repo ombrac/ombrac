@@ -11,6 +11,10 @@ use ombrac_transport::quic::Connection;
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
 struct Args {
+    /// Protocol Secret
+    #[clap(long, short = 'k', help_heading = "Service Secret", value_name = "STR")]
+    secret: String,
+
     // Endpoint SOCKS
     /// Listening address for the SOCKS server.
     #[clap(
@@ -26,13 +30,18 @@ struct Args {
     #[clap(long, help_heading = "Transport QUIC", value_name = "ADDR")]
     bind: Option<String>,
 
+    /// Address of the server to connect
+    #[clap(
+        long,
+        short = 's',
+        help_heading = "Transport QUIC",
+        value_name = "ADDR"
+    )]
+    server: String,
+
     /// Name of the server to connect
     #[clap(long, help_heading = "Transport QUIC", value_name = "STR")]
     server_name: Option<String>,
-
-    /// Address of the server to connect
-    #[clap(long, help_heading = "Transport QUIC", value_name = "ADDR")]
-    server_address: String,
 
     /// Path to the TLS certificate file for secure connections
     #[clap(long, help_heading = "Transport QUIC", value_name = "FILE")]
@@ -55,7 +64,12 @@ struct Args {
     max_idle_timeout: Option<u64>,
 
     /// Connection keep alive period in millisecond
-    #[clap(long, help_heading = "Transport QUIC", value_name = "TIME", default_value = "8000")]
+    #[clap(
+        long,
+        help_heading = "Transport QUIC",
+        value_name = "TIME",
+        default_value = "8000"
+    )]
     max_keep_alive_period: Option<u64>,
 
     /// Connection max open bidirectional streams
@@ -83,7 +97,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .with_max_level(args.tracing_level)
         .init();
 
-    let ombrac_client = Client::new(quic_from_args(&args).await?);
+    let secret = blake3::hash(args.secret.as_bytes());
+    let ombrac_client = Client::new(*secret.as_bytes(), quic_from_args(&args).await?);
 
     SocksServer::listen(args.socks, ombrac_client).await?;
 
@@ -93,7 +108,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 async fn quic_from_args(args: &Args) -> Result<Connection, Box<dyn Error>> {
     use std::time::Duration;
 
-    let mut builder = Builder::new(args.server_address.clone());
+    let mut builder = Builder::new(args.server.clone());
 
     if let Some(value) = &args.bind {
         builder = builder.with_bind(value.to_string());

@@ -39,6 +39,7 @@ socks-lib = { version = "0.1", default-features = false }
 
 # binary
 clap = { version = "4", default-features = false }
+blake3 = { version = "1.5", default-features = false }
 
 # quic
 quinn = { version = "0.11", default-features = false }

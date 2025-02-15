@@ -1,36 +1,44 @@
 use std::io;
 
-use ombrac::io::Streamable;
 use ombrac::request::{Address, Request};
 use ombrac::Provider;
 use tokio::io::{AsyncRead, AsyncWrite};
 
 pub struct Client<T> {
+    secret: [u8; 32],
     transport: T,
 }
 
 impl<Transport, Stream> Client<Transport>
 where
     Transport: Provider<Item = Stream>,
-    Stream: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+    Stream: AsyncRead + AsyncWrite + Unpin,
 {
-    pub fn new(transport: Transport) -> Self {
-        Self { transport }
+    pub fn new(secret: [u8; 32], transport: Transport) -> Self {
+        Self { secret, transport }
     }
 
-    pub async fn outbound(&mut self) -> io::Result<Stream> {
+    async fn outbound(&self) -> io::Result<Stream> {
         match self.transport.fetch().await {
             Some(value) => Ok(value),
             None => Err(io::Error::new(
-                io::ErrorKind::NotConnected,
-                "Not outbound connected",
+                io::ErrorKind::ConnectionAborted,
+                "Connection has been lost",
             )),
         }
     }
 
-    pub async fn tcp_connect(outbound: &mut Stream, address: Address) -> io::Result<()> {
-        <Request as Streamable>::write(Request::TcpConnect(address), outbound).await?;
+    pub async fn tcp_connect<A>(&self, addr: A) -> io::Result<Stream>
+    where
+        A: Into<Address>,
+    {
+        use tokio::io::AsyncWriteExt;
 
-        Ok(())
+        let request: Vec<u8> = Request::TcpConnect(self.secret, addr.into()).into();
+        let mut stream = self.outbound().await?;
+
+        stream.write_all(&request).await?;
+
+        Ok(stream)
     }
 }
