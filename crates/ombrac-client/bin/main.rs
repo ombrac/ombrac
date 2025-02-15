@@ -12,7 +12,7 @@ use ombrac_transport::quic::Connection;
 #[command(version, about, long_about = None)]
 struct Args {
     /// Protocol Secret
-    #[clap(long, help_heading = "Service Secret", value_name = "STR")]
+    #[clap(long, short = 'k', help_heading = "Service Secret", value_name = "STR")]
     secret: String,
 
     // Endpoint SOCKS
@@ -35,7 +35,7 @@ struct Args {
     server_name: Option<String>,
 
     /// Address of the server to connect
-    #[clap(long, help_heading = "Transport QUIC", value_name = "ADDR")]
+    #[clap(long, short = 's', help_heading = "Transport QUIC", value_name = "ADDR")]
     server_address: String,
 
     /// Path to the TLS certificate file for secure connections
