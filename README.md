@@ -3,9 +3,9 @@
 **Ombrac** is a high-performance, Rust-based TCP tunneling solution designed for secure communication
 
 ## Features
-- Optionally pass through SOCKS
-- Encryption is ensured by the built-in TLS layer of QUIC
-- Employs QUIC multiplexing with bidirectional streams for efficient transmission
+- **High Performance**: Leverages QUIC's multiplexing capabilities with bidirectional streams for efficient and low-latency transmission.
+- **Secure Communication**: Encryption is ensured by the built-in TLS layer of QUIC, providing robust security for your data.
+- **Zero-RTT Support**: Optional 0-RTT or 0.5-RTT connections for faster handshakes (at the cost of slightly weakened security).
 
 [![Apache 2.0 Licensed][license-badge]][license-url]
 [![Build Status][ci-badge]][ci-url]
@@ -15,6 +15,10 @@
 ### Releases
 Download the latest release from the [releases page](https://github.com/ombrac/ombrac/releases).
 
+### [crate](https://crates.io/)
+```shell
+cargo install ombrac-client ombrac-server --features binary
+```
 
 ### Build
 ```shell
@@ -29,13 +33,18 @@ ombrac-server -l "[::]:443" -k "secret" --tls-cert "./cert.pem" --tls-key "./key
 ```
 Starts the Ombrac server listening on port 443, using the provided TLS certificate and key for encrypted communication.
 
+**Alternatively, you can use the `--tls-skip` option to generate a self-signed certificate and key automatically. This is useful for testing or development purposes, but note that using self-signed certificates may expose your communication to security risks, such as man-in-the-middle attacks.**
+
 ### Client
 ```shell
 ombrac-client -s "example.com:443" -k "secret"
 ```
 Will sets up a SOCKS5 server on 127.0.0.1:1080, forwarding traffic to example.com:443.
 
-When using a self-signed certificate, the client requires both the `--server-name` parameter and the `--tls-cert` path to be explicitly configured.
+When using a self-signed certificate, the client requires both the `--server-name` parameter and the `--tls-cert` path to be explicitly configured. 
+
+Alternatively, you can use the `--tls-skip` option to skip TLS verification. **This is not recommended for production environments as it bypasses certificate validation, potentially exposing your communication to security risks.**
+
 
 ## Usage
 
@@ -58,10 +67,10 @@ Transport QUIC:
           Path to the TLS certificate file for secure connections
       --tls-key <FILE>
           Path to the TLS private key file for secure connections
-      --tls-skip <BOOL>
-          When enabled, a self-signed certificate and key will be generated, the cert and key will be disregarded [possible values: true, false] [default: false]
-      --enable-zero-rtt <BOOL>
-          Whether to enable 0-RTT or 0.5-RTT connections at the cost of weakened security [possible values: true, false] [default: false]
+      --tls-skip
+          When enabled, a self-signed certificate and key will be generated, the cert and key will be disregarded
+      --enable-zero-rtt
+          Whether to enable 0-RTT or 0.5-RTT connections at the cost of weakened security
       --congestion-initial-window <NUM>
           Initial congestion window in bytes
       --max-idle-timeout <TIME>
@@ -98,12 +107,12 @@ Transport QUIC:
           Name of the server to connect
       --tls-cert <FILE>
           Path to the TLS certificate file for secure connections
-      --tls-skip <BOOL>
-          Skip TLS verification for connections [possible values: true, false] [default: false]
-      --enable-zero-rtt <BOOL>
-          Whether to enable 0-RTT or 0.5-RTT connections at the cost of weakened security [possible values: true, false] [default: false]
-      --enable-connection-multiplexing <BOOL>
-          Whether to enable connection multiplexing [possible values: true, false] [default: false]
+      --tls-skip
+          Skip TLS verification for connections
+      --enable-zero-rtt
+          Whether to enable 0-RTT or 0.5-RTT connections at the cost of weakened security
+      --enable-connection-multiplexing
+          Whether to enable connection multiplexing
       --congestion-initial-window <NUM>
           Initial congestion window in bytes
       --max-idle-timeout <TIME>
