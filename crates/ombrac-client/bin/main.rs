@@ -48,16 +48,16 @@ struct Args {
     tls_cert: Option<PathBuf>,
 
     /// Skip TLS verification for connections
-    #[clap(long, help_heading = "Transport QUIC", value_name = "BOOL")]
-    tls_skip: Option<bool>,
+    #[clap(long, help_heading = "Transport QUIC", action)]
+    tls_skip: bool,
 
     /// Whether to enable 0-RTT or 0.5-RTT connections at the cost of weakened security
-    #[clap(long, help_heading = "Transport QUIC", value_name = "BOOL")]
-    enable_zero_rtt: Option<bool>,
+    #[clap(long, help_heading = "Transport QUIC", action)]
+    enable_zero_rtt: bool,
 
     /// Whether to enable connection multiplexing
-    #[clap(long, help_heading = "Transport QUIC", value_name = "BOOL")]
-    enable_connection_multiplexing: Option<bool>,
+    #[clap(long, help_heading = "Transport QUIC", action)]
+    enable_connection_multiplexing: bool,
 
     /// Initial congestion window in bytes
     #[clap(long, help_heading = "Transport QUIC", value_name = "NUM")]
@@ -126,17 +126,9 @@ async fn quic_from_args(args: &Args) -> Result<Connection, Box<dyn Error>> {
         builder = builder.with_tls_cert(value.clone());
     }
 
-    if let Some(value) = &args.tls_skip {
-        builder = builder.with_tls_skip(value.clone());
-    }
-
-    if let Some(value) = &args.enable_zero_rtt {
-        builder = builder.with_enable_zero_rtt(value.clone());
-    }
-
-    if let Some(value) = &args.enable_connection_multiplexing {
-        builder = builder.with_enable_connection_multiplexing(value.clone());
-    }
+    builder = builder.with_tls_skip(args.tls_skip);
+    builder = builder.with_enable_zero_rtt(args.enable_zero_rtt);
+    builder = builder.with_enable_connection_multiplexing(args.enable_connection_multiplexing);
 
     if let Some(value) = args.congestion_initial_window {
         builder = builder.with_congestion_initial_window(value);

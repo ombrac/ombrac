@@ -33,12 +33,12 @@ struct Args {
     tls_key: Option<PathBuf>,
 
     /// When enabled, a self-signed certificate and key will be generated, the cert and key will be disregarded
-    #[clap(long, help_heading = "Transport QUIC", value_name = "BOOL")]
-    tls_skip: Option<bool>,
+    #[clap(long, help_heading = "Transport QUIC", action)]
+    tls_skip: bool,
 
     /// Whether to enable 0-RTT or 0.5-RTT connections at the cost of weakened security
-    #[clap(long, help_heading = "Transport QUIC", value_name = "BOOL")]
-    enable_zero_rtt: Option<bool>,
+    #[clap(long, help_heading = "Transport QUIC", action)]
+    enable_zero_rtt: bool,
 
     /// Initial congestion window in bytes
     #[clap(long, help_heading = "Transport QUIC", value_name = "NUM")]
@@ -99,13 +99,8 @@ async fn quic_config_from_args(args: &Args) -> Result<Connection, Box<dyn Error>
         builder = builder.with_tls_key(value.clone())
     }
 
-    if let Some(value) = args.tls_skip {
-        builder = builder.with_tls_skip(value)
-    }
-
-    if let Some(value) = args.enable_zero_rtt {
-        builder = builder.with_enable_zero_rtt(value);
-    }
+    builder = builder.with_tls_skip(args.tls_skip);
+    builder = builder.with_enable_zero_rtt(args.enable_zero_rtt);
 
     if let Some(value) = args.congestion_initial_window {
         builder = builder.with_congestion_initial_window(value);
