@@ -15,7 +15,7 @@
 ### Releases
 Download the latest release from the [releases page](https://github.com/ombrac/ombrac/releases).
 
-### [crate](https://crates.io/)
+### [crate.io](https://crates.io/)
 ```shell
 cargo install ombrac-client ombrac-server --features binary
 ```
@@ -32,8 +32,6 @@ cargo build --bin ombrac-client --bin ombrac-server --features binary
 ombrac-server -l "[::]:443" -k "secret" --tls-cert "./cert.pem" --tls-key "./key.pem"
 ```
 Starts the Ombrac server listening on port 443, using the provided TLS certificate and key for encrypted communication.
-
-**Alternatively, you can use the `--tls-skip` option to generate a self-signed certificate and key automatically. This is useful for testing or development purposes, but note that using self-signed certificates may expose your communication to security risks, such as man-in-the-middle attacks.**
 
 ### Client
 ```shell
