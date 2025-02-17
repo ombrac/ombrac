@@ -102,9 +102,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .init();
 
     let secret = blake3::hash(args.secret.as_bytes());
-    let ombrac_client = Client::new(*secret.as_bytes(), quic_from_args(&args).await?);
+    let ombrac_client = Client::new(
+        *secret.as_bytes(),
+        quic_from_args(&args).await.expect("Client failed to start"),
+    );
 
-    SocksServer::listen(args.socks, ombrac_client).await?;
+    SocksServer::listen(args.socks, ombrac_client)
+        .await
+        .expect("SOCKS server failed to start");
 
     Ok(())
 }
