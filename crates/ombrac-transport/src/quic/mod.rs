@@ -110,14 +110,13 @@ mod tests {
         let addr_str = listen_addr.to_string();
         let (cert_path, key_path) = CertificateGenerator::generate();
 
-        let server_conn =
-            server::Builder::new(addr_str.clone())
-                .with_tls_cert(cert_path.clone())
-                .with_tls_key(key_path.clone())
-                .with_enable_zero_rtt(zero_rtt)
-                .build()
-                .await
-                .expect("Failed to build server connection");
+        let server_conn = server::Builder::new(addr_str.clone())
+            .with_tls_cert(cert_path.clone())
+            .with_tls_key(key_path.clone())
+            .with_enable_zero_rtt(zero_rtt)
+            .build()
+            .await
+            .expect("Failed to build server connection");
 
         tokio::time::sleep(STARTUP_WAIT).await;
 

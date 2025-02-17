@@ -2,8 +2,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-
-
 use super::{Connection, Result, Stream};
 
 pub struct Builder {
@@ -101,8 +99,14 @@ impl Connection {
                         let key = super::load_private_key(&key_path)?;
                         (cert, key)
                     }
-                    (Some(_), None) => return Err("Private key must be provided when certificate is specified".into()),
-                    (None, _) => return Err("Certificate must be provided when TLS is enabled".into()),
+                    (Some(_), None) => {
+                        return Err(
+                            "Private key must be provided when certificate is specified".into()
+                        )
+                    }
+                    (None, _) => {
+                        return Err("Certificate must be provided when TLS is enabled".into())
+                    }
                 };
                 (cert, key)
             };

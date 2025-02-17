@@ -7,7 +7,7 @@ pub struct ClientBuilder {
     pub secret: Option<String>,
     pub socks: Option<String>,
     pub tls_cert: Option<String>,
-    pub tls_skip: Option<String>,
+    pub tls_skip: bool,
     pub server_name: Option<String>,
     pub server: Option<String>,
 }
@@ -28,8 +28,8 @@ impl ClientBuilder {
         self
     }
 
-    pub fn tls_skip(mut self, skip: String) -> Self {
-        self.tls_skip = Some(skip);
+    pub fn tls_skip(mut self, skip: bool) -> Self {
+        self.tls_skip = skip;
         self
     }
 
@@ -64,8 +64,8 @@ impl Client {
                 if let Some(cert) = opts.tls_cert {
                     args.extend_from_slice(&["--tls-cert".to_string(), cert]);
                 }
-                if let Some(skip) = opts.tls_skip {
-                    args.extend_from_slice(&["--tls-skip".to_string(), skip]);
+                if opts.tls_skip {
+                    args.extend_from_slice(&["--tls-skip".to_string()]);
                 }
                 if let Some(name) = opts.server_name {
                     args.extend_from_slice(&["--server-name".to_string(), name]);
@@ -94,7 +94,7 @@ pub struct ServerBuilder {
     pub listen: Option<String>,
     pub tls_cert: Option<String>,
     pub tls_key: Option<String>,
-    pub tls_skip: Option<String>
+    pub tls_skip: bool,
 }
 
 impl ServerBuilder {
@@ -118,8 +118,8 @@ impl ServerBuilder {
         self
     }
 
-    pub fn tls_skip(mut self, skip: String) -> Self {
-        self.tls_skip = Some(skip);
+    pub fn tls_skip(mut self, skip: bool) -> Self {
+        self.tls_skip = skip;
         self
     }
 
@@ -147,8 +147,8 @@ impl Server {
                 if let Some(tls_key) = opts.tls_key {
                     args.extend_from_slice(&["--tls-key".to_string(), tls_key]);
                 }
-                if let Some(skip) = opts.tls_skip {
-                    args.extend_from_slice(&["--tls-skip".to_string(), skip]);
+                if opts.tls_skip {
+                    args.extend_from_slice(&["--tls-skip".to_string()]);
                 }
                 args
             })

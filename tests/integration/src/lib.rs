@@ -92,7 +92,7 @@ mod tests {
                 .secret("secret".to_string())
                 .socks(client_socks_addr.to_string())
                 .server(server_addr.to_string())
-                .tls_skip("true".to_string())
+                .tls_skip(true)
                 .build();
 
             assert!(
@@ -118,14 +118,14 @@ mod tests {
             let _server = ServerBuilder::default()
                 .secret("secret".to_string())
                 .listen(server_addr.to_string())
-                .tls_skip("true".to_string())
+                .tls_skip(true)
                 .build();
 
             let _client = ClientBuilder::default()
                 .secret("secret".to_string())
                 .socks(client_socks_addr.to_string())
                 .server(server_addr.to_string())
-                .tls_skip("true".to_string())
+                .tls_skip(true)
                 .build();
 
             assert!(
