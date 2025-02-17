@@ -214,9 +214,9 @@ checksum = "8f68f53c83ab957f72c32642f3868eec03eb974d1fb82e453128456482613d36"
 
 [[package]]
 name = "blake3"
-version = "1.5.5"
+version = "1.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b8ee0c1824c4dea5b5f81736aff91bae041d2c07ee1192bec91054e10e3e601e"
+checksum = "1230237285e3e10cde447185e8975408ae24deaa67205ce684805c25bc0c7937"
 dependencies = [
  "arrayref",
  "arrayvec",
@@ -857,7 +857,7 @@ dependencies = [
 
 [[package]]
 name = "ombrac"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "bytes",
  "futures",
@@ -866,7 +866,7 @@ dependencies = [
 
 [[package]]
 name = "ombrac-client"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "blake3",
  "clap",
@@ -881,11 +881,11 @@ dependencies = [
 
 [[package]]
 name = "ombrac-macros"
-version = "0.3.1"
+version = "0.3.2"
 
 [[package]]
 name = "ombrac-server"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "blake3",
  "clap",
@@ -899,7 +899,7 @@ dependencies = [
 
 [[package]]
 name = "ombrac-transport"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "async-channel",
  "aws-lc-rs",
@@ -1456,7 +1456,7 @@ dependencies = [
 
 [[package]]
 name = "tests-integration"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "curl",
  "tests-support",
@@ -1464,7 +1464,7 @@ dependencies = [
 
 [[package]]
 name = "tests-support"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "rcgen",
 ]
