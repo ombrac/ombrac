@@ -169,7 +169,7 @@ impl Connection {
             Endpoint::server(server_config, config.listen.parse()?)?
         };
 
-        let (sender, receiver) = async_channel::bounded(8);
+        let (sender, receiver) = async_channel::unbounded();
 
         tokio::spawn(async move {
             use ombrac_macros::{try_or_break, try_or_return};
