@@ -17,9 +17,11 @@
 ### Releases
 Download the latest release from the [releases page](https://github.com/ombrac/ombrac/releases).
 
-### Homebrew
+
+
+### Build
 ```shell
-brew tap ombrac/tap && brew install ombrac
+cargo build --bin ombrac-client --bin ombrac-server --features binary
 ```
 
 ### Crates
@@ -27,10 +29,11 @@ brew tap ombrac/tap && brew install ombrac
 cargo install ombrac-client ombrac-server --features binary
 ```
 
-### Build
+### Homebrew
 ```shell
-cargo build --bin ombrac-client --bin ombrac-server --features binary
+brew tap ombrac/tap && brew install ombrac
 ```
+
 **NOTE**: On linux systems, [`aws-lc-rs`](https://github.com/aws/aws-lc-rs) will be used for cryptographic operations. A C compiler and CMake may be required on these systems for installation.
 
 ## Usage
