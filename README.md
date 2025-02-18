@@ -11,11 +11,18 @@
 [![Build Status][ci-badge]][ci-url]
 [![Build Status][release-badge]][release-url]
 
+
+
 ## Install
 ### Releases
 Download the latest release from the [releases page](https://github.com/ombrac/ombrac/releases).
 
-### [crate.io](https://crates.io/)
+### Homebrew
+```shell
+brew tap ombrac/tap && brew install ombrac
+```
+
+### Crates
 ```shell
 cargo install ombrac-client ombrac-server --features binary
 ```
