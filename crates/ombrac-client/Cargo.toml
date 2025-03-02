@@ -21,7 +21,9 @@ default = [
     "tracing"
 ]
 
-tracing = ["dep:tracing"]
+datagram = ["ombrac-transport/datagram"]
+
+tracing = ["dep:tracing", "ombrac-transport/tracing"]
 
 endpoint-default = ["endpoint-socks"]
 endpoint-socks = ["socks-lib"]
@@ -41,6 +43,7 @@ binary = [
 ombrac = { workspace = true }
 ombrac-macros = { workspace = true }
 ombrac-transport = { workspace = true }
+bytes = { workspace = true }
 tokio = { workspace = true, features = ["rt", "net", "sync", "io-util"] }
 clap = { workspace = true, features = ["std", "derive", "color", "help", "usage", "error-context", "suggestions"], optional = true }
 blake3 = { workspace = true, optional = true }
