@@ -53,51 +53,74 @@ impl<T: Transport> Server<T> {
     async fn handle_udp_associate(conn: impl Unreliable, secret: Secret) -> io::Result<()> {
         use std::net::SocketAddr;
         use tokio::net::UdpSocket;
+        use tokio::time::{timeout, Duration};
 
         const DEFAULT_BUFFER_SIZE: usize = 2 * 1024;
+        const RECV_TIMEOUT: Duration = Duration::from_secs(180);
 
         let local = SocketAddr::from(([0, 0, 0, 0, 0, 0, 0, 0], 0));
         let socket = UdpSocket::bind(local).await?;
-
         let sock_send = Arc::new(socket);
         let sock_recv = Arc::clone(&sock_send);
         let conn_send = Arc::new(conn);
         let conn_recv = Arc::clone(&conn_send);
 
-        let handle = tokio::spawn(async move {
+        let mut recv_handle = tokio::spawn(async move {
             let mut buf = [0u8; DEFAULT_BUFFER_SIZE];
-
             loop {
                 let (len, addr) = sock_recv.recv_from(&mut buf).await?;
-
                 let data = bytes::Bytes::copy_from_slice(&buf[..len]);
                 let packet = Packet::with(secret, addr, data);
-
-                if conn_send.send(packet.to_bytes()?).await.is_err() {
-                    break;
+                if let Err(e) = conn_send.send(packet.to_bytes()?).await {
+                    return Err(io::Error::other(e.to_string()));
                 }
             }
-
-            Ok::<(), io::Error>(())
         });
 
-        while let Ok(mut packet) = conn_recv.recv().await {
-            let packet = Packet::from_bytes(&mut packet)?;
+        let mut send_handle = tokio::spawn(async move {
+            loop {
+                let packet_result = timeout(RECV_TIMEOUT, conn_recv.recv()).await;
 
-            if packet.secret != secret {
-                return Err(io::Error::new(
-                    io::ErrorKind::PermissionDenied,
-                    "Secret does not match",
-                ));
-            };
+                let result = match packet_result {
+                    Ok(value) => value,
+                    Err(_) => return Ok(()), // UDP recv timeout
+                };
 
-            let target = packet.address.to_socket_addr().await?;
-            sock_send.send_to(&packet.data, target).await?;
+                match result {
+                    Ok(mut packet) => {
+                        let packet = Packet::from_bytes(&mut packet)?;
+                        if packet.secret != secret {
+                            return Err(io::Error::new(
+                                io::ErrorKind::PermissionDenied,
+                                "Secret does not match",
+                            ));
+                        };
+                        let target = packet.address.to_socket_addr().await?;
+                        sock_send.send_to(&packet.data, target).await?;
+                    }
+                    Err(e) => {
+                        return Err(io::Error::other(e.to_string()));
+                    }
+                }
+            }
+        });
+
+        let result = tokio::select! {
+            result = &mut recv_handle => {
+                send_handle.abort();
+                result
+            },
+            result = &mut send_handle => {
+                recv_handle.abort();
+                result
+            },
+        };
+
+        match result {
+            Ok(inner_result) => inner_result,
+            Err(e) if e.is_cancelled() => Ok(()),
+            Err(e) => Err(io::Error::new(io::ErrorKind::Other, e)),
         }
-
-        handle.abort();
-
-        Ok(())
     }
 
     pub async fn listen(self) -> io::Result<()> {
@@ -106,25 +129,29 @@ impl<T: Transport> Server<T> {
         let transport = Arc::new(self.transport);
 
         #[cfg(feature = "datagram")]
-        {
-            let unreliable_transport = transport.clone();
-            tokio::spawn(async move {
-                match unreliable_transport.unreliable().await {
-                    Ok(stream) => {
-                        tokio::spawn(async move {
-                            if let Err(_error) = Self::handle_unreliable(stream, secret).await {
-                                error!("{_error}");
-                            }
-                        });
-                    }
-                    Err(_error) => {
-                        error!("{}", _error);
-                    }
-                };
+        let datagram_handle = {
+            let transport = transport.clone();
+            let datagram_handle = tokio::spawn(async move {
+                loop {
+                    match transport.unreliable().await {
+                        Ok(stream) => {
+                            tokio::spawn(async move {
+                                if let Err(_error) = Self::handle_unreliable(stream, secret).await {
+                                    error!("{_error}");
+                                }
+                            });
+                        }
+                        Err(_error) => {
+                            error!("{_error}");
 
-                ()
+                            break;
+                        }
+                    };
+                }
             });
-        }
+
+            datagram_handle
+        };
 
         loop {
             match transport.reliable().await {
@@ -133,7 +160,12 @@ impl<T: Transport> Server<T> {
                         error!("{_error}");
                     }
                 }),
-                Err(err) => return Err(io::Error::other(err.to_string())),
+                Err(err) => {
+                    #[cfg(feature = "datagram")]
+                    datagram_handle.abort();
+
+                    return Err(io::Error::other(err.to_string()));
+                }
             };
         }
     }
