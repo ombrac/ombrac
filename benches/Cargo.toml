@@ -10,10 +10,6 @@ ombrac = { workspace = true }
 tests-support = { path = "../tests/support" }
 criterion = { workspace = true, features = ["default"] }
 
-[[bench]]
-name = "request"
-path = "request.rs"
-harness = false
 
 [lints]
 workspace = true
