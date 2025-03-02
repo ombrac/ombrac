@@ -1,68 +1,140 @@
-use std::io;
+use std::{io, sync::Arc};
 
-use ombrac::io::Streamable;
-use ombrac::request::{Address, Request};
-use ombrac::Provider;
-use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::net::TcpStream;
+use ombrac::prelude::*;
+use ombrac_transport::{Reliable, Transport};
+
+#[cfg(feature = "datagram")]
+use ombrac_transport::Unreliable;
 
 use ombrac_macros::error;
 
 pub struct Server<T> {
-    secret: [u8; 32],
+    secret: Secret,
     transport: T,
 }
 
-impl<Transport, Stream> Server<Transport>
-where
-    Transport: Provider<Item = Stream>,
-    Stream: AsyncRead + AsyncWrite + Unpin + Send + 'static,
-{
-    pub fn new(secret: [u8; 32], transport: Transport) -> Self {
+impl<T: Transport> Server<T> {
+    pub fn new(secret: Secret, transport: T) -> Self {
         Self { secret, transport }
     }
 
-    async fn handler(mut stream: Stream, secret: &[u8; 32]) -> io::Result<()> {
-        let request = Request::read(&mut stream).await?;
+    async fn handle_reliable(stream: impl Reliable, secret: Secret) -> io::Result<()> {
+        Self::handle_tcp_connect(stream, secret).await
+    }
 
-        match request {
-            Request::TcpConnect(client_auth, addr) => {
-                if &client_auth != secret {
-                    return Err(io::Error::new(
-                        io::ErrorKind::PermissionDenied,
-                        "Authentication failed",
-                    ));
-                }
-                Self::handle_tcp_connect(stream, addr).await?
-            }
-        };
+    #[cfg(feature = "datagram")]
+    async fn handle_unreliable(stream: impl Unreliable, secret: Secret) -> io::Result<()> {
+        Self::handle_udp_associate(stream, secret).await
+    }
+
+    #[inline]
+    async fn handle_tcp_connect(mut stream: impl Reliable, secret: Secret) -> io::Result<()> {
+        use tokio::net::TcpStream;
+
+        let request = Connect::from_async_read(&mut stream).await?;
+
+        if request.secret != secret {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "Secret does not match",
+            ));
+        }
+
+        let addr = request.address.to_socket_addr().await?;
+        let mut target = TcpStream::connect(addr).await?;
+
+        ombrac::io::util::copy_bidirectional(&mut stream, &mut target).await?;
 
         Ok(())
     }
 
-    async fn handle_tcp_connect<A>(mut stream: Stream, addr: A) -> io::Result<Stream>
-    where
-        A: Into<Address>,
-    {
-        let addr = addr.into().to_socket_addr().await?;
-        let mut outbound = TcpStream::connect(addr).await?;
+    #[cfg(feature = "datagram")]
+    #[inline]
+    async fn handle_udp_associate(conn: impl Unreliable, secret: Secret) -> io::Result<()> {
+        use std::net::SocketAddr;
+        use tokio::net::UdpSocket;
 
-        ombrac::io::util::copy_bidirectional(&mut stream, &mut outbound).await?;
+        const DEFAULT_BUFFER_SIZE: usize = 2 * 1024;
 
-        Ok(stream)
+        let local = SocketAddr::from(([0, 0, 0, 0, 0, 0, 0, 0], 0));
+        let socket = UdpSocket::bind(local).await?;
+
+        let sock_send = Arc::new(socket);
+        let sock_recv = Arc::clone(&sock_send);
+        let conn_send = Arc::new(conn);
+        let conn_recv = Arc::clone(&conn_send);
+
+        let handle = tokio::spawn(async move {
+            let mut buf = [0u8; DEFAULT_BUFFER_SIZE];
+
+            loop {
+                let (len, addr) = sock_recv.recv_from(&mut buf).await?;
+
+                let data = bytes::Bytes::copy_from_slice(&buf[..len]);
+                let packet = Packet::with(secret, addr, data);
+
+                if conn_send.send(packet.to_bytes()?).await.is_err() {
+                    break;
+                }
+            }
+
+            Ok::<(), io::Error>(())
+        });
+
+        while let Ok(mut packet) = conn_recv.recv().await {
+            let packet = Packet::from_bytes(&mut packet)?;
+
+            if packet.secret != secret {
+                return Err(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    "Secret does not match",
+                ));
+            };
+
+            let target = packet.address.to_socket_addr().await?;
+            sock_send.send_to(&packet.data, target).await?;
+        }
+
+        handle.abort();
+
+        Ok(())
     }
 
-    pub async fn listen(&self) -> io::Result<()> {
+    pub async fn listen(self) -> io::Result<()> {
         let secret = self.secret.clone();
 
-        while let Some(stream) = self.transport.fetch().await {
+        let transport = Arc::new(self.transport);
+
+        #[cfg(feature = "datagram")]
+        {
+            let unreliable_transport = transport.clone();
             tokio::spawn(async move {
-                if let Err(e) = Self::handler(stream, &secret).await {
-                    error!("{}", e);
-                }
+                match unreliable_transport.unreliable().await {
+                    Ok(stream) => {
+                        tokio::spawn(async move {
+                            if let Err(_error) = Self::handle_unreliable(stream, secret).await {
+                                error!("{_error}");
+                            }
+                        });
+                    }
+                    Err(_error) => {
+                        error!("{}", _error);
+                    }
+                };
+
+                ()
             });
         }
 
-        Ok(())
+        loop {
+            match transport.reliable().await {
+                Ok(stream) => tokio::spawn(async move {
+                    if let Err(_error) = Self::handle_reliable(stream, secret).await {
+                        error!("{_error}");
+                    }
+                }),
+                Err(err) => return Err(io::Error::other(err.to_string())),
+            };
+        }
     }
 }

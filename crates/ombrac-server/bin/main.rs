@@ -118,5 +118,5 @@ async fn quic_config_from_args(args: &Args) -> Result<Connection, Box<dyn Error>
         builder = builder.with_max_open_bidirectional_streams(value);
     }
 
-    Ok(builder.build().await?)
+    Ok(builder.build().await.unwrap())
 }
