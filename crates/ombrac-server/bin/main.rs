@@ -83,7 +83,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     #[cfg(feature = "tracing")]
     tracing::info!("Server listening on {}", args.listen);
 
-    ombrac_server.listen().await?;
+    ombrac_server.listen().await.expect("Server error");
 
     Ok(())
 }

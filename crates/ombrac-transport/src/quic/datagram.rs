@@ -129,8 +129,10 @@ impl Session {
 
                 if let Err(_error) = conn.send_datagram(buf.split().freeze()) {
                     error!(
-                        "Failed to send datagram for session {}: {}",
-                        session_id, _error
+                        "Failed to send datagram for session {}: {}, length: {}",
+                        session_id,
+                        _error,
+                        data.len()
                     );
                     break;
                 }
