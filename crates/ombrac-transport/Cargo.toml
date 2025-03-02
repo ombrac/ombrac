@@ -11,15 +11,19 @@ readme = "../../README.md"
 
 [features]
 default = ["quic"]
+
 tracing = ["dep:tracing"]
+
+datagram = ["dashmap"]
 
 quic = ["quinn", "rustls", "rustls-pemfile", "aws-lc-rs", "webpki-roots", "rcgen"]
 
 [dependencies]
 ombrac = { workspace = true }
 ombrac-macros = { workspace = true }
+bytes = { workspace = true }
 tokio = { workspace = true, features = ["rt", "sync"] }
-async-channel = { workspace = true }
+async-channel = { workspace = true, features = ["std"] }
 quinn = { workspace = true, features = ["runtime-tokio", "rustls-aws-lc-rs"], optional = true }
 rustls = { workspace = true, optional = true }
 aws-lc-rs = { workspace = true, features = ["bindgen"], optional = true }
@@ -27,9 +31,13 @@ webpki-roots = { workspace = true, optional = true }
 rustls-pemfile = { workspace = true, features = ["std"], optional = true }
 rcgen = { workspace = true, features = ["crypto", "aws_lc_rs"], optional = true }
 tracing = { workspace = true, optional = true }
+dashmap = { workspace = true, optional = true }
 
 [dev-dependencies]
 tests-support = { path = "../../tests/support" }
+
+ntest = { workspace = true }
+futures = { workspace = true, features = ["alloc"] }
 
 [lints]
 workspace = true
