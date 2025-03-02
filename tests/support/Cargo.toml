@@ -1,5 +1,6 @@
 [package]
 name = "tests-support"
+publish = false
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -10,6 +11,7 @@ keywords.workspace = true
 readme = "../../README.md"
 
 [dependencies]
+tokio = { workspace = true, features = ["full"] }
 rcgen = { workspace = true, features = ["pem", "crypto", "aws_lc_rs"] }
 
 [lints]

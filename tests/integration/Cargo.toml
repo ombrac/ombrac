@@ -1,5 +1,6 @@
 [package]
 name = "tests-integration"
+publish = false
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -10,8 +11,14 @@ keywords.workspace = true
 readme = "../../README.md"
 
 [dependencies]
+ombrac-client = { workspace = true, features = ["datagram"] }
+ombrac-server = { workspace = true, features = ["datagram"] }
+ombrac-transport = { workspace = true, features = ["quic", "datagram"] }
+
+tokio = { workspace = true, features = ["full"] }
 curl = { workspace = true }
 tests-support = { path = "../support" }
+
 
 [lints]
 workspace = true

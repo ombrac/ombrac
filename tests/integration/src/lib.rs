@@ -1,3 +1,5 @@
+mod quic;
+
 #[cfg(test)]
 mod tests {
     use std::{net::SocketAddr, time::Duration};
@@ -38,9 +40,9 @@ mod tests {
     // Integration test for Ombrac SOCKS + QUIC
     #[test]
     fn test_ombrac_socks_quic() {
-        let server_addr = find_available_udp_addr("127.0.0.1".parse().unwrap());
-        let client_socks_addr = find_available_tcp_addr("127.0.0.1".parse().unwrap());
-        let mock_http_server_addr = find_available_tcp_addr("127.0.0.1".parse().unwrap());
+        let server_addr = find_available_local_udp_addr();
+        let client_socks_addr = find_available_local_tcp_addr();
+        let mock_http_server_addr = find_available_local_tcp_addr();
         let (cert_path, key_path) = CertificateGenerator::generate();
 
         let _server = ServerBuilder::default()
@@ -76,9 +78,9 @@ mod tests {
 
         #[test]
         fn test_ombrac_socks_quic_tls_skip() {
-            let server_addr = find_available_udp_addr("127.0.0.1".parse().unwrap());
-            let client_socks_addr = find_available_tcp_addr("127.0.0.1".parse().unwrap());
-            let mock_http_server_addr = find_available_tcp_addr("127.0.0.1".parse().unwrap());
+            let server_addr = find_available_local_udp_addr();
+            let client_socks_addr = find_available_local_tcp_addr();
+            let mock_http_server_addr = find_available_local_tcp_addr();
             let (cert_path, key_path) = CertificateGenerator::generate();
 
             let _server = ServerBuilder::default()
@@ -111,9 +113,9 @@ mod tests {
 
         #[test]
         fn test_ombrac_socks_quic_tls_self_signed() {
-            let server_addr = find_available_udp_addr("127.0.0.1".parse().unwrap());
-            let client_socks_addr = find_available_tcp_addr("127.0.0.1".parse().unwrap());
-            let mock_http_server_addr = find_available_tcp_addr("127.0.0.1".parse().unwrap());
+            let server_addr = find_available_local_udp_addr();
+            let client_socks_addr = find_available_local_tcp_addr();
+            let mock_http_server_addr = find_available_local_tcp_addr();
 
             let _server = ServerBuilder::default()
                 .secret("secret".to_string())

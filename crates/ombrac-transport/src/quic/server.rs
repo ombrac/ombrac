@@ -171,19 +171,40 @@ impl Connection {
 
         let (sender, receiver) = async_channel::unbounded();
 
-        tokio::spawn(async move {
-            use ombrac_macros::{try_or_break, try_or_return};
+        #[cfg(feature = "datagram")]
+        let (datagram_sender, datagram_receiver) = async_channel::unbounded();
 
-            while let Some(connection) = endpoint.accept().await {
+        tokio::spawn(async move {
+            while let Some(connecting) = endpoint.accept().await {
                 let sender = sender.clone();
 
+                #[cfg(feature = "datagram")]
+                let datagram_sender = datagram_sender.clone();
+
                 tokio::spawn(async move {
-                    let connection = try_or_return!(connection.await);
+                    let connection = match connecting.await {
+                        Ok(conn) => conn,
+                        Err(_) => return,
+                    };
 
-                    loop {
-                        let stream = try_or_break!(connection.accept_bi().await);
+                    #[cfg(feature = "datagram")]
+                    {
+                        use crate::quic::datagram::Session;
 
-                        if sender.send(Stream(stream.0, stream.1)).await.is_err() {
+                        let conn = connection.clone();
+                        tokio::spawn(async move {
+                            let session = Session::with_server(conn);
+
+                            while let Some(datagram) = session.accept_bidirectional().await {
+                                if datagram_sender.send(datagram).await.is_err() {
+                                    break;
+                                }
+                            }
+                        });
+                    }
+
+                    while let Ok((send_stream, recv_stream)) = connection.accept_bi().await {
+                        if sender.send(Stream(send_stream, recv_stream)).await.is_err() {
                             break;
                         }
                     }
@@ -191,6 +212,10 @@ impl Connection {
             }
         });
 
-        Ok(Connection(receiver))
+        Ok(Connection(
+            receiver,
+            #[cfg(feature = "datagram")]
+            datagram_receiver,
+        ))
     }
 }

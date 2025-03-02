@@ -1,23 +1,6 @@
-use std::future::Future;
 use std::io;
 
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
-
-pub trait Streamable {
-    fn write<Stream>(self, stream: &mut Stream) -> impl Future<Output = io::Result<()>> + Send
-    where
-        Self: Into<Vec<u8>>,
-        Stream: AsyncWrite + Unpin + Send,
-    {
-        let bytes = self.into();
-        async move { stream.write_all(&bytes).await }
-    }
-
-    fn read<Stream>(stream: &mut Stream) -> impl Future<Output = io::Result<Self>> + Send
-    where
-        Self: Sized,
-        Stream: AsyncRead + Unpin + Send;
-}
 
 pub mod util {
     use tokio::sync::broadcast;

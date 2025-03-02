@@ -4,21 +4,33 @@ use std::{fs, io};
 use async_channel::Receiver;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
 
+use crate::Result;
+
 pub mod client;
 pub mod server;
 
-pub struct Connection(Receiver<Stream>);
+#[cfg(feature = "datagram")]
+mod datagram;
+
 pub struct Stream(quinn::SendStream, quinn::RecvStream);
 
-type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
+pub struct Connection(
+    Receiver<Stream>,
+    #[cfg(feature = "datagram")] Receiver<datagram::Datagram>,
+);
 
-impl ombrac::Provider for Connection {
-    type Item = Stream;
+impl crate::Transport for Connection {
+    async fn reliable(&self) -> crate::Result<impl crate::Reliable> {
+        self.0.recv().await.map_err(Into::into)
+    }
 
-    async fn fetch(&self) -> Option<Self::Item> {
-        self.0.recv().await.ok()
+    #[cfg(feature = "datagram")]
+    async fn unreliable(&self) -> crate::Result<impl crate::Unreliable> {
+        self.1.recv().await.map_err(Into::into)
     }
 }
+
+impl crate::Reliable for Stream {}
 
 fn load_certificates(path: &PathBuf) -> io::Result<Vec<CertificateDer<'static>>> {
     let cert_chain = fs::read(path)?;
@@ -89,18 +101,20 @@ mod impl_tokio_io {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{client, server, Connection, Stream};
+pub(crate) mod tests {
+    use crate::{Reliable, Transport};
+
+    use super::{client, server, Connection};
     use std::{net::SocketAddr, time::Duration};
     use tests_support::cert::CertificateGenerator;
-    use tests_support::net::find_available_udp_addr;
+    use tests_support::net::find_available_local_udp_addr;
 
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     const TIMEOUT: Duration = Duration::from_millis(300);
     const STARTUP_WAIT: Duration = Duration::from_millis(300);
 
-    async fn setup_connections(
+    pub async fn setup_connections(
         listen_addr: SocketAddr,
         zero_rtt: bool,
         enable_multiplexing: bool,
@@ -132,9 +146,8 @@ mod tests {
         (server_conn, client_conn)
     }
 
-    async fn fetch_stream(conn: &Connection) -> Stream {
-        use ombrac::Provider;
-        tokio::time::timeout(TIMEOUT, conn.fetch())
+    async fn fetch_stream(conn: &Connection) -> impl Reliable + '_ {
+        tokio::time::timeout(TIMEOUT, conn.reliable())
             .await
             .expect("Timed out waiting for stream")
             .expect("Failed to fetch stream")
@@ -142,7 +155,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_client_server_connection() {
-        let listen_addr = find_available_udp_addr("127.0.0.1".parse().unwrap());
+        let listen_addr = find_available_local_udp_addr();
         let (server_conn, client_conn) = setup_connections(listen_addr, false, false).await;
 
         let mut client_stream = fetch_stream(&client_conn).await;
@@ -157,7 +170,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_client_server_connection_zerortt() {
-        let listen_addr = find_available_udp_addr("127.0.0.1".parse().unwrap());
+        let listen_addr = find_available_local_udp_addr();
         let (server_conn, client_conn) = setup_connections(listen_addr, true, false).await;
 
         let mut client_stream = fetch_stream(&client_conn).await;
@@ -172,7 +185,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_multiplexed_streams() {
-        let listen_addr = find_available_udp_addr("127.0.0.1".parse().unwrap());
+        let listen_addr = find_available_local_udp_addr();
         let (server_conn, client_conn) = setup_connections(listen_addr, false, true).await;
 
         let mut client_stream1 = fetch_stream(&client_conn).await;
@@ -196,7 +209,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_bidirectional_data_exchange() {
-        let listen_addr = find_available_udp_addr("127.0.0.1".parse().unwrap());
+        let listen_addr = find_available_local_udp_addr();
         let (server_conn, client_conn) = setup_connections(listen_addr, false, false).await;
 
         let mut client_stream = fetch_stream(&client_conn).await;
