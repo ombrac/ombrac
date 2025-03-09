@@ -174,7 +174,7 @@ impl Connection {
         #[cfg(feature = "datagram")]
         let (datagram_sender, datagram_receiver) = async_channel::unbounded();
 
-        tokio::spawn(async move {
+        let handle = tokio::spawn(async move {
             while let Some(connecting) = endpoint.accept().await {
                 let sender = sender.clone();
 
@@ -212,10 +212,11 @@ impl Connection {
             }
         });
 
-        Ok(Connection(
-            receiver,
+        Ok(Connection {
+            handle,
+            stream: receiver,
             #[cfg(feature = "datagram")]
-            datagram_receiver,
-        ))
+            datagram: datagram_receiver,
+        })
     }
 }
