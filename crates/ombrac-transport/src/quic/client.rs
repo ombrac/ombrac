@@ -3,9 +3,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use ombrac_macros::try_or_break;
-use quinn::Connecting;
-
 use super::{Connection, Result, Stream};
 
 pub struct Builder {
@@ -234,43 +231,65 @@ impl Connection {
         let tcp_server_name = server_name.clone();
 
         let (sender, receiver) = async_channel::bounded(1);
-        tokio::spawn(async move {
-            use ombrac_macros::{try_or_break, try_or_continue};
-
-            'connection: loop {
-                let sender = sender.clone();
-                let connecting =
-                    try_or_continue!(tcp_endpoint.connect(server_address, &tcp_server_name));
-                let connection = try_or_continue!(connection(connecting, enable_zero_rtt).await);
-
-                'stream: loop {
-                    let stream = try_or_break!(connection.open_bi().await);
-
-                    if sender.send(Stream(stream.0, stream.1)).await.is_err() {
-                        break 'connection;
-                    }
-
-                    if !enable_connection_multiplexing {
-                        break 'stream;
-                    }
-                }
-            }
-        });
 
         #[cfg(feature = "datagram")]
-        let datagram_receiver = {
-            use crate::quic::datagram::Session;
+        let (datagram_sender, datagram_receiver) = async_channel::bounded(1);
 
-            let (datagram_sender, datagram_receiver) = async_channel::bounded(1);
+        let handle = tokio::spawn(async move {
+            use ombrac_macros::error;
 
             tokio::spawn(async move {
-                use ombrac_macros::try_or_continue;
+                'connection: loop {
+                    let connection = match connection(
+                        &tcp_endpoint,
+                        server_address,
+                        &tcp_server_name,
+                        enable_zero_rtt,
+                    )
+                    .await
+                    {
+                        Ok(value) => value,
+                        Err(_error) => {
+                            error!("{}", _error);
+                            continue 'connection;
+                        }
+                    };
+
+                    'stream: loop {
+                        let stream = match connection.open_bi().await {
+                            Ok(value) => value,
+                            Err(_error) => {
+                                error!("{}", _error);
+                                break 'stream;
+                            }
+                        };
+
+                        if sender.send(Stream(stream.0, stream.1)).await.is_err() {
+                            break 'connection;
+                        }
+
+                        if !enable_connection_multiplexing {
+                            break 'stream;
+                        }
+                    }
+                }
+            });
+
+            #[cfg(feature = "datagram")]
+            tokio::spawn(async move {
+                use crate::quic::datagram::Session;
 
                 'connection: loop {
-                    let connecting =
-                        try_or_continue!(endpoint.connect(server_address, &server_name));
                     let connection =
-                        try_or_continue!(connection(connecting, enable_zero_rtt).await);
+                        match connection(&endpoint, server_address, &server_name, enable_zero_rtt)
+                            .await
+                        {
+                            Ok(value) => value,
+                            Err(_error) => {
+                                error!("{}", _error);
+                                continue 'connection;
+                            }
+                        };
 
                     let session = Session::with_client(connection);
 
@@ -286,19 +305,26 @@ impl Connection {
                     }
                 }
             });
+        });
 
-            datagram_receiver
-        };
-
-        Ok(Connection(
-            receiver,
+        Ok(Connection {
+            handle,
+            stream: receiver,
             #[cfg(feature = "datagram")]
-            datagram_receiver,
-        ))
+            datagram: datagram_receiver,
+        })
     }
 }
 
-async fn connection(connecting: Connecting, enable_zero_rtt: bool) -> Result<quinn::Connection> {
+#[inline]
+async fn connection(
+    endpoint: &quinn::Endpoint,
+    addr: SocketAddr,
+    name: &str,
+    enable_zero_rtt: bool,
+) -> Result<quinn::Connection> {
+    let connecting = endpoint.connect(addr, name).map_err(|e| e.to_string())?;
+
     let connection = if enable_zero_rtt {
         match connecting.into_0rtt() {
             Ok((conn, zero_rtt_accepted)) => {

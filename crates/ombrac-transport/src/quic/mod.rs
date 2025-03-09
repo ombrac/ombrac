@@ -3,6 +3,7 @@ use std::{fs, io};
 
 use async_channel::Receiver;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
+use tokio::task::JoinHandle;
 
 use crate::Result;
 
@@ -14,19 +15,29 @@ mod datagram;
 
 pub struct Stream(quinn::SendStream, quinn::RecvStream);
 
-pub struct Connection(
-    Receiver<Stream>,
-    #[cfg(feature = "datagram")] Receiver<datagram::Datagram>,
-);
+pub struct Connection {
+    handle: JoinHandle<()>,
+    stream: Receiver<Stream>,
+    #[cfg(feature = "datagram")]
+    datagram: Receiver<datagram::Datagram>,
+}
+
+impl Drop for Connection {
+    fn drop(&mut self) {
+        self.handle.abort();
+    }
+}
 
 impl crate::Transport for Connection {
+    #[inline]
     async fn reliable(&self) -> crate::Result<impl crate::Reliable> {
-        self.0.recv().await.map_err(Into::into)
+        self.stream.recv().await.map_err(Into::into)
     }
 
     #[cfg(feature = "datagram")]
+    #[inline]
     async fn unreliable(&self) -> crate::Result<impl crate::Unreliable> {
-        self.1.recv().await.map_err(Into::into)
+        self.datagram.recv().await.map_err(Into::into)
     }
 }
 
