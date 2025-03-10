@@ -1,3 +1,4 @@
+use std::io;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 
@@ -220,12 +221,14 @@ impl Drop for Session {
 }
 
 impl crate::Unreliable for Datagram {
-    async fn recv(&self) -> crate::Result<Bytes> {
-        self.1.recv().await.map_err(Into::into)
+    #[inline]
+    async fn recv(&self) -> io::Result<Bytes> {
+        self.1.recv().await.map_err(|e| io::Error::other(e.to_string()))
     }
 
-    async fn send(&self, data: Bytes) -> crate::Result<()> {
-        self.0.send(data).await.map_err(Into::into)
+    #[inline]
+    async fn send(&self, data: Bytes) -> io::Result<()> {
+        self.0.send(data).await.map_err(|e| io::Error::other(e.to_string()))
     }
 }
 
@@ -251,7 +254,7 @@ mod tests {
         let (server, client) = create_pair().await;
 
         let server_handle = tokio::spawn(async move {
-            let datagram_1 = server.unreliable().await.unwrap();
+            let datagram_1 = server.accept_datagram().await.unwrap();
 
             assert_eq!(datagram_1.recv().await.unwrap(), Bytes::from("ping"));
 
@@ -260,7 +263,7 @@ mod tests {
         });
 
         // Test Client -> Server
-        let datagram_1 = client.unreliable().await.unwrap();
+        let datagram_1 = client.open_datagram().await.unwrap();
         datagram_1.send(Bytes::from("ping")).await.unwrap();
 
         assert_eq!(datagram_1.recv().await.unwrap(), Bytes::from("pong"));
@@ -274,7 +277,7 @@ mod tests {
         let (server, client) = create_pair().await;
 
         let server_handle = tokio::spawn(async move {
-            let datagram_1 = server.unreliable().await.unwrap();
+            let datagram_1 = server.accept_datagram().await.unwrap();
 
             let mut received = Vec::new();
             for _ in 0..1000 {
@@ -291,7 +294,7 @@ mod tests {
             );
         });
 
-        let datagram_1 = Arc::new(client.unreliable().await.unwrap());
+        let datagram_1 = Arc::new(client.accept_datagram().await.unwrap());
 
         let send_tasks = (0..1000).map(|i| {
             let dg = datagram_1.clone();
@@ -313,7 +316,7 @@ mod tests {
         let server_handle = tokio::spawn(async move {
             let mut received = Vec::new();
             for _ in 0..1000 {
-                let datagram = server.unreliable().await.unwrap();
+                let datagram = server.accept_datagram().await.unwrap();
                 let msg = datagram.recv().await.unwrap();
                 received.push(msg);
             }
@@ -332,7 +335,7 @@ mod tests {
             let client = client.clone();
             tokio::spawn(async move {
                 client
-                    .unreliable()
+                    .open_datagram()
                     .await
                     .unwrap()
                     .send(Bytes::from(format!("message{}", i)))

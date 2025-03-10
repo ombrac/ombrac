@@ -1,24 +1,28 @@
-use std::error::Error;
 use std::future::Future;
+use std::io;
 
 use tokio::io::{AsyncRead, AsyncWrite};
+
+#[cfg(feature = "datagram")]
+use bytes::Bytes;
 
 #[cfg(feature = "quic")]
 pub mod quic;
 
-pub trait Transport: Send + Sync + 'static {
-    fn reliable(&self) -> impl Future<Output = Result<impl Reliable>> + Send;
-
-    #[cfg(feature = "datagram")]
-    fn unreliable(&self) -> impl Future<Output = Result<impl Unreliable>> + Send;
-}
+pub trait Reliable: AsyncRead + AsyncWrite + Unpin + Send + 'static {}
 
 #[cfg(feature = "datagram")]
 pub trait Unreliable: Send + Sync + 'static {
-    fn send(&self, data: bytes::Bytes) -> impl Future<Output = Result<()>> + Send;
-    fn recv(&self) -> impl Future<Output = Result<bytes::Bytes>> + Send;
+    fn send(&self, data: Bytes) -> impl Future<Output = io::Result<()>> + Send;
+    fn recv(&self) -> impl Future<Output = io::Result<Bytes>> + Send;
 }
 
-pub trait Reliable: AsyncRead + AsyncWrite + Unpin + Send + 'static {}
+pub trait Transport: Send + Sync + 'static {
+    fn open_bidirectional(&self) -> impl Future<Output = io::Result<impl Reliable>> + Send;
+    fn accept_bidirectional(&self) -> impl Future<Output = io::Result<impl Reliable>> + Send;
 
-type Result<T> = std::result::Result<T, Box<dyn Error + Send + Sync>>;
+    #[cfg(feature = "datagram")]
+    fn open_datagram(&self) -> impl Future<Output = io::Result<impl Unreliable>> + Send;
+    #[cfg(feature = "datagram")]
+    fn accept_datagram(&self) -> impl Future<Output = io::Result<impl Unreliable>> + Send;
+}

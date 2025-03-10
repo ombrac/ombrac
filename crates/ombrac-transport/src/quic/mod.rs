@@ -5,7 +5,7 @@ use async_channel::Receiver;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
 use tokio::task::JoinHandle;
 
-use crate::Result;
+use crate::{Reliable, Transport};
 
 pub mod client;
 pub mod server;
@@ -14,6 +14,8 @@ pub mod server;
 mod datagram;
 
 pub struct Stream(quinn::SendStream, quinn::RecvStream);
+
+impl Reliable for Stream {}
 
 pub struct Connection {
     handle: JoinHandle<()>,
@@ -28,20 +30,26 @@ impl Drop for Connection {
     }
 }
 
-impl crate::Transport for Connection {
-    #[inline]
-    async fn reliable(&self) -> crate::Result<impl crate::Reliable> {
-        self.stream.recv().await.map_err(Into::into)
+// TODO
+impl Transport for Connection {
+    async fn accept_bidirectional(&self) -> io::Result<impl crate::Reliable> {
+        self.stream.recv().await.map_err(|e| io::Error::other(e.to_string()))
+    }
+
+    async fn open_bidirectional(&self) -> io::Result<impl crate::Reliable> {
+        self.stream.recv().await.map_err(|e| io::Error::other(e.to_string()))
     }
 
     #[cfg(feature = "datagram")]
-    #[inline]
-    async fn unreliable(&self) -> crate::Result<impl crate::Unreliable> {
-        self.datagram.recv().await.map_err(Into::into)
+    async fn accept_datagram(&self) -> io::Result<impl crate::Unreliable> {
+        self.datagram.recv().await.map_err(|e| io::Error::other(e.to_string()))
+    }
+
+    #[cfg(feature = "datagram")]
+    async fn open_datagram(&self) -> io::Result<impl crate::Unreliable> {
+        self.datagram.recv().await.map_err(|e| io::Error::other(e.to_string()))
     }
 }
-
-impl crate::Reliable for Stream {}
 
 fn load_certificates(path: &PathBuf) -> io::Result<Vec<CertificateDer<'static>>> {
     let cert_chain = fs::read(path)?;
@@ -158,7 +166,7 @@ pub(crate) mod tests {
     }
 
     async fn fetch_stream(conn: &Connection) -> impl Reliable + '_ {
-        tokio::time::timeout(TIMEOUT, conn.reliable())
+        tokio::time::timeout(TIMEOUT, conn.open_bidirectional())
             .await
             .expect("Timed out waiting for stream")
             .expect("Failed to fetch stream")
@@ -169,11 +177,11 @@ pub(crate) mod tests {
         let listen_addr = find_available_local_udp_addr();
         let (server_conn, client_conn) = setup_connections(listen_addr, false, false).await;
 
-        let mut client_stream = fetch_stream(&client_conn).await;
+        let mut client_stream = client_conn.open_bidirectional().await.unwrap();
         let msg = b"hello quic";
         client_stream.write_all(msg).await.unwrap();
 
-        let mut server_stream = fetch_stream(&server_conn).await;
+        let mut server_stream = server_conn.accept_bidirectional().await.unwrap();
         let mut buf = vec![0u8; msg.len()];
         server_stream.read_exact(&mut buf).await.unwrap();
         assert_eq!(&buf, msg);

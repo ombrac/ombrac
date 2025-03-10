@@ -1,9 +1,12 @@
-use std::net::SocketAddr;
+use std::{io, net::SocketAddr};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
+use std::io::Result;
 
-use super::{Connection, Result, Stream};
+use quinn::IdleTimeout;
+
+use super::{Connection, Stream};
 
 pub struct Builder {
     bind: Option<String>,
@@ -101,7 +104,7 @@ impl Builder {
                 let pos = self
                     .server_address
                     .rfind(':')
-                    .ok_or(format!("invalid server address {}", self.server_address))?;
+                    .ok_or(format!("invalid server address {}", self.server_address)).map_err(|e| io::Error::other(e.to_string()))?;
 
                 Ok(&self.server_address[..pos])
             }
@@ -112,7 +115,7 @@ impl Builder {
         use std::net::{Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6};
 
         let address = match &self.bind {
-            Some(value) => value.parse()?,
+            Some(value) => value.parse().map_err(|e| io::Error::other(e))?,
             None => match self.server_address().await? {
                 SocketAddr::V4(_) => SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0)),
                 SocketAddr::V6(_) => {
@@ -133,7 +136,7 @@ impl Builder {
             .ok_or(format!(
                 "failed to resolve server address '{}'",
                 self.server_address
-            ))?;
+            )).map_err(|e| io::Error::other(e.to_string()))?;
 
         Ok(address)
     }
@@ -175,7 +178,7 @@ impl Connection {
         let quic_config = {
             use quinn::crypto::rustls::QuicClientConfig;
 
-            let config = QuicClientConfig::try_from(tls_config)?;
+            let config = QuicClientConfig::try_from(tls_config).map_err(|e| io::Error::other(e.to_string()))?;
 
             config
         };
@@ -191,7 +194,7 @@ impl Connection {
             }
 
             if let Some(value) = config.max_idle_timeout {
-                transport.max_idle_timeout(Some(value.try_into()?));
+                transport.max_idle_timeout(Some(IdleTimeout::try_from(value).map_err(|e| io::Error::other(e.to_string()))?));
             }
 
             if let Some(value) = config.max_keep_alive_period {
@@ -199,7 +202,7 @@ impl Connection {
             }
 
             if let Some(value) = config.max_open_bidirectional_streams {
-                transport.max_concurrent_bidi_streams(VarInt::from_u64(value)?);
+                transport.max_concurrent_bidi_streams(VarInt::from_u64(value).map_err(|e| io::Error::other(e.to_string()))?);
             }
 
             transport.congestion_controller_factory(Arc::new(congestion));
@@ -323,13 +326,13 @@ async fn connection(
     name: &str,
     enable_zero_rtt: bool,
 ) -> Result<quinn::Connection> {
-    let connecting = endpoint.connect(addr, name).map_err(|e| e.to_string())?;
+    let connecting = endpoint.connect(addr, name).map_err(|e| io::Error::other(e.to_string()))?;
 
     let connection = if enable_zero_rtt {
         match connecting.into_0rtt() {
             Ok((conn, zero_rtt_accepted)) => {
                 if !zero_rtt_accepted.await {
-                    return Err("Zero rtt not accepted".into());
+                    return Err(io::Error::other("Zero rtt not accepted"));
                 }
 
                 conn
