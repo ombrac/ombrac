@@ -113,7 +113,7 @@ pub(crate) mod tests {
     ) -> (Connection, Connection) {
         tokio::time::sleep(STARTUP_WAIT).await;
 
-        let addr_str = listen_addr.to_string();
+        let addr_str = listen_addr;
         let (cert_path, key_path) = CertificateGenerator::generate();
 
         let server_conn = server::Builder::new(addr_str.clone())
@@ -126,8 +126,7 @@ pub(crate) mod tests {
 
         tokio::time::sleep(STARTUP_WAIT).await;
 
-        let client_conn = client::Builder::new(addr_str)
-            .with_server_name("localhost".to_string())
+        let client_conn = client::Builder::new(addr_str, "localhost")
             .with_tls_cert(cert_path.clone())
             .with_enable_zero_rtt(zero_rtt)
             .with_enable_connection_multiplexing(enable_multiplexing)

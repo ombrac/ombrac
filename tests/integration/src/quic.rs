@@ -23,7 +23,7 @@ mod tests_transport_quic {
         let tcp_server_handle = tcp_server.start().await.unwrap();
 
         tokio::spawn(async move {
-            let server = QuicServerBuilder::new(server_addr.to_string())
+            let server = QuicServerBuilder::new(server_addr)
                 .with_tls_skip(true)
                 .build()
                 .await
@@ -33,7 +33,7 @@ mod tests_transport_quic {
 
         tokio::time::sleep(Duration::from_millis(500)).await;
 
-        let client = QuicClientBuilder::new(server_addr.to_string())
+        let client = QuicClientBuilder::new(server_addr, "localhost")
             .with_tls_skip(true)
             .build()
             .await
@@ -67,7 +67,7 @@ mod tests_transport_quic {
         let server_addr = find_available_local_udp_addr();
 
         tokio::spawn(async move {
-            let server = QuicServerBuilder::new(server_addr.to_string())
+            let server = QuicServerBuilder::new(server_addr)
                 .with_tls_skip(true)
                 .build()
                 .await
@@ -78,7 +78,7 @@ mod tests_transport_quic {
 
         tokio::time::sleep(Duration::from_millis(500)).await;
 
-        let client = QuicClientBuilder::new(server_addr.to_string())
+        let client = QuicClientBuilder::new(server_addr, "localhost")
             .with_tls_skip(true)
             .build()
             .await

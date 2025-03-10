@@ -1,4 +1,5 @@
 use std::io::Result;
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 use std::{io, path::PathBuf};
@@ -8,7 +9,7 @@ use quinn::IdleTimeout;
 use super::{stream::Stream, Connection};
 
 pub struct Builder {
-    listen: String,
+    listen: SocketAddr,
 
     tls_key: Option<PathBuf>,
     tls_cert: Option<PathBuf>,
@@ -23,9 +24,12 @@ pub struct Builder {
 }
 
 impl Builder {
-    pub fn new(listen: String) -> Self {
+    pub fn new<A>(addr: A) -> Self
+    where
+        A: Into<SocketAddr>,
+    {
         Builder {
-            listen,
+            listen: addr.into(),
             tls_cert: None,
             tls_key: None,
             tls_skip: false,
@@ -177,10 +181,7 @@ impl Connection {
         let endpoint = {
             use quinn::Endpoint;
 
-            Endpoint::server(
-                server_config,
-                config.listen.parse().map_err(|_e| io::Error::other(""))?,
-            )?
+            Endpoint::server(server_config, config.listen)?
         };
 
         let (sender, receiver) = async_channel::unbounded();
