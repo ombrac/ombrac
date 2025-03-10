@@ -311,7 +311,7 @@ async fn connection(
         match connecting.into_0rtt() {
             Ok((conn, zero_rtt_accepted)) => {
                 if !zero_rtt_accepted.await {
-                    return Err(io::Error::other("Zero rtt not accepted"));
+                    return Err(io::Error::other("Zero RTT not accepted"));
                 }
 
                 conn
