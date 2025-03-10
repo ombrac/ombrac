@@ -1,11 +1,11 @@
-use std::{io, path::PathBuf};
-use std::sync::Arc;
 use std::io::Result;
+use std::sync::Arc;
 use std::time::Duration;
+use std::{io, path::PathBuf};
 
 use quinn::IdleTimeout;
 
-use super::{Connection, stream::Stream};
+use super::{stream::Stream, Connection};
 
 pub struct Builder {
     listen: String,
@@ -103,14 +103,14 @@ impl Connection {
                         (cert, key)
                     }
                     (Some(_), None) => {
-                        return Err(
-                            io::Error::other("Private key must be provided when certificate is specified")
-                        )
+                        return Err(io::Error::other(
+                            "Private key must be provided when certificate is specified",
+                        ))
                     }
                     (None, _) => {
-                        return Err(
-                            io::Error::other("Certificate must be provided when TLS is enabled")
-                        )
+                        return Err(io::Error::other(
+                            "Certificate must be provided when TLS is enabled",
+                        ))
                     }
                 };
                 (cert, key)
@@ -118,7 +118,8 @@ impl Connection {
 
             let mut tls_config = ServerConfig::builder()
                 .with_no_client_auth()
-                .with_single_cert(cert, key).map_err(|e| io::Error::other(e.to_string()))?;
+                .with_single_cert(cert, key)
+                .map_err(|e| io::Error::other(e.to_string()))?;
 
             tls_config.alpn_protocols = [b"h3"].iter().map(|&x| x.into()).collect();
 
@@ -133,7 +134,8 @@ impl Connection {
         let quic_config = {
             use quinn::crypto::rustls::QuicServerConfig;
 
-            let config = QuicServerConfig::try_from(tls_config).map_err(|e| io::Error::other(e.to_string()))?;
+            let config = QuicServerConfig::try_from(tls_config)
+                .map_err(|e| io::Error::other(e.to_string()))?;
 
             config
         };
@@ -149,7 +151,9 @@ impl Connection {
             }
 
             if let Some(value) = config.max_idle_timeout {
-                transport.max_idle_timeout(Some(IdleTimeout::try_from(value).map_err(|e| io::Error::other(e.to_string()))?));
+                transport.max_idle_timeout(Some(
+                    IdleTimeout::try_from(value).map_err(|e| io::Error::other(e.to_string()))?,
+                ));
             }
 
             if let Some(value) = config.max_keep_alive_period {
@@ -157,7 +161,9 @@ impl Connection {
             }
 
             if let Some(value) = config.max_open_bidirectional_streams {
-                transport.max_concurrent_bidi_streams(VarInt::from_u64(value).map_err(|e| io::Error::other(e.to_string()))?);
+                transport.max_concurrent_bidi_streams(
+                    VarInt::from_u64(value).map_err(|e| io::Error::other(e.to_string()))?,
+                );
             }
 
             transport.congestion_controller_factory(Arc::new(congestion));
@@ -171,7 +177,10 @@ impl Connection {
         let endpoint = {
             use quinn::Endpoint;
 
-            Endpoint::server(server_config, config.listen.parse().map_err( |_e| io::Error::other(""))?)?
+            Endpoint::server(
+                server_config,
+                config.listen.parse().map_err(|_e| io::Error::other(""))?,
+            )?
         };
 
         let (sender, receiver) = async_channel::unbounded();

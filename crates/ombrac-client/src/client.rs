@@ -1,7 +1,7 @@
 use std::io;
 
 use ombrac::prelude::*;
-use ombrac_transport::{Reliable, Initiator};
+use ombrac_transport::{Initiator, Reliable};
 
 #[cfg(feature = "datagram")]
 use ombrac_transport::Unreliable;

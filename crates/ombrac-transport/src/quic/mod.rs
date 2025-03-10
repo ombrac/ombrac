@@ -18,7 +18,6 @@ use crate::{Acceptor, Initiator};
 use self::datagram::Datagram;
 use self::stream::Stream;
 
-
 pub struct Connection {
     handle: JoinHandle<()>,
     #[cfg(feature = "datagram")]
@@ -34,23 +33,35 @@ impl Drop for Connection {
 
 impl Acceptor for Connection {
     async fn accept_bidirectional(&self) -> io::Result<impl crate::Reliable> {
-        self.stream.recv().await.map_err(|e| io::Error::other(e.to_string()))
+        self.stream
+            .recv()
+            .await
+            .map_err(|e| io::Error::other(e.to_string()))
     }
 
     #[cfg(feature = "datagram")]
     async fn accept_datagram(&self) -> io::Result<impl crate::Unreliable> {
-        self.datagram.recv().await.map_err(|e| io::Error::other(e.to_string()))
+        self.datagram
+            .recv()
+            .await
+            .map_err(|e| io::Error::other(e.to_string()))
     }
 }
 
 impl Initiator for Connection {
     async fn open_bidirectional(&self) -> io::Result<impl crate::Reliable> {
-        self.stream.recv().await.map_err(|e| io::Error::other(e.to_string()))
+        self.stream
+            .recv()
+            .await
+            .map_err(|e| io::Error::other(e.to_string()))
     }
 
     #[cfg(feature = "datagram")]
     async fn open_datagram(&self) -> io::Result<impl crate::Unreliable> {
-        self.datagram.recv().await.map_err(|e| io::Error::other(e.to_string()))
+        self.datagram
+            .recv()
+            .await
+            .map_err(|e| io::Error::other(e.to_string()))
     }
 }
 
@@ -83,7 +94,7 @@ fn load_private_key(path: &PathBuf) -> io::Result<PrivateKeyDer<'static>> {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use crate::{Reliable, Acceptor, Initiator};
+    use crate::{Acceptor, Initiator, Reliable};
 
     use super::{client, server, Connection};
     use std::{net::SocketAddr, time::Duration};

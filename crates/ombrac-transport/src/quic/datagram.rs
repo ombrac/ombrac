@@ -223,12 +223,18 @@ impl Drop for Session {
 impl crate::Unreliable for Datagram {
     #[inline]
     async fn recv(&self) -> io::Result<Bytes> {
-        self.1.recv().await.map_err(|e| io::Error::other(e.to_string()))
+        self.1
+            .recv()
+            .await
+            .map_err(|e| io::Error::other(e.to_string()))
     }
 
     #[inline]
     async fn send(&self, data: Bytes) -> io::Result<()> {
-        self.0.send(data).await.map_err(|e| io::Error::other(e.to_string()))
+        self.0
+            .send(data)
+            .await
+            .map_err(|e| io::Error::other(e.to_string()))
     }
 }
 
@@ -239,7 +245,7 @@ mod tests {
     use bytes::Bytes;
     use tests_support::net::find_available_local_udp_addr;
 
-    use crate::{Initiator, Acceptor, Unreliable};
+    use crate::{Acceptor, Initiator, Unreliable};
 
     use crate::quic::tests::setup_connections;
 

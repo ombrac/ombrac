@@ -1,7 +1,7 @@
 use std::{io, sync::Arc};
 
 use ombrac::prelude::*;
-use ombrac_transport::{Reliable, Acceptor};
+use ombrac_transport::{Acceptor, Reliable};
 
 #[cfg(feature = "datagram")]
 use ombrac_transport::Unreliable;

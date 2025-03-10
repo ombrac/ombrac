@@ -1,11 +1,8 @@
-use quinn::{SendStream, RecvStream};
+use quinn::{RecvStream, SendStream};
 
 use crate::Reliable;
 
-pub(crate) struct Stream(
-    pub(crate) SendStream,
-    pub(crate) RecvStream
-);
+pub(crate) struct Stream(pub(crate) SendStream, pub(crate) RecvStream);
 
 impl Reliable for Stream {}
 
