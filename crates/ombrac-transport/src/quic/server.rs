@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use quinn::IdleTimeout;
 
-use super::{Connection, Stream};
+use super::{Connection, stream::Stream};
 
 pub struct Builder {
     listen: String,

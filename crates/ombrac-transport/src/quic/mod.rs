@@ -1,3 +1,10 @@
+pub mod client;
+pub mod server;
+
+#[cfg(feature = "datagram")]
+mod datagram;
+mod stream;
+
 use std::path::PathBuf;
 use std::{fs, io};
 
@@ -5,23 +12,18 @@ use async_channel::Receiver;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
 use tokio::task::JoinHandle;
 
-use crate::{Reliable, Transport};
-
-pub mod client;
-pub mod server;
+use crate::{Acceptor, Initiator};
 
 #[cfg(feature = "datagram")]
-mod datagram;
+use self::datagram::Datagram;
+use self::stream::Stream;
 
-pub struct Stream(quinn::SendStream, quinn::RecvStream);
-
-impl Reliable for Stream {}
 
 pub struct Connection {
     handle: JoinHandle<()>,
-    stream: Receiver<Stream>,
     #[cfg(feature = "datagram")]
-    datagram: Receiver<datagram::Datagram>,
+    datagram: Receiver<Datagram>,
+    stream: Receiver<Stream>,
 }
 
 impl Drop for Connection {
@@ -30,19 +32,20 @@ impl Drop for Connection {
     }
 }
 
-// TODO
-impl Transport for Connection {
+impl Acceptor for Connection {
     async fn accept_bidirectional(&self) -> io::Result<impl crate::Reliable> {
-        self.stream.recv().await.map_err(|e| io::Error::other(e.to_string()))
-    }
-
-    async fn open_bidirectional(&self) -> io::Result<impl crate::Reliable> {
         self.stream.recv().await.map_err(|e| io::Error::other(e.to_string()))
     }
 
     #[cfg(feature = "datagram")]
     async fn accept_datagram(&self) -> io::Result<impl crate::Unreliable> {
         self.datagram.recv().await.map_err(|e| io::Error::other(e.to_string()))
+    }
+}
+
+impl Initiator for Connection {
+    async fn open_bidirectional(&self) -> io::Result<impl crate::Reliable> {
+        self.stream.recv().await.map_err(|e| io::Error::other(e.to_string()))
     }
 
     #[cfg(feature = "datagram")]
@@ -78,50 +81,9 @@ fn load_private_key(path: &PathBuf) -> io::Result<PrivateKeyDer<'static>> {
     Ok(result)
 }
 
-mod impl_tokio_io {
-    use std::io;
-    use std::pin::Pin;
-    use std::task::{Context, Poll};
-
-    use tokio::io::{AsyncRead, AsyncWrite};
-
-    use super::Stream;
-
-    impl AsyncRead for Stream {
-        fn poll_read(
-            self: Pin<&mut Self>,
-            cx: &mut Context<'_>,
-            buf: &mut tokio::io::ReadBuf<'_>,
-        ) -> Poll<io::Result<()>> {
-            AsyncRead::poll_read(Pin::new(&mut self.get_mut().1), cx, buf)
-        }
-    }
-
-    impl AsyncWrite for Stream {
-        fn poll_write(
-            self: Pin<&mut Self>,
-            cx: &mut Context<'_>,
-            buf: &[u8],
-        ) -> Poll<Result<usize, io::Error>> {
-            AsyncWrite::poll_write(Pin::new(&mut self.get_mut().0), cx, buf)
-        }
-
-        fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
-            AsyncWrite::poll_flush(Pin::new(&mut self.get_mut().0), cx)
-        }
-
-        fn poll_shutdown(
-            self: Pin<&mut Self>,
-            cx: &mut Context<'_>,
-        ) -> Poll<Result<(), io::Error>> {
-            AsyncWrite::poll_shutdown(Pin::new(&mut self.get_mut().0), cx)
-        }
-    }
-}
-
 #[cfg(test)]
 pub(crate) mod tests {
-    use crate::{Reliable, Transport};
+    use crate::{Reliable, Acceptor, Initiator};
 
     use super::{client, server, Connection};
     use std::{net::SocketAddr, time::Duration};

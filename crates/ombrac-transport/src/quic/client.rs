@@ -6,7 +6,7 @@ use std::io::Result;
 
 use quinn::IdleTimeout;
 
-use super::{Connection, Stream};
+use super::{Connection, stream::Stream};
 
 pub struct Builder {
     bind: Option<String>,

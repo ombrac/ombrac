@@ -239,11 +239,11 @@ mod tests {
     use bytes::Bytes;
     use tests_support::net::find_available_local_udp_addr;
 
-    use crate::{Transport, Unreliable};
+    use crate::{Initiator, Acceptor, Unreliable};
 
     use crate::quic::tests::setup_connections;
 
-    async fn create_pair() -> (impl Transport, impl Transport) {
+    async fn create_pair() -> (impl Acceptor, impl Initiator) {
         let listen_addr = find_available_local_udp_addr();
         setup_connections(listen_addr, false, false).await
     }
@@ -294,7 +294,7 @@ mod tests {
             );
         });
 
-        let datagram_1 = Arc::new(client.accept_datagram().await.unwrap());
+        let datagram_1 = Arc::new(client.open_datagram().await.unwrap());
 
         let send_tasks = (0..1000).map(|i| {
             let dg = datagram_1.clone();

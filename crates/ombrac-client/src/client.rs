@@ -1,7 +1,7 @@
 use std::io;
 
 use ombrac::prelude::*;
-use ombrac_transport::{Reliable, Transport};
+use ombrac_transport::{Reliable, Initiator};
 
 #[cfg(feature = "datagram")]
 use ombrac_transport::Unreliable;
@@ -11,7 +11,7 @@ pub struct Client<T> {
     transport: T,
 }
 
-impl<T: Transport> Client<T> {
+impl<T: Initiator> Client<T> {
     pub fn new(secret: Secret, transport: T) -> Self {
         Self { secret, transport }
     }

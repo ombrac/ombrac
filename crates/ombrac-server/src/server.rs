@@ -1,7 +1,7 @@
 use std::{io, sync::Arc};
 
 use ombrac::prelude::*;
-use ombrac_transport::{Reliable, Transport};
+use ombrac_transport::{Reliable, Acceptor};
 
 #[cfg(feature = "datagram")]
 use ombrac_transport::Unreliable;
@@ -13,7 +13,7 @@ pub struct Server<T> {
     transport: T,
 }
 
-impl<T: Transport> Server<T> {
+impl<T: Acceptor> Server<T> {
     pub fn new(secret: Secret, transport: T) -> Self {
         Self { secret, transport }
     }
