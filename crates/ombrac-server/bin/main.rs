@@ -1,4 +1,5 @@
 use std::error::Error;
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -22,7 +23,7 @@ struct Args {
         help_heading = "Transport QUIC",
         value_name = "ADDR"
     )]
-    listen: String,
+    listen: SocketAddr,
 
     /// Path to the TLS certificate file for secure connections
     #[clap(long, help_heading = "Transport QUIC", value_name = "FILE")]
@@ -78,7 +79,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .init();
 
     let secret = blake3::hash(args.secret.as_bytes());
-    let ombrac_server = Server::new(*secret.as_bytes(), quic_config_from_args(&args).await?);
+    let ombrac_server = Server::new(
+        *secret.as_bytes(),
+        quic_config_from_args(&args)
+            .await
+            .expect("QUIC server startup failed"),
+    );
 
     #[cfg(feature = "tracing")]
     tracing::info!("Server listening on {}", args.listen);
@@ -89,7 +95,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 }
 
 async fn quic_config_from_args(args: &Args) -> Result<Connection, Box<dyn Error>> {
-    let mut builder = Builder::new(args.listen.to_string());
+    let mut builder = Builder::new(args.listen);
 
     if let Some(value) = &args.tls_cert {
         builder = builder.with_tls_cert(value.clone())
@@ -98,9 +104,6 @@ async fn quic_config_from_args(args: &Args) -> Result<Connection, Box<dyn Error>
     if let Some(value) = &args.tls_key {
         builder = builder.with_tls_key(value.clone())
     }
-
-    builder = builder.with_tls_skip(args.tls_skip);
-    builder = builder.with_enable_zero_rtt(args.enable_zero_rtt);
 
     if let Some(value) = args.congestion_initial_window {
         builder = builder.with_congestion_initial_window(value);
@@ -118,5 +121,8 @@ async fn quic_config_from_args(args: &Args) -> Result<Connection, Box<dyn Error>
         builder = builder.with_max_open_bidirectional_streams(value);
     }
 
-    Ok(builder.build().await.unwrap())
+    builder = builder.with_tls_skip(args.tls_skip);
+    builder = builder.with_enable_zero_rtt(args.enable_zero_rtt);
+
+    Ok(builder.build().await?)
 }
