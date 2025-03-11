@@ -1,7 +1,7 @@
 use std::io;
 
 use ombrac::prelude::*;
-use ombrac_transport::{Reliable, Transport};
+use ombrac_transport::{Initiator, Reliable};
 
 #[cfg(feature = "datagram")]
 use ombrac_transport::Unreliable;
@@ -11,7 +11,7 @@ pub struct Client<T> {
     transport: T,
 }
 
-impl<T: Transport> Client<T> {
+impl<T: Initiator> Client<T> {
     pub fn new(secret: Secret, transport: T) -> Self {
         Self { secret, transport }
     }
@@ -22,7 +22,7 @@ impl<T: Transport> Client<T> {
     {
         use tokio::io::AsyncWriteExt;
 
-        let mut stream = self.reliable().await?;
+        let mut stream = self.transport.open_bidirectional().await?;
         let request = Connect::with(self.secret, addr).to_bytes()?;
 
         stream.write_all(&request).await?;
@@ -32,26 +32,9 @@ impl<T: Transport> Client<T> {
 
     #[cfg(feature = "datagram")]
     pub async fn udp_associate(&self) -> io::Result<Datagram<impl Unreliable + '_>> {
-        let stream = self.unreliable().await?;
+        let stream = self.transport.open_datagram().await?;
 
         Ok(Datagram::with(self.secret, stream))
-    }
-
-    #[inline]
-    async fn reliable(&self) -> io::Result<impl Reliable + '_> {
-        match self.transport.reliable().await {
-            Ok(stream) => Ok(stream),
-            Err(error) => Err(io::Error::other(error.to_string())),
-        }
-    }
-
-    #[cfg(feature = "datagram")]
-    #[inline]
-    async fn unreliable(&self) -> io::Result<impl Unreliable + '_> {
-        match self.transport.unreliable().await {
-            Ok(stream) => Ok(stream),
-            Err(error) => Err(io::Error::other(error.to_string())),
-        }
     }
 }
 

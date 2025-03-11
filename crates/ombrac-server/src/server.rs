@@ -1,7 +1,7 @@
 use std::{io, sync::Arc};
 
 use ombrac::prelude::*;
-use ombrac_transport::{Reliable, Transport};
+use ombrac_transport::{Acceptor, Reliable};
 
 #[cfg(feature = "datagram")]
 use ombrac_transport::Unreliable;
@@ -13,7 +13,7 @@ pub struct Server<T> {
     transport: T,
 }
 
-impl<T: Transport> Server<T> {
+impl<T: Acceptor> Server<T> {
     pub fn new(secret: Secret, transport: T) -> Self {
         Self { secret, transport }
     }
@@ -133,7 +133,7 @@ impl<T: Transport> Server<T> {
             let transport = transport.clone();
             let datagram_handle = tokio::spawn(async move {
                 loop {
-                    match transport.unreliable().await {
+                    match transport.accept_datagram().await {
                         Ok(stream) => {
                             tokio::spawn(async move {
                                 if let Err(_error) = Self::handle_unreliable(stream, secret).await {
@@ -154,7 +154,7 @@ impl<T: Transport> Server<T> {
         };
 
         loop {
-            match transport.reliable().await {
+            match transport.accept_bidirectional().await {
                 Ok(stream) => tokio::spawn(async move {
                     if let Err(_error) = Self::handle_reliable(stream, secret).await {
                         error!("{_error}");

@@ -1,3 +1,10 @@
+pub mod client;
+pub mod server;
+
+#[cfg(feature = "datagram")]
+mod datagram;
+mod stream;
+
 use std::path::PathBuf;
 use std::{fs, io};
 
@@ -5,21 +12,17 @@ use async_channel::Receiver;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
 use tokio::task::JoinHandle;
 
-use crate::Result;
-
-pub mod client;
-pub mod server;
+use crate::{Acceptor, Initiator};
 
 #[cfg(feature = "datagram")]
-mod datagram;
-
-pub struct Stream(quinn::SendStream, quinn::RecvStream);
+use self::datagram::Datagram;
+use self::stream::Stream;
 
 pub struct Connection {
     handle: JoinHandle<()>,
-    stream: Receiver<Stream>,
     #[cfg(feature = "datagram")]
-    datagram: Receiver<datagram::Datagram>,
+    datagram: Receiver<Datagram>,
+    stream: Receiver<Stream>,
 }
 
 impl Drop for Connection {
@@ -28,20 +31,39 @@ impl Drop for Connection {
     }
 }
 
-impl crate::Transport for Connection {
-    #[inline]
-    async fn reliable(&self) -> crate::Result<impl crate::Reliable> {
-        self.stream.recv().await.map_err(Into::into)
+impl Acceptor for Connection {
+    async fn accept_bidirectional(&self) -> io::Result<impl crate::Reliable> {
+        self.stream
+            .recv()
+            .await
+            .map_err(|e| io::Error::other(e.to_string()))
     }
 
     #[cfg(feature = "datagram")]
-    #[inline]
-    async fn unreliable(&self) -> crate::Result<impl crate::Unreliable> {
-        self.datagram.recv().await.map_err(Into::into)
+    async fn accept_datagram(&self) -> io::Result<impl crate::Unreliable> {
+        self.datagram
+            .recv()
+            .await
+            .map_err(|e| io::Error::other(e.to_string()))
     }
 }
 
-impl crate::Reliable for Stream {}
+impl Initiator for Connection {
+    async fn open_bidirectional(&self) -> io::Result<impl crate::Reliable> {
+        self.stream
+            .recv()
+            .await
+            .map_err(|e| io::Error::other(e.to_string()))
+    }
+
+    #[cfg(feature = "datagram")]
+    async fn open_datagram(&self) -> io::Result<impl crate::Unreliable> {
+        self.datagram
+            .recv()
+            .await
+            .map_err(|e| io::Error::other(e.to_string()))
+    }
+}
 
 fn load_certificates(path: &PathBuf) -> io::Result<Vec<CertificateDer<'static>>> {
     let cert_chain = fs::read(path)?;
@@ -70,50 +92,9 @@ fn load_private_key(path: &PathBuf) -> io::Result<PrivateKeyDer<'static>> {
     Ok(result)
 }
 
-mod impl_tokio_io {
-    use std::io;
-    use std::pin::Pin;
-    use std::task::{Context, Poll};
-
-    use tokio::io::{AsyncRead, AsyncWrite};
-
-    use super::Stream;
-
-    impl AsyncRead for Stream {
-        fn poll_read(
-            self: Pin<&mut Self>,
-            cx: &mut Context<'_>,
-            buf: &mut tokio::io::ReadBuf<'_>,
-        ) -> Poll<io::Result<()>> {
-            AsyncRead::poll_read(Pin::new(&mut self.get_mut().1), cx, buf)
-        }
-    }
-
-    impl AsyncWrite for Stream {
-        fn poll_write(
-            self: Pin<&mut Self>,
-            cx: &mut Context<'_>,
-            buf: &[u8],
-        ) -> Poll<Result<usize, io::Error>> {
-            AsyncWrite::poll_write(Pin::new(&mut self.get_mut().0), cx, buf)
-        }
-
-        fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
-            AsyncWrite::poll_flush(Pin::new(&mut self.get_mut().0), cx)
-        }
-
-        fn poll_shutdown(
-            self: Pin<&mut Self>,
-            cx: &mut Context<'_>,
-        ) -> Poll<Result<(), io::Error>> {
-            AsyncWrite::poll_shutdown(Pin::new(&mut self.get_mut().0), cx)
-        }
-    }
-}
-
 #[cfg(test)]
 pub(crate) mod tests {
-    use crate::{Reliable, Transport};
+    use crate::{Acceptor, Initiator, Reliable};
 
     use super::{client, server, Connection};
     use std::{net::SocketAddr, time::Duration};
@@ -132,7 +113,7 @@ pub(crate) mod tests {
     ) -> (Connection, Connection) {
         tokio::time::sleep(STARTUP_WAIT).await;
 
-        let addr_str = listen_addr.to_string();
+        let addr_str = listen_addr;
         let (cert_path, key_path) = CertificateGenerator::generate();
 
         let server_conn = server::Builder::new(addr_str.clone())
@@ -145,8 +126,7 @@ pub(crate) mod tests {
 
         tokio::time::sleep(STARTUP_WAIT).await;
 
-        let client_conn = client::Builder::new(addr_str)
-            .with_server_name("localhost".to_string())
+        let client_conn = client::Builder::new(addr_str, "localhost")
             .with_tls_cert(cert_path.clone())
             .with_enable_zero_rtt(zero_rtt)
             .with_enable_connection_multiplexing(enable_multiplexing)
@@ -158,7 +138,7 @@ pub(crate) mod tests {
     }
 
     async fn fetch_stream(conn: &Connection) -> impl Reliable + '_ {
-        tokio::time::timeout(TIMEOUT, conn.reliable())
+        tokio::time::timeout(TIMEOUT, conn.open_bidirectional())
             .await
             .expect("Timed out waiting for stream")
             .expect("Failed to fetch stream")
@@ -169,11 +149,11 @@ pub(crate) mod tests {
         let listen_addr = find_available_local_udp_addr();
         let (server_conn, client_conn) = setup_connections(listen_addr, false, false).await;
 
-        let mut client_stream = fetch_stream(&client_conn).await;
+        let mut client_stream = client_conn.open_bidirectional().await.unwrap();
         let msg = b"hello quic";
         client_stream.write_all(msg).await.unwrap();
 
-        let mut server_stream = fetch_stream(&server_conn).await;
+        let mut server_stream = server_conn.accept_bidirectional().await.unwrap();
         let mut buf = vec![0u8; msg.len()];
         server_stream.read_exact(&mut buf).await.unwrap();
         assert_eq!(&buf, msg);

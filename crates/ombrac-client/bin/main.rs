@@ -28,7 +28,7 @@ struct Args {
     // Transport QUIC
     /// Bind address
     #[clap(long, help_heading = "Transport QUIC", value_name = "ADDR")]
-    bind: Option<String>,
+    bind: Option<SocketAddr>,
 
     /// Address of the server to connect
     #[clap(
@@ -104,7 +104,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let secret = blake3::hash(args.secret.as_bytes());
     let ombrac_client = Client::new(
         *secret.as_bytes(),
-        quic_from_args(&args).await.expect("Client failed to start"),
+        quic_from_args(&args)
+            .await
+            .expect("QUIC client startup failed"),
     );
 
     SocksServer::listen(args.socks, ombrac_client)
@@ -116,11 +118,29 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
 async fn quic_from_args(args: &Args) -> Result<Connection, Box<dyn Error>> {
     use std::time::Duration;
+    use tokio::net::lookup_host;
 
-    let mut builder = Builder::new(args.server.clone());
+    let name = match &args.server_name {
+        Some(value) => value.to_string(),
+        None => {
+            let pos = args
+                .server
+                .rfind(':')
+                .ok_or(format!("Invalid server address {}", args.server))?;
 
-    if let Some(value) = &args.bind {
-        builder = builder.with_bind(value.to_string());
+            args.server[..pos].to_string()
+        }
+    };
+
+    let addr = lookup_host(&args.server).await?.next().ok_or(format!(
+        "Failed to resolve server address '{}'",
+        args.server
+    ))?;
+
+    let mut builder = Builder::new(addr, name);
+
+    if let Some(value) = args.bind {
+        builder = builder.with_bind(value);
     }
 
     if let Some(value) = &args.server_name {
@@ -130,10 +150,6 @@ async fn quic_from_args(args: &Args) -> Result<Connection, Box<dyn Error>> {
     if let Some(value) = &args.tls_cert {
         builder = builder.with_tls_cert(value.clone());
     }
-
-    builder = builder.with_tls_skip(args.tls_skip);
-    builder = builder.with_enable_zero_rtt(args.enable_zero_rtt);
-    builder = builder.with_enable_connection_multiplexing(args.enable_connection_multiplexing);
 
     if let Some(value) = args.congestion_initial_window {
         builder = builder.with_congestion_initial_window(value);
@@ -151,5 +167,9 @@ async fn quic_from_args(args: &Args) -> Result<Connection, Box<dyn Error>> {
         builder = builder.with_max_open_bidirectional_streams(value);
     }
 
-    Ok(builder.build().await.unwrap())
+    builder = builder.with_tls_skip(args.tls_skip);
+    builder = builder.with_enable_zero_rtt(args.enable_zero_rtt);
+    builder = builder.with_enable_connection_multiplexing(args.enable_connection_multiplexing);
+
+    Ok(builder.build().await?)
 }

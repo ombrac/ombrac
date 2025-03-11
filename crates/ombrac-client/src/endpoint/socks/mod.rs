@@ -8,7 +8,7 @@ use std::{error::Error, io::Cursor};
 
 use ombrac::prelude::*;
 use ombrac_macros::{error, info, try_or_return};
-use ombrac_transport::Transport;
+use ombrac_transport::Initiator;
 use socks_lib::socks5::Address as Socks5Address;
 use socks_lib::ToBytes;
 use socks_lib::{socks5::UdpPacket, Streamable};
@@ -29,7 +29,7 @@ pub enum Request {
 impl Server {
     pub async fn listen<T>(addr: SocketAddr, ombrac: Client<T>) -> Result<(), Box<dyn Error>>
     where
-        T: Transport + Send + Sync + 'static,
+        T: Initiator + Send + Sync + 'static,
     {
         use ombrac::io::util::copy_bidirectional;
 
