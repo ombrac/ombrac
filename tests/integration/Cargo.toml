@@ -17,6 +17,8 @@ ombrac-transport = { workspace = true, features = ["quic", "datagram"] }
 
 tokio = { workspace = true, features = ["full"] }
 curl = { workspace = true }
+ntest = { workspace = true }
+
 tests-support = { path = "../support" }
 
 
