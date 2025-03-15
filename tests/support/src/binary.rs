@@ -3,7 +3,7 @@ use std::process::Command;
 use crate::{path::BinaryLocator, process::ProcessGuard};
 
 #[derive(Debug, Default, Clone)]
-pub struct ClientBuilder {
+pub struct Client {
     pub secret: Option<String>,
     pub socks: Option<String>,
     pub tls_cert: Option<String>,
@@ -12,7 +12,7 @@ pub struct ClientBuilder {
     pub server: Option<String>,
 }
 
-impl ClientBuilder {
+impl Client {
     pub fn secret(mut self, secret: String) -> Self {
         self.secret = Some(secret);
         self
@@ -43,39 +43,28 @@ impl ClientBuilder {
         self
     }
 
-    pub fn build(self) -> ProcessGuard {
-        Client::start(Some(self))
-    }
-}
+    pub fn start(self) -> ProcessGuard {
+        let opts = self;
+        let mut args = Vec::new();
 
-pub struct Client;
-
-impl Client {
-    pub fn start(options: Option<ClientBuilder>) -> ProcessGuard {
-        let args = options
-            .map(|opts| {
-                let mut args = Vec::new();
-                if let Some(secret) = opts.secret {
-                    args.extend_from_slice(&["--secret".to_string(), secret]);
-                }
-                if let Some(socks) = opts.socks {
-                    args.extend_from_slice(&["--socks".to_string(), socks]);
-                }
-                if let Some(cert) = opts.tls_cert {
-                    args.extend_from_slice(&["--tls-cert".to_string(), cert]);
-                }
-                if opts.tls_skip {
-                    args.extend_from_slice(&["--tls-skip".to_string()]);
-                }
-                if let Some(name) = opts.server_name {
-                    args.extend_from_slice(&["--server-name".to_string(), name]);
-                }
-                if let Some(addr) = opts.server {
-                    args.extend_from_slice(&["--server".to_string(), addr]);
-                }
-                args
-            })
-            .unwrap_or_default();
+        if let Some(secret) = opts.secret {
+            args.extend_from_slice(&["--secret".to_string(), secret]);
+        }
+        if let Some(socks) = opts.socks {
+            args.extend_from_slice(&["--socks".to_string(), socks]);
+        }
+        if let Some(cert) = opts.tls_cert {
+            args.extend_from_slice(&["--tls-cert".to_string(), cert]);
+        }
+        if opts.tls_skip {
+            args.extend_from_slice(&["--tls-skip".to_string()]);
+        }
+        if let Some(name) = opts.server_name {
+            args.extend_from_slice(&["--server-name".to_string(), name]);
+        }
+        if let Some(addr) = opts.server {
+            args.extend_from_slice(&["--server".to_string(), addr]);
+        }
 
         let client = Command::new(BinaryLocator::locate("ombrac-client"))
             .args(&args)
@@ -89,7 +78,7 @@ impl Client {
 }
 
 #[derive(Debug, Default)]
-pub struct ServerBuilder {
+pub struct Server {
     pub secret: Option<String>,
     pub listen: Option<String>,
     pub tls_cert: Option<String>,
@@ -97,7 +86,7 @@ pub struct ServerBuilder {
     pub tls_skip: bool,
 }
 
-impl ServerBuilder {
+impl Server {
     pub fn secret(mut self, secret: String) -> Self {
         self.secret = Some(secret);
         self
@@ -123,36 +112,25 @@ impl ServerBuilder {
         self
     }
 
-    pub fn build(self) -> ProcessGuard {
-        Server::start(Some(self))
-    }
-}
+    pub fn start(self) -> ProcessGuard {
+        let opts = self;
 
-pub struct Server;
-
-impl Server {
-    pub fn start(options: Option<ServerBuilder>) -> ProcessGuard {
-        let args = options
-            .map(|opts| {
-                let mut args = Vec::new();
-                if let Some(secret) = opts.secret {
-                    args.extend_from_slice(&["--secret".to_string(), secret]);
-                }
-                if let Some(listen) = opts.listen {
-                    args.extend_from_slice(&["--listen".to_string(), listen]);
-                }
-                if let Some(tls_cert) = opts.tls_cert {
-                    args.extend_from_slice(&["--tls-cert".to_string(), tls_cert]);
-                }
-                if let Some(tls_key) = opts.tls_key {
-                    args.extend_from_slice(&["--tls-key".to_string(), tls_key]);
-                }
-                if opts.tls_skip {
-                    args.extend_from_slice(&["--tls-skip".to_string()]);
-                }
-                args
-            })
-            .unwrap_or_default();
+        let mut args = Vec::new();
+        if let Some(secret) = opts.secret {
+            args.extend_from_slice(&["--secret".to_string(), secret]);
+        }
+        if let Some(listen) = opts.listen {
+            args.extend_from_slice(&["--listen".to_string(), listen]);
+        }
+        if let Some(tls_cert) = opts.tls_cert {
+            args.extend_from_slice(&["--tls-cert".to_string(), tls_cert]);
+        }
+        if let Some(tls_key) = opts.tls_key {
+            args.extend_from_slice(&["--tls-key".to_string(), tls_key]);
+        }
+        if opts.tls_skip {
+            args.extend_from_slice(&["--tls-skip".to_string()]);
+        }
 
         let server = Command::new(BinaryLocator::locate("ombrac-server"))
             .args(&args)
