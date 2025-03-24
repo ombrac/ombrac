@@ -6,7 +6,7 @@ use std::{io, net::SocketAddr};
 
 use quinn::IdleTimeout;
 
-use super::{stream::Stream, Connection};
+use super::{Connection, stream::Stream};
 
 pub struct Builder {
     bind: Option<SocketAddr>,
@@ -159,7 +159,7 @@ impl Connection {
         };
 
         let client_config = {
-            use quinn::{congestion, ClientConfig, TransportConfig, VarInt};
+            use quinn::{ClientConfig, TransportConfig, VarInt, congestion};
 
             let mut transport = TransportConfig::default();
             let mut congestion = congestion::BbrConfig::default();
@@ -326,9 +326,9 @@ async fn connection(
 }
 
 mod cert_verifier {
+    use rustls::Error;
     use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
     use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
-    use rustls::Error;
     use rustls::{DigitallySignedStruct, SignatureScheme};
 
     #[derive(Debug)]

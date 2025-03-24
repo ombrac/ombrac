@@ -6,7 +6,7 @@ use ombrac_transport::{Acceptor, Reliable};
 #[cfg(feature = "datagram")]
 use ombrac_transport::Unreliable;
 
-use ombrac_macros::error;
+use ombrac_macros::{error, info};
 
 pub struct Server<T> {
     secret: Secret,
@@ -18,17 +18,19 @@ impl<T: Acceptor> Server<T> {
         Self { secret, transport }
     }
 
+    #[inline]
     async fn handle_reliable(stream: impl Reliable, secret: Secret) -> io::Result<()> {
-        Self::handle_tcp_connect(stream, secret).await
+        Self::handle_connect(stream, secret).await
     }
 
     #[cfg(feature = "datagram")]
-    async fn handle_unreliable(stream: impl Unreliable, secret: Secret) -> io::Result<()> {
-        Self::handle_udp_associate(stream, secret).await
+    #[inline]
+    async fn handle_unreliable(datagram: impl Unreliable, secret: Secret) -> io::Result<()> {
+        Self::handle_associate(datagram, secret).await
     }
 
     #[inline]
-    async fn handle_tcp_connect(mut stream: impl Reliable, secret: Secret) -> io::Result<()> {
+    async fn handle_connect(mut stream: impl Reliable, secret: Secret) -> io::Result<()> {
         use tokio::net::TcpStream;
 
         let request = Connect::from_async_read(&mut stream).await?;
@@ -41,6 +43,9 @@ impl<T: Acceptor> Server<T> {
         }
 
         let addr = request.address.to_socket_addr().await?;
+
+        info!("Connect {}", addr);
+
         let mut target = TcpStream::connect(addr).await?;
 
         ombrac::io::util::copy_bidirectional(&mut stream, &mut target).await?;
@@ -50,68 +55,71 @@ impl<T: Acceptor> Server<T> {
 
     #[cfg(feature = "datagram")]
     #[inline]
-    async fn handle_udp_associate(conn: impl Unreliable, secret: Secret) -> io::Result<()> {
+    async fn handle_associate(datagram: impl Unreliable, secret: Secret) -> io::Result<()> {
         use std::net::SocketAddr;
+
+        use bytes::Bytes;
         use tokio::net::UdpSocket;
-        use tokio::time::{timeout, Duration};
+        use tokio::time::{Duration, timeout};
 
         const DEFAULT_BUFFER_SIZE: usize = 2 * 1024;
-        const RECV_TIMEOUT: Duration = Duration::from_secs(180);
+        const IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 
         let local = SocketAddr::from(([0, 0, 0, 0, 0, 0, 0, 0], 0));
         let socket = UdpSocket::bind(local).await?;
-        let sock_send = Arc::new(socket);
-        let sock_recv = Arc::clone(&sock_send);
-        let conn_send = Arc::new(conn);
-        let conn_recv = Arc::clone(&conn_send);
 
-        let mut recv_handle = tokio::spawn(async move {
-            let mut buf = [0u8; DEFAULT_BUFFER_SIZE];
+        let socket_1 = Arc::new(socket);
+        let socket_2 = Arc::clone(&socket_1);
+        let datagram_1 = Arc::new(datagram);
+        let datagram_2 = Arc::clone(&datagram_1);
+
+        let mut handle_1 = tokio::spawn(async move {
             loop {
-                let (len, addr) = sock_recv.recv_from(&mut buf).await?;
-                let data = bytes::Bytes::copy_from_slice(&buf[..len]);
-                let packet = Packet::with(secret, addr, data);
-                if let Err(e) = conn_send.send(packet.to_bytes()?).await {
-                    return Err(io::Error::other(e.to_string()));
-                }
+                let packet_result = timeout(IDLE_TIMEOUT, datagram_1.recv()).await;
+
+                let mut bytes = match packet_result {
+                    Ok(value) => value?,
+                    Err(_) => return Ok(()), // Timeout
+                };
+
+                let packet = Associate::from_bytes(&mut bytes)?;
+                if packet.secret != secret {
+                    return Err(io::Error::new(
+                        io::ErrorKind::PermissionDenied,
+                        "Secret does not match",
+                    ));
+                };
+
+                let target = packet.address.to_socket_addr().await?;
+                socket_1.send_to(&packet.data, target).await?;
             }
         });
 
-        let mut send_handle = tokio::spawn(async move {
+        let mut handle_2 = tokio::spawn(async move {
+            let mut buf = [0u8; DEFAULT_BUFFER_SIZE];
             loop {
-                let packet_result = timeout(RECV_TIMEOUT, conn_recv.recv()).await;
+                match timeout(IDLE_TIMEOUT, socket_2.recv_from(&mut buf)).await {
+                    Ok(Ok((n, addr))) => {
+                        let data = Bytes::copy_from_slice(&buf[..n]);
+                        let packet = Associate::with(secret, addr, data);
 
-                let result = match packet_result {
-                    Ok(value) => value,
-                    Err(_) => return Ok(()), // UDP recv timeout
-                };
-
-                match result {
-                    Ok(mut packet) => {
-                        let packet = Packet::from_bytes(&mut packet)?;
-                        if packet.secret != secret {
-                            return Err(io::Error::new(
-                                io::ErrorKind::PermissionDenied,
-                                "Secret does not match",
-                            ));
-                        };
-                        let target = packet.address.to_socket_addr().await?;
-                        sock_send.send_to(&packet.data, target).await?;
+                        datagram_2.send(packet.to_bytes()?).await?;
                     }
-                    Err(e) => {
-                        return Err(io::Error::other(e.to_string()));
-                    }
+                    Ok(Err(e)) => return Err(e),
+                    Err(_) => break, // Timeout
                 }
             }
+
+            Ok(())
         });
 
         let result = tokio::select! {
-            result = &mut recv_handle => {
-                send_handle.abort();
+            result = &mut handle_1 => {
+                handle_2.abort();
                 result
             },
-            result = &mut send_handle => {
-                recv_handle.abort();
+            result = &mut handle_2 => {
+                handle_1.abort();
                 result
             },
         };
@@ -129,44 +137,53 @@ impl<T: Acceptor> Server<T> {
         let transport = Arc::new(self.transport);
 
         #[cfg(feature = "datagram")]
-        let datagram_handle = {
-            let transport = transport.clone();
-            let datagram_handle = tokio::spawn(async move {
+        let mut datagram_handle = {
+            let transport = Arc::clone(&transport);
+            tokio::spawn(async move {
                 loop {
                     match transport.accept_datagram().await {
-                        Ok(stream) => {
-                            tokio::spawn(async move {
-                                if let Err(_error) = Self::handle_unreliable(stream, secret).await {
-                                    error!("{_error}");
-                                }
-                            });
-                        }
-                        Err(_error) => {
-                            error!("{_error}");
+                        Ok(datagram) => tokio::spawn(async move {
+                            if let Err(_error) = Self::handle_unreliable(datagram, secret).await {
+                                error!("{_error}");
+                            }
+                        }),
 
-                            break;
-                        }
+                        Err(error) => return error,
                     };
                 }
-            });
-
-            datagram_handle
+            })
         };
 
-        loop {
-            match transport.accept_bidirectional().await {
-                Ok(stream) => tokio::spawn(async move {
-                    if let Err(_error) = Self::handle_reliable(stream, secret).await {
-                        error!("{_error}");
-                    }
-                }),
-                Err(err) => {
-                    #[cfg(feature = "datagram")]
-                    datagram_handle.abort();
-
-                    return Err(io::Error::other(err.to_string()));
+        let mut stream_handle = {
+            let transport = Arc::clone(&transport);
+            tokio::spawn(async move {
+                loop {
+                    match transport.accept_bidirectional().await {
+                        Ok(stream) => tokio::spawn(async move {
+                            if let Err(_error) = Self::handle_reliable(stream, secret).await {
+                                error!("{_error}");
+                            }
+                        }),
+                        Err(error) => return error,
+                    };
                 }
-            };
-        }
+            })
+        };
+
+        let error = tokio::select! {
+            result = &mut stream_handle => {
+                #[cfg(feature = "datagram")]
+                datagram_handle.abort();
+
+                result?
+            },
+
+            result = &mut datagram_handle, if cfg!(feature = "datagram") => {
+                stream_handle.abort();
+                result?
+            },
+        };
+
+        Err(error)
     }
 }

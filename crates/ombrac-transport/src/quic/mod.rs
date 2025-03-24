@@ -96,7 +96,7 @@ fn load_private_key(path: &PathBuf) -> io::Result<PrivateKeyDer<'static>> {
 pub(crate) mod tests {
     use crate::{Acceptor, Initiator, Reliable};
 
-    use super::{client, server, Connection};
+    use super::{Connection, client, server};
     use std::{net::SocketAddr, time::Duration};
     use tests_support::cert::CertificateGenerator;
     use tests_support::net::find_available_local_udp_addr;
