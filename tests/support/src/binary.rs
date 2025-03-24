@@ -57,7 +57,7 @@ impl Client {
             args.extend_from_slice(&["--tls-cert".to_string(), cert]);
         }
         if opts.tls_skip {
-            args.extend_from_slice(&["--tls-skip".to_string()]);
+            args.extend_from_slice(&["--insecure".to_string()]);
         }
         if let Some(name) = opts.server_name {
             args.extend_from_slice(&["--server-name".to_string(), name]);
@@ -129,7 +129,7 @@ impl Server {
             args.extend_from_slice(&["--tls-key".to_string(), tls_key]);
         }
         if opts.tls_skip {
-            args.extend_from_slice(&["--tls-skip".to_string()]);
+            args.extend_from_slice(&["--insecure".to_string()]);
         }
 
         let server = Command::new(BinaryLocator::locate("ombrac-server"))

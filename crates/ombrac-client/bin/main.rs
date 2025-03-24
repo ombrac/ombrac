@@ -1,92 +1,136 @@
 use std::error::Error;
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::time::Duration;
 
 use clap::Parser;
-use ombrac_client::endpoint::socks::Server as SocksServer;
 use ombrac_client::Client;
+use ombrac_client::endpoint::socks::Server as SocksServer;
 use ombrac_transport::quic::client::Builder;
-use ombrac_transport::quic::Connection;
 
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
 struct Args {
     /// Protocol Secret
-    #[clap(long, short = 'k', help_heading = "Service Secret", value_name = "STR")]
+    #[clap(
+        long,
+        short = 'k',
+        help_heading = "Service Secret",
+        value_name = "STR",
+        verbatim_doc_comment
+    )]
     secret: String,
 
     // Endpoint SOCKS
-    /// Listening address for the SOCKS server.
+    /// The address to bind for the SOCKS server
     #[clap(
         long,
         default_value = "127.0.0.1:1080",
         value_name = "ADDR",
-        help_heading = "Endpoint SOCKS"
+        help_heading = "Endpoint SOCKS",
+        verbatim_doc_comment
     )]
     socks: SocketAddr,
 
     // Transport QUIC
-    /// Bind address
-    #[clap(long, help_heading = "Transport QUIC", value_name = "ADDR")]
+    /// The address to bind for QUIC transport
+    #[clap(
+        long,
+        help_heading = "Transport QUIC",
+        value_name = "ADDR",
+        verbatim_doc_comment
+    )]
     bind: Option<SocketAddr>,
 
-    /// Address of the server to connect
+    /// Address of the server to connect to
     #[clap(
         long,
         short = 's',
         help_heading = "Transport QUIC",
-        value_name = "ADDR"
+        value_name = "ADDR",
+        verbatim_doc_comment
     )]
     server: String,
 
-    /// Name of the server to connect
-    #[clap(long, help_heading = "Transport QUIC", value_name = "STR")]
+    /// Name of the server to connect (derived from `server` if not provided)
+    #[clap(
+        long,
+        help_heading = "Transport QUIC",
+        value_name = "STR",
+        verbatim_doc_comment
+    )]
     server_name: Option<String>,
 
-    /// Path to the TLS certificate file for secure connections
-    #[clap(long, help_heading = "Transport QUIC", value_name = "FILE")]
+    /// Path to the TLS certificate file
+    #[clap(
+        long,
+        help_heading = "Transport QUIC",
+        value_name = "FILE",
+        verbatim_doc_comment
+    )]
     tls_cert: Option<PathBuf>,
 
-    /// Skip TLS verification for connections
-    #[clap(long, help_heading = "Transport QUIC", action)]
-    tls_skip: bool,
+    /// Skip TLS certificate verification (insecure, for testing only)
+    #[clap(long, help_heading = "Transport QUIC", action, verbatim_doc_comment)]
+    insecure: bool,
 
-    /// Whether to enable 0-RTT or 0.5-RTT connections at the cost of weakened security
-    #[clap(long, help_heading = "Transport QUIC", action)]
-    enable_zero_rtt: bool,
+    /// Enable 0-RTT for faster connection establishment (may reduce security)
+    #[clap(long, help_heading = "Transport QUIC", action, verbatim_doc_comment)]
+    zero_rtt: bool,
 
-    /// Whether to enable connection multiplexing
-    #[clap(long, help_heading = "Transport QUIC", action)]
-    enable_connection_multiplexing: bool,
+    /// Disable connection multiplexing (each stream uses a separate QUIC connection)
+    /// This may be useful in special network environments where multiplexing causes issues
+    #[clap(long, help_heading = "Transport QUIC", action, verbatim_doc_comment)]
+    no_multiplex: bool,
 
-    /// Initial congestion window in bytes
-    #[clap(long, help_heading = "Transport QUIC", value_name = "NUM")]
-    congestion_initial_window: Option<u64>,
+    /// Initial congestion window size in bytes
+    #[clap(
+        long,
+        help_heading = "Transport QUIC",
+        value_name = "NUM",
+        verbatim_doc_comment
+    )]
+    cwnd_init: Option<u64>,
 
-    /// Connection idle timeout in millisecond
-    #[clap(long, help_heading = "Transport QUIC", value_name = "TIME")]
-    max_idle_timeout: Option<u64>,
-
-    /// Connection keep alive period in millisecond
+    /// Maximum idle time (in milliseconds) before closing the connection
+    /// 30 second default recommended by RFC 9308
     #[clap(
         long,
         help_heading = "Transport QUIC",
         value_name = "TIME",
-        default_value = "8000"
+        default_value = "30000",
+        verbatim_doc_comment
     )]
-    max_keep_alive_period: Option<u64>,
+    idle_timeout: Option<u64>,
 
-    /// Connection max open bidirectional streams
-    #[clap(long, help_heading = "Transport QUIC", value_name = "NUM")]
-    max_open_bidirectional_streams: Option<u64>,
+    /// Keep-alive interval (in milliseconds)
+    #[clap(
+        long,
+        help_heading = "Transport QUIC",
+        value_name = "TIME",
+        default_value = "8000",
+        verbatim_doc_comment
+    )]
+    keep_alive: Option<u64>,
 
-    /// Logging level e.g., INFO, WARN, ERROR
+    /// Maximum number of bidirectional streams that can be open simultaneously
+    #[clap(
+        long,
+        help_heading = "Transport QUIC",
+        value_name = "NUM",
+        default_value = "100",
+        verbatim_doc_comment
+    )]
+    max_streams: Option<u64>,
+
+    /// Logging level (e.g., INFO, WARN, ERROR)
     #[cfg(feature = "tracing")]
     #[clap(
         long,
         default_value = "WARN",
         value_name = "TRACE",
-        help_heading = "Logging"
+        help_heading = "Logging",
+        verbatim_doc_comment
     )]
     tracing_level: tracing::Level,
 }
@@ -105,18 +149,24 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let ombrac_client = Client::new(
         *secret.as_bytes(),
         quic_from_args(&args)
+            .await?
+            .build()
             .await
-            .expect("QUIC client startup failed"),
+            .expect("QUIC Client failed to build"),
     );
 
-    SocksServer::listen(args.socks, ombrac_client)
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    SocksServer::bind(args.socks, ombrac_client.into())
         .await
-        .expect("SOCKS server failed to start");
+        .expect("SOCKS server failed to bind")
+        .listen()
+        .await?;
 
     Ok(())
 }
 
-async fn quic_from_args(args: &Args) -> Result<Connection, Box<dyn Error>> {
+async fn quic_from_args(args: &Args) -> Result<Builder, Box<dyn Error>> {
     use std::time::Duration;
     use tokio::net::lookup_host;
 
@@ -151,25 +201,25 @@ async fn quic_from_args(args: &Args) -> Result<Connection, Box<dyn Error>> {
         builder = builder.with_tls_cert(value.clone());
     }
 
-    if let Some(value) = args.congestion_initial_window {
+    if let Some(value) = args.cwnd_init {
         builder = builder.with_congestion_initial_window(value);
     }
 
-    if let Some(value) = args.max_idle_timeout {
+    if let Some(value) = args.idle_timeout {
         builder = builder.with_max_idle_timeout(Duration::from_millis(value));
     }
 
-    if let Some(value) = args.max_keep_alive_period {
+    if let Some(value) = args.keep_alive {
         builder = builder.with_max_keep_alive_period(Duration::from_millis(value));
     }
 
-    if let Some(value) = args.max_open_bidirectional_streams {
+    if let Some(value) = args.max_streams {
         builder = builder.with_max_open_bidirectional_streams(value);
     }
 
-    builder = builder.with_tls_skip(args.tls_skip);
-    builder = builder.with_enable_zero_rtt(args.enable_zero_rtt);
-    builder = builder.with_enable_connection_multiplexing(args.enable_connection_multiplexing);
+    builder = builder.with_tls_skip(args.insecure);
+    builder = builder.with_enable_zero_rtt(args.zero_rtt);
+    builder = builder.with_enable_connection_multiplexing(!args.no_multiplex);
 
-    Ok(builder.build().await?)
+    Ok(builder)
 }
