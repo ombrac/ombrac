@@ -170,18 +170,29 @@ impl<T: Acceptor> Server<T> {
             })
         };
 
-        let error = tokio::select! {
-            result = &mut stream_handle => {
-                #[cfg(feature = "datagram")]
-                datagram_handle.abort();
+        let error = {
+            #[cfg(feature = "datagram")]
+            {
+                tokio::select! {
+                    result = &mut stream_handle => {
+                        datagram_handle.abort();
+                        result?
+                    },
+                    result = &mut datagram_handle => {
+                        stream_handle.abort();
+                        result?
+                    },
+                }
+            }
 
-                result?
-            },
-
-            result = &mut datagram_handle, if cfg!(feature = "datagram") => {
-                stream_handle.abort();
-                result?
-            },
+            #[cfg(not(feature = "datagram"))]
+            {
+                tokio::select! {
+                    result = &mut stream_handle => {
+                        result?
+                    },
+                }
+            }
         };
 
         Err(error)
