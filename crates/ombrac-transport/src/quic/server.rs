@@ -6,7 +6,7 @@ use std::{io, path::PathBuf};
 
 use quinn::IdleTimeout;
 
-use super::{stream::Stream, Connection};
+use super::{Connection, stream::Stream};
 
 pub struct Builder {
     listen: SocketAddr,
@@ -109,12 +109,12 @@ impl Connection {
                     (Some(_), None) => {
                         return Err(io::Error::other(
                             "Private key must be provided when certificate is specified",
-                        ))
+                        ));
                     }
                     (None, _) => {
                         return Err(io::Error::other(
                             "Certificate must be provided when TLS is enabled",
-                        ))
+                        ));
                     }
                 };
                 (cert, key)
@@ -145,7 +145,7 @@ impl Connection {
         };
 
         let server_config = {
-            use quinn::{congestion, ServerConfig, TransportConfig, VarInt};
+            use quinn::{ServerConfig, TransportConfig, VarInt, congestion};
 
             let mut transport = TransportConfig::default();
             let mut congestion = congestion::BbrConfig::default();

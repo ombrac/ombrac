@@ -52,10 +52,10 @@ Will sets up a SOCKS5 server on 127.0.0.1:1080, forwarding traffic to example.co
 
 When using a self-signed certificate, the client requires both the `--server-name` parameter and the `--tls-cert` path to be explicitly configured. 
 
-Alternatively, you can use the `--tls-skip` option to skip TLS verification. **This is not recommended for production environments as it bypasses certificate validation, potentially exposing your communication to security risks.**
+Alternatively, you can use the `--insecure` option to skip TLS verification. **This is not recommended for production environments as it bypasses certificate validation, potentially exposing your communication to security risks.**
 
 
-## Usage
+## Full Options
 
 ### Server
 
@@ -70,24 +70,18 @@ Service Secret:
   -k, --secret <STR>  Protocol Secret
 
 Transport QUIC:
-  -l, --listen <ADDR>
-          Transport server listening address
-      --tls-cert <FILE>
-          Path to the TLS certificate file for secure connections
-      --tls-key <FILE>
-          Path to the TLS private key file for secure connections
-      --tls-skip
-          When enabled, a self-signed certificate and key will be generated, the cert and key will be disregarded
-      --enable-zero-rtt
-          Whether to enable 0-RTT or 0.5-RTT connections at the cost of weakened security
-      --congestion-initial-window <NUM>
-          Initial congestion window in bytes
-      --max-idle-timeout <TIME>
-          Connection idle timeout in millisecond
-      --max-keep-alive-period <TIME>
-          Connection keep alive period in millisecond
-      --max-open-bidirectional-streams <NUM>
-          Connection max open bidirectional streams
+  -l, --listen <ADDR>        The address to bind for QUIC transport
+      --tls-cert <FILE>      Path to the TLS certificate file
+      --tls-key <FILE>       Path to the TLS private key file
+      --insecure             When enabled, the server will generate a self-signed TLS certificate
+                             and use it for the QUIC connection. This mode is useful for testing
+                             but should not be used in production
+      --zero-rtt             Enable 0-RTT for faster connection establishment (may reduce security)
+      --cwnd-init <NUM>      Initial congestion window size in bytes
+      --idle-timeout <TIME>  Maximum idle time (in milliseconds) before closing the connection
+                             30 second default recommended by RFC 9308 [default: 30000]
+      --keep-alive <TIME>    Keep-alive interval (in milliseconds) [default: 8000]
+      --max-streams <NUM>    Maximum number of bidirectional streams that can be open simultaneously [default: 100]
 
 Logging:
       --tracing-level <TRACE>  Logging level e.g., INFO, WARN, ERROR [default: WARN]
@@ -105,34 +99,25 @@ Service Secret:
   -k, --secret <STR>  Protocol Secret
 
 Endpoint SOCKS:
-      --socks <ADDR>  Listening address for the SOCKS server [default: 127.0.0.1:1080]
+      --socks <ADDR>  The address to bind for the SOCKS server [default: 127.0.0.1:1080]
 
 Transport QUIC:
-      --bind <ADDR>
-          Bind address
-  -s, --server <ADDR>
-          Address of the server to connect
-      --server-name <STR>
-          Name of the server to connect
-      --tls-cert <FILE>
-          Path to the TLS certificate file for secure connections
-      --tls-skip
-          Skip TLS verification for connections
-      --enable-zero-rtt
-          Whether to enable 0-RTT or 0.5-RTT connections at the cost of weakened security
-      --enable-connection-multiplexing
-          Whether to enable connection multiplexing
-      --congestion-initial-window <NUM>
-          Initial congestion window in bytes
-      --max-idle-timeout <TIME>
-          Connection idle timeout in millisecond
-      --max-keep-alive-period <TIME>
-          Connection keep alive period in millisecond [default: 8000]
-      --max-open-bidirectional-streams <NUM>
-          Connection max open bidirectional streams
+      --bind <ADDR>          The address to bind for QUIC transport
+  -s, --server <ADDR>        Address of the server to connect to
+      --server-name <STR>    Name of the server to connect (derived from `server` if not provided)
+      --tls-cert <FILE>      Path to the TLS certificate file
+      --insecure             Skip TLS certificate verification (insecure, for testing only)
+      --zero-rtt             Enable 0-RTT for faster connection establishment (may reduce security)
+      --no-multiplex         Disable connection multiplexing (each stream uses a separate QUIC connection)
+                             This may be useful in special network environments where multiplexing causes issues
+      --cwnd-init <NUM>      Initial congestion window size in bytes
+      --idle-timeout <TIME>  Maximum idle time (in milliseconds) before closing the connection
+                             30 second default recommended by RFC 9308 [default: 30000]
+      --keep-alive <TIME>    Keep-alive interval (in milliseconds) [default: 8000]
+      --max-streams <NUM>    Maximum number of bidirectional streams that can be open simultaneously [default: 100]
 
 Logging:
-      --tracing-level <TRACE>  Logging level e.g., INFO, WARN, ERROR [default: WARN]
+      --tracing-level <TRACE>  Logging level (e.g., INFO, WARN, ERROR) [default: WARN]
 ```
 
 ## License

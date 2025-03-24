@@ -16,7 +16,6 @@ required-features = ["binary"]
 
 [features]
 default = [
-    "endpoint-default",
     "transport-default",
     "tracing"
 ]
@@ -37,6 +36,8 @@ binary = [
     "tokio/macros",
     "tokio/rt-multi-thread",
     "tracing-subscriber",
+
+    "endpoint-default",
 ]
 
 [dependencies]

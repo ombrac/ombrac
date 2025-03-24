@@ -6,56 +6,98 @@ use std::time::Duration;
 use clap::Parser;
 use ombrac_server::Server;
 use ombrac_transport::quic::server::Builder;
-use ombrac_transport::quic::Connection;
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Args {
     /// Protocol Secret
-    #[clap(long, short = 'k', help_heading = "Service Secret", value_name = "STR")]
+    #[clap(
+        long,
+        short = 'k',
+        help_heading = "Service Secret",
+        value_name = "STR",
+        verbatim_doc_comment
+    )]
     secret: String,
 
     // Transport QUIC
-    /// Transport server listening address
+    /// The address to bind for QUIC transport
     #[clap(
         long,
         short = 'l',
         help_heading = "Transport QUIC",
-        value_name = "ADDR"
+        value_name = "ADDR",
+        verbatim_doc_comment
     )]
     listen: SocketAddr,
 
-    /// Path to the TLS certificate file for secure connections
-    #[clap(long, help_heading = "Transport QUIC", value_name = "FILE")]
+    /// Path to the TLS certificate file
+    #[clap(
+        long,
+        help_heading = "Transport QUIC",
+        value_name = "FILE",
+        verbatim_doc_comment
+    )]
     tls_cert: Option<PathBuf>,
 
-    /// Path to the TLS private key file for secure connections
-    #[clap(long, help_heading = "Transport QUIC", value_name = "FILE")]
+    /// Path to the TLS private key file
+    #[clap(
+        long,
+        help_heading = "Transport QUIC",
+        value_name = "FILE",
+        verbatim_doc_comment
+    )]
     tls_key: Option<PathBuf>,
 
-    /// When enabled, a self-signed certificate and key will be generated, the cert and key will be disregarded
-    #[clap(long, help_heading = "Transport QUIC", action)]
-    tls_skip: bool,
+    /// When enabled, the server will generate a self-signed TLS certificate
+    /// and use it for the QUIC connection. This mode is useful for testing
+    /// but should not be used in production
+    #[clap(long, help_heading = "Transport QUIC", action, verbatim_doc_comment)]
+    insecure: bool,
 
-    /// Whether to enable 0-RTT or 0.5-RTT connections at the cost of weakened security
-    #[clap(long, help_heading = "Transport QUIC", action)]
-    enable_zero_rtt: bool,
+    /// Enable 0-RTT for faster connection establishment (may reduce security)
+    #[clap(long, help_heading = "Transport QUIC", action, verbatim_doc_comment)]
+    zero_rtt: bool,
 
-    /// Initial congestion window in bytes
-    #[clap(long, help_heading = "Transport QUIC", value_name = "NUM")]
-    congestion_initial_window: Option<u64>,
+    /// Initial congestion window size in bytes
+    #[clap(
+        long,
+        help_heading = "Transport QUIC",
+        value_name = "NUM",
+        verbatim_doc_comment
+    )]
+    cwnd_init: Option<u64>,
 
-    /// Connection idle timeout in millisecond
-    #[clap(long, help_heading = "Transport QUIC", value_name = "TIME")]
-    max_idle_timeout: Option<u64>,
+    /// Maximum idle time (in milliseconds) before closing the connection
+    /// 30 second default recommended by RFC 9308
+    #[clap(
+        long,
+        help_heading = "Transport QUIC",
+        value_name = "TIME",
+        default_value = "30000",
+        verbatim_doc_comment
+    )]
+    idle_timeout: Option<u64>,
 
-    /// Connection keep alive period in millisecond
-    #[clap(long, help_heading = "Transport QUIC", value_name = "TIME")]
-    max_keep_alive_period: Option<u64>,
+    /// Keep-alive interval (in milliseconds)
+    #[clap(
+        long,
+        help_heading = "Transport QUIC",
+        value_name = "TIME",
+        default_value = "8000",
+        verbatim_doc_comment
+    )]
+    keep_alive: Option<u64>,
 
-    /// Connection max open bidirectional streams
-    #[clap(long, help_heading = "Transport QUIC", value_name = "NUM")]
-    max_open_bidirectional_streams: Option<u64>,
+    /// Maximum number of bidirectional streams that can be open simultaneously
+    #[clap(
+        long,
+        help_heading = "Transport QUIC",
+        value_name = "NUM",
+        default_value = "100",
+        verbatim_doc_comment
+    )]
+    max_streams: Option<u64>,
 
     /// Logging level e.g., INFO, WARN, ERROR
     #[cfg(feature = "tracing")]
@@ -63,7 +105,8 @@ struct Args {
         long,
         default_value = "WARN",
         value_name = "TRACE",
-        help_heading = "Logging"
+        help_heading = "Logging",
+        verbatim_doc_comment
     )]
     tracing_level: tracing::Level,
 }
@@ -82,19 +125,23 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let ombrac_server = Server::new(
         *secret.as_bytes(),
         quic_config_from_args(&args)
+            .build()
             .await
-            .expect("QUIC server startup failed"),
+            .expect("QUIC Server failed to build"),
     );
 
     #[cfg(feature = "tracing")]
     tracing::info!("Server listening on {}", args.listen);
 
-    ombrac_server.listen().await.expect("Server error");
+    ombrac_server
+        .listen()
+        .await
+        .expect("Server failed to listen");
 
     Ok(())
 }
 
-async fn quic_config_from_args(args: &Args) -> Result<Connection, Box<dyn Error>> {
+fn quic_config_from_args(args: &Args) -> Builder {
     let mut builder = Builder::new(args.listen);
 
     if let Some(value) = &args.tls_cert {
@@ -105,24 +152,24 @@ async fn quic_config_from_args(args: &Args) -> Result<Connection, Box<dyn Error>
         builder = builder.with_tls_key(value.clone())
     }
 
-    if let Some(value) = args.congestion_initial_window {
+    if let Some(value) = args.cwnd_init {
         builder = builder.with_congestion_initial_window(value);
     }
 
-    if let Some(value) = args.max_idle_timeout {
+    if let Some(value) = args.idle_timeout {
         builder = builder.with_max_idle_timeout(Duration::from_millis(value));
     }
 
-    if let Some(value) = args.max_keep_alive_period {
+    if let Some(value) = args.keep_alive {
         builder = builder.with_max_keep_alive_period(Duration::from_millis(value));
     }
 
-    if let Some(value) = args.max_open_bidirectional_streams {
+    if let Some(value) = args.max_streams {
         builder = builder.with_max_open_bidirectional_streams(value);
     }
 
-    builder = builder.with_tls_skip(args.tls_skip);
-    builder = builder.with_enable_zero_rtt(args.enable_zero_rtt);
+    builder = builder.with_tls_skip(args.insecure);
+    builder = builder.with_enable_zero_rtt(args.zero_rtt);
 
-    Ok(builder.build().await?)
+    builder
 }

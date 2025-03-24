@@ -16,22 +16,24 @@ impl<T: Initiator> Client<T> {
         Self { secret, transport }
     }
 
-    pub async fn tcp_connect<A>(&self, addr: A) -> io::Result<impl Reliable + '_>
+    #[inline]
+    pub async fn connect<A>(&self, addr: A) -> io::Result<impl Reliable + '_>
     where
         A: Into<Address>,
     {
         use tokio::io::AsyncWriteExt;
 
         let mut stream = self.transport.open_bidirectional().await?;
-        let request = Connect::with(self.secret, addr).to_bytes()?;
 
+        let request = Connect::with(self.secret, addr).to_bytes()?;
         stream.write_all(&request).await?;
 
         Ok(stream)
     }
 
     #[cfg(feature = "datagram")]
-    pub async fn udp_associate(&self) -> io::Result<Datagram<impl Unreliable + '_>> {
+    #[inline]
+    pub async fn associate(&self) -> io::Result<Datagram<impl Unreliable + '_>> {
         let stream = self.transport.open_datagram().await?;
 
         Ok(Datagram::with(self.secret, stream))
@@ -47,27 +49,25 @@ impl<U: Unreliable> Datagram<U> {
         Self(secret, stream)
     }
 
-    pub async fn send<A, B>(&self, addr: A, data: B) -> io::Result<()>
+    #[inline]
+    pub async fn send<A, B>(&self, data: B, addr: A) -> io::Result<()>
     where
         A: Into<Address>,
         B: Into<bytes::Bytes>,
     {
-        let packet = Packet::with(self.0, addr, data).to_bytes()?;
+        let packet = Associate::with(self.0, addr, data).to_bytes()?;
 
-        if let Err(error) = self.1.send(packet).await {
-            return Err(io::Error::other(error.to_string()));
-        };
-
-        Ok(())
+        self.1.send(packet).await
     }
 
-    pub async fn recv(&self) -> io::Result<(Address, bytes::Bytes)> {
+    #[inline]
+    pub async fn recv(&self) -> io::Result<(bytes::Bytes, Address)> {
         match self.1.recv().await {
             Ok(mut data) => {
-                let packet = Packet::from_bytes(&mut data)?;
-                Ok((packet.address, packet.data))
+                let packet = Associate::from_bytes(&mut data)?;
+                Ok((packet.data, packet.address))
             }
-            Err(error) => Err(io::Error::other(error.to_string())),
+            Err(error) => Err(error),
         }
     }
 }

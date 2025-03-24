@@ -1,0 +1,263 @@
+use std::io;
+use std::net::SocketAddr;
+use std::sync::Arc;
+use std::time::Duration;
+
+use ombrac_macros::{debug, error, info, warn};
+use ombrac_transport::Initiator;
+use socks_lib::v5::server::Server as SocksServer;
+use socks_lib::v5::{Address, Request, Response, Stream};
+use tokio::io::{AsyncRead, AsyncWrite};
+
+use crate::Client;
+
+pub struct Server<T: Initiator>(SocksServer, Arc<Client<T>>);
+
+impl<T: Initiator> Server<T> {
+    pub async fn bind<A: Into<SocketAddr>>(addr: A, ombrac: Arc<Client<T>>) -> io::Result<Self> {
+        Ok(Self(SocksServer::bind(addr.into()).await?, ombrac))
+    }
+
+    pub async fn listen(&self) -> io::Result<()> {
+        let ombrac = Arc::clone(&self.1);
+
+        info!("SOCKS server listening on {}", self.0.local_addr()?);
+
+        loop {
+            match self.0.accept().await {
+                Ok((request, mut stream)) => {
+                    let ombrac = ombrac.clone();
+
+                    tokio::spawn(async move {
+                        let result = match request {
+                            Request::Connect(address) => {
+                                Self::handle_connect(ombrac, address, stream).await
+                            }
+                            #[cfg(feature = "datagram")]
+                            Request::Associate(address) => {
+                                Self::handle_associate(ombrac, address, stream).await
+                            }
+                            _ => {
+                                match stream.write_response(&Response::CommandNotSupported).await {
+                                    Ok(_) => Ok(()),
+                                    Err(e) => Err(e),
+                                }
+                            }
+                        };
+
+                        if let Err(_error) = result {
+                            error!("{}", _error);
+                        }
+                    });
+                }
+
+                Err(_error) => {
+                    error!("Failed to accept: {}", _error);
+                    continue;
+                }
+            }
+        }
+    }
+
+    #[inline]
+    async fn handle_connect(
+        ombrac: Arc<Client<T>>,
+        address: Address,
+        mut stream: Stream<impl AsyncRead + AsyncWrite + Unpin>,
+    ) -> io::Result<()> {
+        use ombrac::address::Address as OmbracAddress;
+        use ombrac::io::util::copy_bidirectional;
+        use tokio::time::{sleep, timeout};
+
+        const MAX_RETRIES: usize = 1;
+        const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+        const INITIAL_RETRY_DELAY: Duration = Duration::from_secs(1);
+
+        stream
+            .write_response(&Response::Success(Address::unspecified()))
+            .await?;
+
+        let addr = match address {
+            Address::Domain(domain, port) => OmbracAddress::Domain(domain.to_bytes().into(), port),
+            Address::IPv4(addr) => OmbracAddress::IPv4(addr),
+            Address::IPv6(addr) => OmbracAddress::IPv6(addr),
+        };
+
+        debug!("Connect {}", addr);
+
+        let mut retry_count = 0;
+        let mut retry_delay = INITIAL_RETRY_DELAY;
+
+        loop {
+            match timeout(CONNECT_TIMEOUT, ombrac.connect(addr.clone())).await {
+                Ok(Ok(mut outbound)) => {
+                    let t = copy_bidirectional(&mut stream, &mut outbound).await?;
+                    info!("Connect {}, Send: {}, Recv: {}", addr, t.0, t.1);
+                    break;
+                }
+                Ok(Err(e)) => {
+                    if retry_count >= MAX_RETRIES {
+                        break;
+                    }
+
+                    warn!("Connect {} failed: {}", addr, e.to_string());
+                    retry_count += 1;
+
+                    sleep(retry_delay).await;
+                    retry_delay *= 2;
+                }
+                Err(_) => {
+                    if retry_count >= MAX_RETRIES {
+                        break;
+                    }
+
+                    warn!("Connect {} timed out", addr);
+                    retry_count += 1;
+
+                    sleep(retry_delay).await;
+                    retry_delay *= 2;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    #[cfg(feature = "datagram")]
+    #[inline]
+    async fn handle_associate(
+        ombrac: Arc<Client<T>>,
+        _address: Address,
+        mut stream: Stream<impl AsyncRead + AsyncWrite + Unpin>,
+    ) -> io::Result<()> {
+        use ombrac::address::Address as OmbracAddress;
+        use socks_lib::v5::{Domain, UdpPacket};
+        use tokio::io::{Error, ErrorKind};
+        use tokio::net::UdpSocket;
+        use tokio::time::timeout;
+
+        const DEFAULT_BUF_SIZE: usize = 2 * 1024;
+        const IDLE_TIMEOUT: Duration = Duration::from_secs(30);
+
+        let socket = UdpSocket::bind("0.0.0.0:0").await?;
+        let addr = Address::from_socket_addr(socket.local_addr()?);
+
+        stream.write_response(&Response::Success(&addr)).await?;
+        drop(stream);
+
+        let outbound = ombrac.associate().await?;
+
+        let socket_1 = Arc::new(socket);
+        let socket_2 = Arc::clone(&socket_1);
+        let datagram_1 = Arc::new(outbound);
+        let datagram_2 = Arc::clone(&datagram_1);
+
+        let mut buf = [0u8; DEFAULT_BUF_SIZE];
+
+        // Accpet first client
+        let client_addr = {
+            let (n, client_addr) = match timeout(IDLE_TIMEOUT, socket_1.recv_from(&mut buf)).await {
+                Ok(Ok((n, addr))) => (n, addr),
+                Ok(Err(e)) => return Err(e),
+                Err(_) => {
+                    return Err(Error::new(
+                        ErrorKind::TimedOut,
+                        "No initial packet received",
+                    ));
+                }
+            };
+
+            let packet = UdpPacket::from_bytes(&mut &buf[..n]).map_err(|e| {
+                Error::new(
+                    ErrorKind::InvalidData,
+                    format!("Failed to parse UDP packet: {}", e),
+                )
+            })?;
+
+            let addr = match packet.address {
+                Address::Domain(domain, port) => {
+                    OmbracAddress::Domain(domain.to_bytes().into(), port)
+                }
+                Address::IPv4(addr) => OmbracAddress::IPv4(addr),
+                Address::IPv6(addr) => OmbracAddress::IPv6(addr),
+            };
+
+            datagram_1.send(packet.data, addr).await?;
+
+            client_addr
+        };
+
+        let mut handle_1 = tokio::spawn(async move {
+            loop {
+                let (n, addr) = socket_1.recv_from(&mut buf).await?;
+
+                // Only accept packets from the first client
+                if addr != client_addr {
+                    buf = [0u8; DEFAULT_BUF_SIZE];
+                    continue;
+                }
+
+                let packet = UdpPacket::from_bytes(&mut &buf[..n]).map_err(|e| {
+                    Error::new(
+                        ErrorKind::InvalidData,
+                        format!("Failed to parse UDP packet: {}", e),
+                    )
+                })?;
+
+                let addr = match packet.address {
+                    Address::Domain(domain, port) => {
+                        OmbracAddress::Domain(domain.to_bytes().into(), port)
+                    }
+                    Address::IPv4(addr) => OmbracAddress::IPv4(addr),
+                    Address::IPv6(addr) => OmbracAddress::IPv6(addr),
+                };
+
+                debug!("Associate send to {}, length: {}", addr, packet.data.len());
+                datagram_1.send(packet.data, addr).await?;
+            }
+        });
+
+        let mut handle_2 = tokio::spawn(async move {
+            loop {
+                match timeout(IDLE_TIMEOUT, datagram_2.recv()).await {
+                    Ok(Ok((data, addr))) => {
+                        debug!("Associate recv from {}, length: {}", addr, data.len());
+
+                        let addr = match addr {
+                            OmbracAddress::Domain(domain, port) => {
+                                Address::Domain(Domain::from_bytes(domain.to_bytes()), port)
+                            }
+                            OmbracAddress::IPv4(addr) => Address::IPv4(addr),
+                            OmbracAddress::IPv6(addr) => Address::IPv6(addr),
+                        };
+
+                        let packet = UdpPacket::un_frag(addr, data);
+
+                        socket_2.send_to(&packet.data, client_addr).await?;
+                    }
+                    Ok(Err(e)) => return Err(e),
+                    Err(_) => break, // Timeout
+                }
+            }
+
+            Ok(())
+        });
+
+        let result = tokio::select! {
+            result = &mut handle_1 => {
+                handle_2.abort();
+                result
+            },
+            result = &mut handle_2 => {
+                handle_1.abort();
+                result
+            },
+        };
+
+        match result {
+            Ok(inner_result) => inner_result,
+            Err(e) if e.is_cancelled() => Ok(()),
+            Err(e) => Err(io::Error::new(io::ErrorKind::Other, e)),
+        }
+    }
+}

@@ -40,7 +40,7 @@ mod tests_transport_quic {
             .unwrap();
         let client = Client::new(secret, client);
 
-        let mut stream = client.tcp_connect(tcp_server_handle.addr()).await.unwrap();
+        let mut stream = client.connect(tcp_server_handle.addr()).await.unwrap();
 
         stream.write_all(b"test_request").await.unwrap();
         stream.flush().await.unwrap();
@@ -86,11 +86,11 @@ mod tests_transport_quic {
         let client = Client::new(secret, client);
 
         let data = b"test_request".to_vec();
-        let stream = client.udp_associate().await.unwrap();
+        let stream = client.associate().await.unwrap();
 
-        stream.send(udp_addr, data).await.unwrap();
+        stream.send(data, udp_addr).await.unwrap();
 
-        let (_addr, bytes) = stream.recv().await.unwrap();
+        let (bytes, _addr) = stream.recv().await.unwrap();
 
         assert_eq!(&bytes.to_vec(), b"test_response");
     }
