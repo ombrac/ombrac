@@ -1,79 +1,93 @@
 use std::io;
-use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
+use std::net::{SocketAddr, SocketAddrV4, SocketAddrV6};
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
-use tokio::io::{AsyncRead, AsyncReadExt};
 
-const ADDRESS_ATYP_DOMAIN: u8 = 1;
-const ADDRESS_ATYP_IPV4: u8 = 2;
-const ADDRESS_ATYP_IPV6: u8 = 3;
-
-const IPV4_LENGTH: usize = 4;
-const IPV6_LENGTH: usize = 16;
-
-//  +------------+------------------------+------------------------+
-//  |  ATYP (8)  |       PORT (16)        |      ADDR (0...)     ...
-//  +------------+------------------------+------------------------+
-#[derive(Debug, Clone)]
+/// # ADDRESS
+///
+/// ```text
+/// +------------+------------------------+------------------------+
+/// |  ATYP (1)  |       ADDR (*)         |       PORT (2)         |
+/// +------------+------------------------+------------------------+
+/// ```
+///
+/// ## ATYP
+///
+/// ```text
+/// +------+--------------+
+/// | Bits |    ATYP      |
+/// +======+==============+
+/// | 0x01 |    Domain    |
+/// +------+--------------+
+/// | 0x02 |    IPv4      |
+/// +------+--------------+
+/// | 0x03 |    IPv6      |
+/// +------+--------------+
+/// ```
+#[derive(Debug, Clone, PartialEq)]
 pub enum Address {
-    Domain(String, u16),
+    Domain(Domain, u16),
     IPv4(SocketAddrV4),
     IPv6(SocketAddrV6),
 }
 
 impl Address {
-    pub async fn to_socket_addr(self) -> io::Result<SocketAddr> {
-        use tokio::net::lookup_host;
+    const ADDRESS_ATYP_DOMAIN: u8 = 0x01;
+    const ADDRESS_ATYP_IPV4: u8 = 0x02;
+    const ADDRESS_ATYP_IPV6: u8 = 0x03;
 
+    const PORT_LENGTH: usize = 2;
+    const IPV4_LENGTH: usize = 4;
+    const IPV6_LENGTH: usize = 16;
+
+    const DOMAIN_LENGTH_MAX: usize = (u8::MAX - 1) as usize;
+}
+
+impl Address {
+    #[inline]
+    pub fn format_as_string(&self) -> io::Result<String> {
         match self {
-            Address::IPv4(addr) => Ok(SocketAddr::V4(addr)),
-            Address::IPv6(addr) => Ok(SocketAddr::V6(addr)),
-            Address::Domain(domain, port) => lookup_host((domain.as_str(), port))
-                .await?
-                .next()
-                .ok_or(io::Error::other(format!(
-                    "Failed to resolve domain {}",
-                    domain
-                ))),
+            Self::Domain(domain, port) => Ok(format!("{}:{}", domain.format_as_str()?, port)),
+            Self::IPv4(addr) => Ok(addr.to_string()),
+            Self::IPv6(addr) => Ok(addr.to_string()),
         }
     }
 
+    #[inline]
     pub fn to_bytes(&self) -> io::Result<Bytes> {
         let mut buf = BytesMut::new();
 
         match self {
             Address::Domain(domain, port) => {
-                let domain_bytes = domain.as_bytes();
-                let domain_len = domain_bytes.len();
-                if domain_len > 255 {
+                let domain_len = domain.len();
+                if domain_len > Self::DOMAIN_LENGTH_MAX {
                     return Err(io::Error::new(
                         io::ErrorKind::InvalidInput,
-                        "Domain name exceeds maximum length of 255 bytes",
+                        "Domain name exceeds maximum length of 254 bytes",
                     ));
                 }
-                buf.reserve(1 + 2 + 1 + domain_len);
-                buf.put_u8(ADDRESS_ATYP_DOMAIN);
-                buf.put_u16(*port);
+
+                buf.put_u8(Self::ADDRESS_ATYP_DOMAIN);
                 buf.put_u8(domain_len as u8);
-                buf.put_slice(domain_bytes);
+                buf.put_slice(domain.as_bytes());
+                buf.put_u16(*port);
             }
             Address::IPv4(addr) => {
-                buf.reserve(1 + 2 + IPV4_LENGTH);
-                buf.put_u8(ADDRESS_ATYP_IPV4);
-                buf.put_u16(addr.port());
+                buf.put_u8(Self::ADDRESS_ATYP_IPV4);
                 buf.put_slice(&addr.ip().octets());
+                buf.put_u16(addr.port());
             }
             Address::IPv6(addr) => {
-                buf.reserve(1 + 2 + IPV6_LENGTH);
-                buf.put_u8(ADDRESS_ATYP_IPV6);
-                buf.put_u16(addr.port());
+                buf.put_u8(Self::ADDRESS_ATYP_IPV6);
                 buf.put_slice(&addr.ip().octets());
+                buf.put_u16(addr.port());
             }
         }
 
         Ok(buf.freeze())
     }
 
+    #[inline]
     pub fn from_bytes<B: Buf>(buf: &mut B) -> io::Result<Self> {
         if buf.remaining() < 1 {
             return Err(io::Error::new(
@@ -84,17 +98,8 @@ impl Address {
 
         let atyp = buf.get_u8();
 
-        if buf.remaining() < 2 {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "Insufficient data for port",
-            ));
-        }
-
-        let port = buf.get_u16();
-
         match atyp {
-            ADDRESS_ATYP_DOMAIN => {
+            Self::ADDRESS_ATYP_DOMAIN => {
                 if buf.remaining() < 1 {
                     return Err(io::Error::new(
                         io::ErrorKind::InvalidData,
@@ -103,52 +108,52 @@ impl Address {
                 }
 
                 let len = buf.get_u8() as usize;
-
-                if buf.remaining() < len {
+                if buf.remaining() < len + Self::PORT_LENGTH {
                     return Err(io::Error::new(
                         io::ErrorKind::InvalidData,
-                        "Insufficient data for domain",
+                        "Insufficient data for domain and port",
                     ));
                 }
 
                 let domain_bytes = buf.copy_to_bytes(len);
-                let domain = String::from_utf8(domain_bytes.to_vec()).map_err(|e| {
-                    io::Error::new(io::ErrorKind::InvalidData, format!("Invalid domain: {}", e))
-                })?;
+                let port = buf.get_u16();
+                let domain = Domain::from_bytes(domain_bytes);
 
                 Ok(Address::Domain(domain, port))
             }
-            ADDRESS_ATYP_IPV4 => {
-                if buf.remaining() < IPV4_LENGTH {
+
+            Self::ADDRESS_ATYP_IPV4 => {
+                if buf.remaining() < Self::IPV4_LENGTH + Self::PORT_LENGTH {
                     return Err(io::Error::new(
                         io::ErrorKind::InvalidData,
-                        "Insufficient data for IPv4",
+                        "Insufficient data for IPv4 address and port",
                     ));
                 }
 
-                let mut ip = [0u8; IPV4_LENGTH];
-                buf.copy_to_slice(&mut ip);
+                let mut ip_bytes = [0u8; 4];
+                buf.copy_to_slice(&mut ip_bytes);
+                let port = buf.get_u16();
 
-                Ok(Address::IPv4(SocketAddrV4::new(Ipv4Addr::from(ip), port)))
+                let addr = SocketAddrV4::new(ip_bytes.into(), port);
+                Ok(Address::IPv4(addr))
             }
-            ADDRESS_ATYP_IPV6 => {
-                if buf.remaining() < IPV6_LENGTH {
+
+            Self::ADDRESS_ATYP_IPV6 => {
+                if buf.remaining() < Self::IPV6_LENGTH + Self::PORT_LENGTH {
                     return Err(io::Error::new(
                         io::ErrorKind::InvalidData,
-                        "Insufficient data for IPv6",
+                        "Insufficient data for IPv6 address and port",
                     ));
                 }
 
-                let mut ip = [0u8; IPV6_LENGTH];
-                buf.copy_to_slice(&mut ip);
+                let mut ip_bytes = [0u8; 16];
+                buf.copy_to_slice(&mut ip_bytes);
+                let port = buf.get_u16();
 
-                Ok(Address::IPv6(SocketAddrV6::new(
-                    Ipv6Addr::from(ip),
-                    port,
-                    0,
-                    0,
-                )))
+                let addr = SocketAddrV6::new(ip_bytes.into(), port, 0, 0);
+                Ok(Address::IPv6(addr))
             }
+
             _ => Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 format!("Invalid address type value: {}", atyp),
@@ -156,58 +161,119 @@ impl Address {
         }
     }
 
-    pub async fn from_async_read<R: AsyncRead + Unpin>(reader: &mut R) -> io::Result<Self> {
-        let mut header = [0u8; 3];
-        reader.read_exact(&mut header).await?;
+    pub async fn to_socket_addr(self) -> io::Result<SocketAddr> {
+        use tokio::net::lookup_host;
 
-        let atyp = header[0];
-        let port = u16::from_be_bytes([header[1], header[2]]);
+        match self {
+            Address::IPv4(addr) => Ok(SocketAddr::V4(addr)),
+            Address::IPv6(addr) => Ok(SocketAddr::V6(addr)),
+            Address::Domain(domain, port) => {
+                let domain = domain.format_as_str()?;
 
-        match atyp {
-            ADDRESS_ATYP_DOMAIN => {
-                let mut len = [0u8; 1];
-                reader.read_exact(&mut len).await?;
-                let len = len[0] as usize;
-
-                let mut domain = vec![0u8; len];
-                reader.read_exact(&mut domain).await?;
-                let domain = String::from_utf8(domain).map_err(|e| {
-                    io::Error::new(io::ErrorKind::InvalidData, format!("Invalid domain: {}", e))
-                })?;
-
-                Ok(Address::Domain(domain, port))
+                lookup_host((domain, port))
+                    .await?
+                    .next()
+                    .ok_or(io::Error::other(format!(
+                        "Failed to resolve domain {}",
+                        domain
+                    )))
             }
-            ADDRESS_ATYP_IPV4 => {
-                let mut ip = [0u8; IPV4_LENGTH];
-                reader.read_exact(&mut ip).await?;
-
-                Ok(Address::IPv4(SocketAddrV4::new(Ipv4Addr::from(ip), port)))
-            }
-            ADDRESS_ATYP_IPV6 => {
-                let mut ip = [0u8; IPV6_LENGTH];
-                reader.read_exact(&mut ip).await?;
-
-                Ok(Address::IPv6(SocketAddrV6::new(
-                    Ipv6Addr::from(ip),
-                    port,
-                    0,
-                    0,
-                )))
-            }
-            _ => Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("Invalid address type value: {}", atyp),
-            )),
         }
     }
 }
 
-impl Into<Address> for SocketAddr {
-    fn into(self) -> Address {
-        match self {
-            Self::V4(addr) => Address::IPv4(addr),
-            Self::V6(addr) => Address::IPv6(addr),
+impl From<SocketAddr> for Address {
+    #[inline]
+    fn from(value: SocketAddr) -> Self {
+        match value {
+            SocketAddr::V4(addr) => Self::IPv4(addr),
+            SocketAddr::V6(addr) => Self::IPv6(addr),
         }
+    }
+}
+
+impl std::fmt::Display for Address {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let message = match self {
+            Self::Domain(domain, port) => format!("Doamin({:?}:{})", domain.0, port),
+            Self::IPv4(addr) => format!("IPv4({})", addr),
+            Self::IPv6(addr) => format!("IPv6({})", addr),
+        };
+
+        write!(f, "{message}")
+    }
+}
+
+// ===== Domain =====
+#[derive(Debug, Clone, PartialEq)]
+pub struct Domain(Bytes);
+
+impl From<&[u8]> for Domain {
+    #[inline]
+    fn from(value: &[u8]) -> Self {
+        Self(Bytes::copy_from_slice(value))
+    }
+}
+
+impl From<&str> for Domain {
+    #[inline]
+    fn from(value: &str) -> Self {
+        Self(Bytes::copy_from_slice(value.as_bytes()))
+    }
+}
+
+impl From<String> for Domain {
+    #[inline]
+    fn from(value: String) -> Self {
+        Self(Bytes::copy_from_slice(value.as_bytes()))
+    }
+}
+
+impl From<Bytes> for Domain {
+    #[inline]
+    fn from(value: Bytes) -> Self {
+        Self(value)
+    }
+}
+
+impl Domain {
+    #[inline]
+    pub fn format_as_str(&self) -> io::Result<&str> {
+        use std::str::from_utf8;
+
+        from_utf8(&self.0).map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Invalid UTF-8"))
+    }
+
+    #[inline]
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.0
+    }
+
+    #[inline]
+    pub fn to_bytes(self) -> Bytes {
+        self.0
+    }
+
+    #[inline]
+    pub fn from_bytes(bytes: Bytes) -> Self {
+        Self(bytes)
+    }
+
+    #[inline]
+    pub fn from_string(value: String) -> Self {
+        value.into()
+    }
+
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+}
+
+impl AsRef<[u8]> for Domain {
+    #[inline]
+    fn as_ref(&self) -> &[u8] {
+        self.as_bytes()
     }
 }
 
@@ -215,208 +281,82 @@ impl Into<Address> for SocketAddr {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_address_domain_serialization() {
-        let domain_addr = Address::Domain("example.com".to_string(), 8080);
-        let bytes = domain_addr.to_bytes().unwrap();
-        let mut buf = bytes.as_ref();
-        let decoded = Address::from_bytes(&mut buf).unwrap();
-
-        match decoded {
-            Address::Domain(domain, port) => {
-                assert_eq!(domain, "example.com");
-                assert_eq!(port, 8080);
-            }
-            _ => panic!("Wrong address type"),
-        }
-    }
-
-    #[test]
-    fn test_address_ipv4_serialization() {
-        let ipv4_addr = Address::IPv4(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 8080));
-        let bytes = ipv4_addr.to_bytes().unwrap();
-        let mut buf = bytes.as_ref();
-        let decoded = Address::from_bytes(&mut buf).unwrap();
-
-        match decoded {
-            Address::IPv4(addr) => {
-                assert_eq!(addr.ip().octets(), [127, 0, 0, 1]);
-                assert_eq!(addr.port(), 8080);
-            }
-            _ => panic!("Wrong address type"),
-        }
-    }
-
-    #[test]
-    fn test_address_ipv6_serialization() {
-        let ipv6_addr = Address::IPv6(SocketAddrV6::new(
-            Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1),
-            8080,
-            0,
-            0,
-        ));
-        let bytes = ipv6_addr.to_bytes().unwrap();
-        let mut buf = bytes.as_ref();
-        let decoded = Address::from_bytes(&mut buf).unwrap();
-
-        match decoded {
-            Address::IPv6(addr) => {
-                assert_eq!(addr.ip().segments(), [0x2001, 0xdb8, 0, 0, 0, 0, 0, 1]);
-                assert_eq!(addr.port(), 8080);
-            }
-            _ => panic!("Wrong address type"),
-        }
-    }
-
-    #[test]
-    fn test_address_domain_too_long() {
-        let long_domain = "a".repeat(256);
-        let addr = Address::Domain(long_domain, 8080);
-        assert!(addr.to_bytes().is_err());
-    }
-
-    #[test]
-    fn test_address_from_bytes_insufficient_data() {
-        // Test with empty buffer
-        let mut empty_buf = Bytes::new();
-        assert!(Address::from_bytes(&mut empty_buf).is_err());
-
-        // Test with only address type
-        let mut small_buf = BytesMut::new();
-        small_buf.put_u8(ADDRESS_ATYP_DOMAIN);
-        assert!(Address::from_bytes(&mut small_buf.freeze()).is_err());
-    }
-
-    #[test]
-    fn test_address_invalid_type() {
-        let mut buf = BytesMut::new();
-        buf.put_u8(255); // Invalid address type
-        buf.put_u16(8080);
-        assert!(Address::from_bytes(&mut buf.freeze()).is_err());
-    }
-
-    #[test]
-    fn test_address_invalid_domain() {
-        let mut buf = BytesMut::new();
-        buf.put_u8(ADDRESS_ATYP_DOMAIN);
-        buf.put_u16(8080);
-        buf.put_u8(4); // domain length
-        buf.put_slice(&[0xFF, 0xFF, 0xFF, 0xFF]); // Invalid UTF-8
-        assert!(Address::from_bytes(&mut buf.freeze()).is_err());
-    }
-}
-
-#[cfg(test)]
-mod tests_async {
-    use bytes::BytesMut;
     use std::net::{Ipv4Addr, Ipv6Addr};
 
-    use super::*;
-
-    async fn write_to_buf(data: &[u8]) -> impl AsyncRead + Unpin {
-        use std::io::Cursor;
-
-        Cursor::new(Vec::from(data))
+    #[test]
+    fn test_ipv4_serialization() {
+        let addr = Address::IPv4(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 8080));
+        let bytes = addr.to_bytes().unwrap();
+        let mut buf = &bytes[..];
+        let parsed = Address::from_bytes(&mut buf).unwrap();
+        assert_eq!(addr, parsed);
     }
 
-    #[tokio::test]
-    async fn test_from_async_read_domain() {
-        let mut data = BytesMut::new();
-        data.put_u8(ADDRESS_ATYP_DOMAIN);
-        data.put_u16(8080);
-        data.put_u8(11);
-        data.put_slice(b"example.com");
+    #[test]
+    fn test_ipv6_serialization() {
+        let addr = Address::IPv6(SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8080, 0, 0));
+        let bytes = addr.to_bytes().unwrap();
+        let mut buf = &bytes[..];
+        let parsed = Address::from_bytes(&mut buf).unwrap();
+        assert_eq!(addr, parsed);
+    }
 
-        let mut reader = write_to_buf(&data).await;
+    #[test]
+    fn test_domain_serialization() {
+        let domain = Domain::from("example.com");
+        let addr = Address::Domain(domain, 8080);
+        let mut bytes = addr.to_bytes().unwrap();
 
-        let address = Address::from_async_read(&mut reader).await.unwrap();
+        let parsed = Address::from_bytes(&mut bytes).unwrap();
 
-        match address {
-            Address::Domain(domain, port) => {
-                assert_eq!(domain, "example.com");
-                assert_eq!(port, 8080);
-            }
-            _ => panic!("Expected Address::Domain"),
+        if let Address::Domain(d, p) = parsed {
+            assert_eq!(d.format_as_str().unwrap(), "example.com");
+            assert_eq!(p, 8080);
+        } else {
+            panic!("Parsed address is not Domain type");
         }
     }
 
-    #[tokio::test]
-    async fn test_from_async_read_ipv4() {
-        let mut data = BytesMut::new();
-        data.put_u8(ADDRESS_ATYP_IPV4);
-        data.put_u16(8080);
-        data.put_slice(&[127, 0, 0, 1]);
-
-        let mut reader = write_to_buf(&data).await;
-
-        let address = Address::from_async_read(&mut reader).await.unwrap();
-
-        match address {
-            Address::IPv4(addr) => {
-                assert_eq!(addr.ip(), &Ipv4Addr::new(127, 0, 0, 1));
-                assert_eq!(addr.port(), 8080);
-            }
-            _ => panic!("Expected Address::IPv4"),
-        }
-    }
-
-    #[tokio::test]
-    async fn test_from_async_read_ipv6() {
-        let mut data = BytesMut::new();
-        data.put_u8(ADDRESS_ATYP_IPV6);
-        data.put_u16(8080);
-        data.put_slice(&[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]);
-
-        let mut reader = write_to_buf(&data).await;
-
-        let address = Address::from_async_read(&mut reader).await.unwrap();
-
-        match address {
-            Address::IPv6(addr) => {
-                assert_eq!(addr.ip(), &Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1));
-                assert_eq!(addr.port(), 8080);
-            }
-            _ => panic!("Expected Address::IPv6"),
-        }
-    }
-
-    #[tokio::test]
-    async fn test_from_async_read_invalid_atyp() {
-        let mut data = BytesMut::new();
-        data.put_u8(4);
-        data.put_u16(8080);
-
-        let mut reader = write_to_buf(&data).await;
-
-        let result = Address::from_async_read(&mut reader).await;
+    #[test]
+    fn test_invalid_atyp() {
+        let mut buf = bytes::BytesMut::new();
+        buf.put_u8(0x04);
+        let mut buf = buf.freeze();
+        let result = Address::from_bytes(&mut buf);
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err().kind(), io::ErrorKind::InvalidData);
+    }
+
+    #[test]
+    fn test_domain_too_long() {
+        let domain = Domain::from(vec![b'a'; 255].as_slice());
+        let addr = Address::Domain(domain, 8080);
+        let result = addr.to_bytes();
+        assert!(result.is_err());
     }
 
     #[tokio::test]
-    async fn test_from_async_read_incomplete_data() {
-        let mut data = BytesMut::new();
-        data.put_u8(ADDRESS_ATYP_IPV4);
-
-        let mut reader = write_to_buf(&data).await;
-
-        let result = Address::from_async_read(&mut reader).await;
-        assert!(result.is_err());
-        assert_eq!(result.unwrap_err().kind(), io::ErrorKind::UnexpectedEof);
+    async fn test_domain_resolution() {
+        let domain = Domain::from("localhost");
+        let addr = Address::Domain(domain, 8080);
+        let socket_addr = addr.to_socket_addr().await.unwrap();
+        assert!(socket_addr.port() == 8080);
     }
 
-    #[tokio::test]
-    async fn test_from_async_read_invalid_domain() {
-        let mut data = BytesMut::new();
-        data.put_u8(ADDRESS_ATYP_DOMAIN);
-        data.put_u16(8080);
-        data.put_u8(3);
-        data.put_slice(&[0xFF, 0xFF, 0xFF]);
-
-        let mut reader = write_to_buf(&data).await;
-
-        let result = Address::from_async_read(&mut reader).await;
+    #[test]
+    fn test_domain_utf8_error() {
+        let domain = Domain::from(vec![0xff, 0xfe].as_slice());
+        let result = domain.format_as_str();
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err().kind(), io::ErrorKind::InvalidData);
+    }
+
+    #[test]
+    fn test_socket_addr_conversion() {
+        let socket_v4 = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 8080);
+        let addr: Address = SocketAddr::V4(socket_v4).into();
+        assert!(matches!(addr, Address::IPv4(_)));
+
+        let socket_v6 = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8080, 0, 0);
+        let addr: Address = SocketAddr::V6(socket_v6).into();
+        assert!(matches!(addr, Address::IPv6(_)));
     }
 }
