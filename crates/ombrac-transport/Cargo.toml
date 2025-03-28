@@ -16,7 +16,14 @@ tracing = ["dep:tracing"]
 
 datagram = ["dashmap"]
 
-quic = ["quinn", "rustls", "rustls-pemfile", "aws-lc-rs", "webpki-roots", "rcgen"]
+quic = [
+    "quinn", 
+    "rustls", 
+    "rustls-pemfile", 
+    "aws-lc-rs", 
+    "webpki-roots", 
+    "rcgen"
+]
 
 [dependencies]
 ombrac = { workspace = true }

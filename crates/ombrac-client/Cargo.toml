@@ -15,10 +15,7 @@ path = "bin/main.rs"
 required-features = ["binary"]
 
 [features]
-default = [
-    "transport-default",
-    "tracing"
-]
+default = []
 
 datagram = ["ombrac-transport/datagram"]
 
@@ -39,6 +36,8 @@ binary = [
 
     "transport-default",
     "endpoint-default",
+    "datagram",
+    "tracing"
 ]
 
 [dependencies]

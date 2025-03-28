@@ -15,10 +15,7 @@ path = "bin/main.rs"
 required-features = ["binary"]
 
 [features]
-default = [
-    "transport-default",
-    "tracing"
-]
+default = []
 
 datagram = ["ombrac-transport/datagram"]
 
@@ -33,6 +30,10 @@ binary = [
     "tokio/macros",
     "tokio/rt-multi-thread",
     "tracing-subscriber",
+
+    "transport-default",
+    "datagram",
+    "tracing"
 ]
 
 [dependencies]
