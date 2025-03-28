@@ -5,17 +5,20 @@ use std::time::Duration;
 
 use ombrac_macros::{debug, error, info, warn};
 use ombrac_transport::Initiator;
-use socks_lib::v5::server::Server as SocksServer;
-use socks_lib::v5::{Address, Request, Response, Stream};
-use tokio::io::{AsyncRead, AsyncWrite};
+use socks_lib::v5::{Address, Method, Request, Response, Stream};
+use tokio::{
+    io::{AsyncRead, AsyncWrite},
+    net::TcpListener,
+};
 
 use crate::Client;
 
-pub struct Server<T: Initiator>(SocksServer, Arc<Client<T>>);
+pub struct Server<T: Initiator>(TcpListener, Arc<Client<T>>);
 
 impl<T: Initiator> Server<T> {
     pub async fn bind<A: Into<SocketAddr>>(addr: A, ombrac: Arc<Client<T>>) -> io::Result<Self> {
-        Ok(Self(SocksServer::bind(addr.into()).await?, ombrac))
+        let inner = TcpListener::bind(addr.into()).await?;
+        Ok(Self(inner, ombrac))
     }
 
     pub async fn listen(&self) -> io::Result<()> {
@@ -25,10 +28,20 @@ impl<T: Initiator> Server<T> {
 
         loop {
             match self.0.accept().await {
-                Ok((request, mut stream)) => {
+                Ok((inner, _addr)) => {
                     let ombrac = ombrac.clone();
 
                     tokio::spawn(async move {
+                        let mut stream = Stream::with(inner);
+
+                        let request = match Self::handle_socks_request(&mut stream).await {
+                            Ok(request) => request,
+                            Err(_error) => {
+                                error!("Failed to accept socks: {}", _error);
+                                return;
+                            }
+                        };
+
                         let result = match request {
                             Request::Connect(address) => {
                                 Self::handle_connect(ombrac, address, stream).await
@@ -57,6 +70,18 @@ impl<T: Initiator> Server<T> {
                 }
             }
         }
+    }
+
+    #[inline]
+    async fn handle_socks_request(
+        stream: &mut Stream<impl AsyncRead + AsyncWrite + Unpin>,
+    ) -> io::Result<Request> {
+        let _methods = stream.read_methods().await?;
+        stream.write_auth_method(Method::NoAuthentication).await?;
+
+        let request = stream.read_request().await?;
+
+        Ok(request)
     }
 
     #[inline]

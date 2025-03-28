@@ -176,7 +176,7 @@ name = "benches"
 version = "0.5.0"
 dependencies = [
  "criterion",
- "ombrac",
+ "ombrac 0.5.0",
  "ombrac-client",
  "ombrac-server",
  "tests-support",
@@ -948,13 +948,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "ombrac"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cc0e39113a0ea773cfef401f13d645d81ef851daf9746271c6ae00d087953c31"
+dependencies = [
+ "bytes",
+ "tokio",
+]
+
+[[package]]
 name = "ombrac-client"
 version = "0.5.0"
 dependencies = [
  "blake3",
  "bytes",
  "clap",
- "ombrac",
+ "ombrac 0.5.0",
  "ombrac-macros",
  "ombrac-transport",
  "socks-lib",
@@ -974,7 +984,7 @@ dependencies = [
  "blake3",
  "bytes",
  "clap",
- "ombrac",
+ "ombrac 0.5.0",
  "ombrac-macros",
  "ombrac-transport",
  "tokio",
@@ -992,7 +1002,7 @@ dependencies = [
  "dashmap",
  "futures",
  "ntest",
- "ombrac",
+ "ombrac 0.5.0",
  "ombrac-macros",
  "quinn",
  "rcgen",
@@ -1529,11 +1539,12 @@ dependencies = [
 
 [[package]]
 name = "socks-lib"
-version = "0.1.3"
+version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fd4e998c42ec8ca980f3ffca64c727ac156cd82b398fac30ec5c8e4125051148"
+checksum = "7306752340c74eb34d2906c2108e632b774b91f4680f757f19f3165112ccd056"
 dependencies = [
  "bytes",
+ "ombrac 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "tokio",
 ]
 
