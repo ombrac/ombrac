@@ -37,6 +37,7 @@ binary = [
     "tokio/rt-multi-thread",
     "tracing-subscriber",
 
+    "transport-default",
     "endpoint-default",
 ]
 

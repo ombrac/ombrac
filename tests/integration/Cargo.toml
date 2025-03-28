@@ -10,10 +10,17 @@ description.workspace = true
 keywords.workspace = true
 readme = "../../README.md"
 
+[features]
+datagram = [
+    "ombrac-client/datagram",
+    "ombrac-server/datagram",
+    "ombrac-transport/datagram"
+]
+
 [dependencies]
-ombrac-client = { workspace = true, features = ["datagram"] }
-ombrac-server = { workspace = true, features = ["datagram"] }
-ombrac-transport = { workspace = true, features = ["quic", "datagram"] }
+ombrac-client = { workspace = true }
+ombrac-server = { workspace = true }
+ombrac-transport = { workspace = true }
 
 tokio = { workspace = true, features = ["full"] }
 curl = { workspace = true }

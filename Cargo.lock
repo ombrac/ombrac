@@ -173,10 +173,10 @@ checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
 name = "benches"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "criterion",
- "ombrac 0.5.0",
+ "ombrac",
  "ombrac-client",
  "ombrac-server",
  "tests-support",
@@ -940,7 +940,7 @@ dependencies = [
 
 [[package]]
 name = "ombrac"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "bytes",
  "futures",
@@ -948,23 +948,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "ombrac"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cc0e39113a0ea773cfef401f13d645d81ef851daf9746271c6ae00d087953c31"
-dependencies = [
- "bytes",
- "tokio",
-]
-
-[[package]]
 name = "ombrac-client"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "blake3",
  "bytes",
  "clap",
- "ombrac 0.5.0",
+ "ombrac",
  "ombrac-macros",
  "ombrac-transport",
  "socks-lib",
@@ -975,16 +965,16 @@ dependencies = [
 
 [[package]]
 name = "ombrac-macros"
-version = "0.5.0"
+version = "0.5.1"
 
 [[package]]
 name = "ombrac-server"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "blake3",
  "bytes",
  "clap",
- "ombrac 0.5.0",
+ "ombrac",
  "ombrac-macros",
  "ombrac-transport",
  "tokio",
@@ -994,7 +984,7 @@ dependencies = [
 
 [[package]]
 name = "ombrac-transport"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "async-channel",
  "aws-lc-rs",
@@ -1002,7 +992,7 @@ dependencies = [
  "dashmap",
  "futures",
  "ntest",
- "ombrac 0.5.0",
+ "ombrac",
  "ombrac-macros",
  "quinn",
  "rcgen",
@@ -1544,7 +1534,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7306752340c74eb34d2906c2108e632b774b91f4680f757f19f3165112ccd056"
 dependencies = [
  "bytes",
- "ombrac 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "tokio",
 ]
 
@@ -1584,7 +1573,7 @@ dependencies = [
 
 [[package]]
 name = "tests-integration"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "curl",
  "ntest",
@@ -1597,7 +1586,7 @@ dependencies = [
 
 [[package]]
 name = "tests-support"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "rcgen",
  "tokio",
