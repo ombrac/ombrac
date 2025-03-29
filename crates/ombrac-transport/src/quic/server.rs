@@ -96,7 +96,7 @@ impl Connection {
 
             let (cert, key) = if config.tls_skip {
                 let signed = rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
-                let cert = vec![CertificateDer::from(signed.cert).into()];
+                let cert = vec![CertificateDer::from(signed.cert)];
                 let key = PrivatePkcs8KeyDer::from(signed.key_pair.serialize_der()).into();
                 (cert, key)
             } else {
@@ -138,10 +138,7 @@ impl Connection {
         let quic_config = {
             use quinn::crypto::rustls::QuicServerConfig;
 
-            let config = QuicServerConfig::try_from(tls_config)
-                .map_err(|e| io::Error::other(e.to_string()))?;
-
-            config
+            QuicServerConfig::try_from(tls_config).map_err(|e| io::Error::other(e.to_string()))?
         };
 
         let server_config = {

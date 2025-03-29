@@ -152,10 +152,7 @@ impl Connection {
         let quic_config = {
             use quinn::crypto::rustls::QuicClientConfig;
 
-            let config = QuicClientConfig::try_from(tls_config)
-                .map_err(|e| io::Error::other(e.to_string()))?;
-
-            config
+            QuicClientConfig::try_from(tls_config).map_err(|e| io::Error::other(e.to_string()))?
         };
 
         let client_config = {
