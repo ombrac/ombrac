@@ -132,7 +132,7 @@ impl<T: Acceptor> Server<T> {
     }
 
     pub async fn listen(self) -> io::Result<()> {
-        let secret = self.secret.clone();
+        let secret = self.secret;
 
         let transport = Arc::new(self.transport);
 

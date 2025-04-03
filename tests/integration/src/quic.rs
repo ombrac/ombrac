@@ -7,7 +7,7 @@ mod tests_transport_quic {
     use ombrac_transport::quic::{
         client::Builder as QuicClientBuilder, server::Builder as QuicServerBuilder,
     };
-    use tests_support::net::{tcp::ResponseTcpServer, udp::ResponseUdpServer, *};
+    use tests_support::net::{tcp::ResponseTcpServer, *};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     #[tokio::test]
@@ -51,8 +51,11 @@ mod tests_transport_quic {
         assert_eq!(&buffer[..n], b"test_response");
     }
 
+    #[cfg(feature = "datagram")]
     #[tokio::test]
     async fn test_transport_quic_udp() {
+        use tests_support::net::udp::ResponseUdpServer;
+
         let secret = [0u8; 32];
 
         let udp_server = ResponseUdpServer::new();

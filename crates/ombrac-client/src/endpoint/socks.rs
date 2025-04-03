@@ -116,16 +116,16 @@ impl<T: Initiator> Server<T> {
         loop {
             match timeout(CONNECT_TIMEOUT, ombrac.connect(addr.clone())).await {
                 Ok(Ok(mut outbound)) => {
-                    let t = copy_bidirectional(&mut stream, &mut outbound).await?;
-                    info!("Connect {}, Send: {}, Recv: {}", addr, t.0, t.1);
+                    let _copy = copy_bidirectional(&mut stream, &mut outbound).await?;
+                    info!("Connect {}, Send: {}, Recv: {}", addr, _copy.0, _copy.1);
                     break;
                 }
-                Ok(Err(e)) => {
+                Ok(Err(_error)) => {
                     if retry_count >= MAX_RETRIES {
                         break;
                     }
 
-                    warn!("Connect {} failed: {}", addr, e.to_string());
+                    warn!("Connect {} failed: {}", addr, _error.to_string());
                     retry_count += 1;
 
                     sleep(retry_delay).await;

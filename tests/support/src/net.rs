@@ -183,6 +183,14 @@ pub mod tcp {
         addr: SocketAddr,
     }
 
+    impl Default for EchoTcpServer {
+        fn default() -> Self {
+            Self {
+                addr: SocketAddr::from(([127, 0, 0, 1], 0)),
+            }
+        }
+    }
+
     impl EchoTcpServer {
         pub fn new() -> Self {
             Self {
@@ -320,8 +328,8 @@ pub mod udp {
         buffer_size: usize,
     }
 
-    impl ResponseUdpServer {
-        pub fn new() -> Self {
+    impl Default for ResponseUdpServer {
+        fn default() -> Self {
             Self {
                 responses: Arc::new(Mutex::new(HashMap::new())),
                 addr: SocketAddr::from(([0, 0, 0, 0, 0, 0, 0, 1], 0)),
@@ -329,7 +337,9 @@ pub mod udp {
                 buffer_size: 4096,
             }
         }
+    }
 
+    impl ResponseUdpServer {
         pub async fn set_response(&self, input: Vec<u8>, response: Vec<u8>) {
             let mut responses = self.responses.lock().await;
             responses.insert(input, response);
@@ -403,14 +413,16 @@ pub mod udp {
         buffer_size: usize,
     }
 
-    impl EchoUdpServer {
-        pub fn new() -> Self {
+    impl Default for EchoUdpServer {
+        fn default() -> Self {
             Self {
                 addr: SocketAddr::from(([0, 0, 0, 0, 0, 0, 0, 1], 0)),
                 buffer_size: 4096,
             }
         }
+    }
 
+    impl EchoUdpServer {
         pub fn with_buffer_size(mut self, buffer_size: usize) -> Self {
             self.buffer_size = buffer_size;
             self
@@ -485,7 +497,7 @@ pub mod udp {
 
         #[tokio::test]
         async fn test_response_udp_server() {
-            let server = ResponseUdpServer::new();
+            let server = ResponseUdpServer::default();
             let input = b"hello";
             let response = b"world";
             server.set_response(input.to_vec(), response.to_vec()).await;
@@ -511,7 +523,7 @@ pub mod udp {
 
         #[tokio::test]
         async fn test_echo_udp_server() {
-            let server = EchoUdpServer::new();
+            let server = EchoUdpServer::default();
             let handle = server.start().await.unwrap();
             let server_addr = handle.addr();
 
