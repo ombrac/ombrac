@@ -68,7 +68,7 @@ impl Client {
 
         let client = Command::new(BinaryLocator::locate("ombrac-client"))
             .args(&args)
-            .arg("--tracing-level")
+            .arg("--log-level")
             .arg("DEBUG")
             .spawn()
             .expect("Failed to start ombrac-client");
@@ -134,7 +134,7 @@ impl Server {
 
         let server = Command::new(BinaryLocator::locate("ombrac-server"))
             .args(&args)
-            .arg("--tracing-level")
+            .arg("--log-level")
             .arg("DEBUG")
             .spawn()
             .expect("Failed to start ombrac-server");
