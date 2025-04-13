@@ -99,16 +99,37 @@ struct Args {
     )]
     max_streams: Option<u64>,
 
-    /// Logging level e.g., INFO, WARN, ERROR
+    /// Logging level (e.g., INFO, WARN, ERROR)
     #[cfg(feature = "tracing")]
     #[clap(
         long,
         default_value = "WARN",
-        value_name = "TRACE",
+        value_name = "LEVEL",
         help_heading = "Logging",
         verbatim_doc_comment
     )]
-    tracing_level: tracing::Level,
+    log_level: tracing::Level,
+
+    /// Path to the log directory
+    #[cfg(feature = "tracing")]
+    #[clap(
+        long,
+        value_name = "PATH",
+        help_heading = "Logging",
+        verbatim_doc_comment
+    )]
+    log_dir: Option<PathBuf>,
+
+    /// Prefix for log file names (only used when log-dir is specified)
+    #[cfg(feature = "tracing")]
+    #[clap(
+        long,
+        default_value = "log",
+        value_name = "STR",
+        help_heading = "Logging",
+        verbatim_doc_comment
+    )]
+    log_prefix: PathBuf,
 }
 
 #[tokio::main]
@@ -116,10 +137,21 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();
 
     #[cfg(feature = "tracing")]
-    tracing_subscriber::fmt()
-        .with_thread_ids(true)
-        .with_max_level(args.tracing_level)
-        .init();
+    {
+        let subscriber = tracing_subscriber::fmt()
+            .with_thread_ids(true)
+            .with_max_level(args.log_level);
+
+        let (non_blocking, guard) = if let Some(path) = &args.log_dir {
+            let file_appender = tracing_appender::rolling::daily(path, &args.log_prefix);
+            tracing_appender::non_blocking(file_appender)
+        } else {
+            tracing_appender::non_blocking(std::io::stdout())
+        };
+
+        std::mem::forget(guard);
+        subscriber.with_writer(non_blocking).init()
+    }
 
     let secret = blake3::hash(args.secret.as_bytes());
     let ombrac_server = Server::new(

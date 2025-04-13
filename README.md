@@ -84,7 +84,9 @@ Transport QUIC:
       --max-streams <NUM>    Maximum number of bidirectional streams that can be open simultaneously [default: 100]
 
 Logging:
-      --tracing-level <TRACE>  Logging level e.g., INFO, WARN, ERROR [default: WARN]
+      --log-level <LEVEL>  Logging level (e.g., INFO, WARN, ERROR) [default: WARN]
+      --log-dir <PATH>     Path to the log directory
+      --log-prefix <STR>   Prefix for log file names (only used when log-dir is specified) [default: log]
 ```
 
 ### Client
@@ -117,7 +119,9 @@ Transport QUIC:
       --max-streams <NUM>    Maximum number of bidirectional streams that can be open simultaneously [default: 100]
 
 Logging:
-      --tracing-level <TRACE>  Logging level (e.g., INFO, WARN, ERROR) [default: WARN]
+      --log-level <LEVEL>  Logging level (e.g., INFO, WARN, ERROR) [default: WARN]
+      --log-dir <PATH>     Path to the log directory
+      --log-prefix <STR>   Prefix for log file names (only used when log-dir is specified) [default: log]
 ```
 
 ## License

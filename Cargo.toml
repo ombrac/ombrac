@@ -52,6 +52,7 @@ rustls-pemfile = { version = "2", default-features = false }
 # logging
 tracing = { version = "0.1", default-features = false }
 tracing-subscriber = { version = "0.3", default-features = false }
+tracing-appender = { version = "0.2", default-features = false }
 
 # dev dependencies
 curl = { version = "0.4", default-features = false }
