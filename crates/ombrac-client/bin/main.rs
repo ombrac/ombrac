@@ -123,6 +123,15 @@ struct Args {
     )]
     max_streams: Option<u64>,
 
+    /// Try to resolve domain name to IPv6 addresses first
+    #[clap(
+        short = '6',
+        help_heading = "Transport QUIC",
+        action,
+        verbatim_doc_comment
+    )]
+    prefer_ipv6: bool,
+
     /// Logging level (e.g., INFO, WARN, ERROR)
     #[cfg(feature = "tracing")]
     #[clap(
@@ -214,7 +223,19 @@ async fn quic_from_args(args: &Args) -> Result<Builder, Box<dyn Error>> {
         }
     };
 
-    let addr = lookup_host(&args.server).await?.next().ok_or(format!(
+    let mut addrs: Vec<_> = lookup_host(&args.server).await?.collect();
+
+    if args.prefer_ipv6 {
+        addrs.sort_by(|a, b| {
+            match (a.is_ipv6(), b.is_ipv6()) {
+                (true, false) => std::cmp::Ordering::Less,
+                (false, true) => std::cmp::Ordering::Greater,
+                _ => std::cmp::Ordering::Equal,
+            }
+        });
+    }
+
+    let addr = addrs.into_iter().next().ok_or(format!(
         "Failed to resolve server address '{}'",
         args.server
     ))?;
