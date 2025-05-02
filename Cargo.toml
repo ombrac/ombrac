@@ -13,7 +13,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.5.3"
+version = "0.5.4"
 edition = "2024"
 license = "Apache-2.0"
 authors = ["Contributors"]
@@ -23,11 +23,11 @@ keywords = ["proxy", "firewall"]
 
 [workspace.dependencies]
 # ombrac
-ombrac = { version = "0.5.3", path = "crates/ombrac", default-features = false }
-ombrac-client = { version = "0.5.3", path = "crates/ombrac-client", default-features = false }
-ombrac-server = { version = "0.5.3", path = "crates/ombrac-server", default-features = false }
-ombrac-macros = { version = "0.5.3", path = "crates/ombrac-macros", default-features = false }
-ombrac-transport = { version = "0.5.3", path = "crates/ombrac-transport", default-features = false }
+ombrac = { version = "0.5.4", path = "crates/ombrac", default-features = false }
+ombrac-client = { version = "0.5.4", path = "crates/ombrac-client", default-features = false }
+ombrac-server = { version = "0.5.4", path = "crates/ombrac-server", default-features = false }
+ombrac-macros = { version = "0.5.4", path = "crates/ombrac-macros", default-features = false }
+ombrac-transport = { version = "0.5.4", path = "crates/ombrac-transport", default-features = false }
 
 futures = { version = "0.3", default-features = false }
 tokio = { version = "1", default-features = false }
