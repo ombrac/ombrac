@@ -173,7 +173,7 @@ checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
 name = "benches"
-version = "0.5.3"
+version = "0.5.4"
 dependencies = [
  "criterion",
  "ombrac",
@@ -940,7 +940,7 @@ dependencies = [
 
 [[package]]
 name = "ombrac"
-version = "0.5.3"
+version = "0.5.4"
 dependencies = [
  "bytes",
  "futures",
@@ -949,7 +949,7 @@ dependencies = [
 
 [[package]]
 name = "ombrac-client"
-version = "0.5.3"
+version = "0.5.4"
 dependencies = [
  "blake3",
  "bytes",
@@ -966,11 +966,11 @@ dependencies = [
 
 [[package]]
 name = "ombrac-macros"
-version = "0.5.3"
+version = "0.5.4"
 
 [[package]]
 name = "ombrac-server"
-version = "0.5.3"
+version = "0.5.4"
 dependencies = [
  "blake3",
  "bytes",
@@ -986,7 +986,7 @@ dependencies = [
 
 [[package]]
 name = "ombrac-transport"
-version = "0.5.3"
+version = "0.5.4"
 dependencies = [
  "async-channel",
  "aws-lc-rs",
@@ -1575,7 +1575,7 @@ dependencies = [
 
 [[package]]
 name = "tests-integration"
-version = "0.5.3"
+version = "0.5.4"
 dependencies = [
  "curl",
  "ntest",
@@ -1588,7 +1588,7 @@ dependencies = [
 
 [[package]]
 name = "tests-support"
-version = "0.5.3"
+version = "0.5.4"
 dependencies = [
  "rcgen",
  "tokio",
