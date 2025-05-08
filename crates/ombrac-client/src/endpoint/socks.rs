@@ -13,6 +13,8 @@ use tokio::{
 
 use crate::Client;
 
+use crate::{Error, Result};
+
 pub struct Server<T: Initiator>(TcpListener, Arc<Client<T>>);
 
 impl<T: Initiator> Server<T> {
@@ -53,7 +55,7 @@ impl<T: Initiator> Server<T> {
                             _ => {
                                 match stream.write_response(&Response::CommandNotSupported).await {
                                     Ok(_) => Ok(()),
-                                    Err(e) => Err(e),
+                                    Err(e) => Err(Error::Io(e)),
                                 }
                             }
                         };
@@ -75,7 +77,7 @@ impl<T: Initiator> Server<T> {
     #[inline]
     async fn handle_socks_request(
         stream: &mut Stream<impl AsyncRead + AsyncWrite + Unpin>,
-    ) -> io::Result<Request> {
+    ) -> Result<Request> {
         let _methods = stream.read_methods().await?;
         stream.write_auth_method(Method::NoAuthentication).await?;
 
@@ -89,7 +91,7 @@ impl<T: Initiator> Server<T> {
         ombrac: Arc<Client<T>>,
         address: Address,
         mut stream: Stream<impl AsyncRead + AsyncWrite + Unpin>,
-    ) -> io::Result<()> {
+    ) -> Result<()> {
         use ombrac::address::Address as OmbracAddress;
         use ombrac::io::util::copy_bidirectional;
         use tokio::time::{sleep, timeout};
@@ -154,10 +156,9 @@ impl<T: Initiator> Server<T> {
         ombrac: Arc<Client<T>>,
         _address: Address,
         mut stream: Stream<impl AsyncRead + AsyncWrite + Unpin>,
-    ) -> io::Result<()> {
+    ) -> Result<()> {
         use ombrac::address::Address as OmbracAddress;
         use socks_lib::v5::{Domain, UdpPacket};
-        use tokio::io::{Error, ErrorKind};
         use tokio::net::UdpSocket;
         use tokio::time::timeout;
 
@@ -183,21 +184,13 @@ impl<T: Initiator> Server<T> {
         let client_addr = {
             let (n, client_addr) = match timeout(IDLE_TIMEOUT, socket_1.recv_from(&mut buf)).await {
                 Ok(Ok((n, addr))) => (n, addr),
-                Ok(Err(e)) => return Err(e),
+                Ok(Err(e)) => return Err(Error::Io(e)),
                 Err(_) => {
-                    return Err(Error::new(
-                        ErrorKind::TimedOut,
-                        "No initial packet received",
-                    ));
+                    return Err(Error::Timeout("No initial packet received".to_string()));
                 }
             };
 
-            let packet = UdpPacket::from_bytes(&mut &buf[..n]).map_err(|e| {
-                Error::new(
-                    ErrorKind::InvalidData,
-                    format!("Failed to parse UDP packet: {}", e),
-                )
-            })?;
+            let packet = UdpPacket::from_bytes(&mut &buf[..n])?;
 
             let addr = match packet.address {
                 Address::Domain(domain, port) => {
@@ -222,12 +215,7 @@ impl<T: Initiator> Server<T> {
                     continue;
                 }
 
-                let packet = UdpPacket::from_bytes(&mut &buf[..n]).map_err(|e| {
-                    Error::new(
-                        ErrorKind::InvalidData,
-                        format!("Failed to parse UDP packet: {}", e),
-                    )
-                })?;
+                let packet = UdpPacket::from_bytes(&mut &buf[..n])?;
 
                 let addr = match packet.address {
                     Address::Domain(domain, port) => {
@@ -282,7 +270,7 @@ impl<T: Initiator> Server<T> {
         match result {
             Ok(inner_result) => inner_result,
             Err(e) if e.is_cancelled() => Ok(()),
-            Err(e) => Err(io::Error::new(io::ErrorKind::Other, e)),
+            Err(e) => Err(Error::JoinError(e)),
         }
     }
 }

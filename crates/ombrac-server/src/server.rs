@@ -8,38 +8,39 @@ use ombrac_transport::Unreliable;
 
 use ombrac_macros::{error, info};
 
+use super::{Error, Result};
+
 pub struct Server<T> {
     secret: Secret,
     transport: T,
 }
 
-impl<T: Acceptor> Server<T> {
+impl<T> Server<T> {
     pub fn new(secret: Secret, transport: T) -> Self {
         Self { secret, transport }
     }
+}
 
+impl<T: Acceptor> Server<T> {
     #[inline]
-    async fn handle_reliable(stream: impl Reliable, secret: Secret) -> io::Result<()> {
+    async fn handle_reliable(stream: impl Reliable, secret: Secret) -> Result<()> {
         Self::handle_connect(stream, secret).await
     }
 
     #[cfg(feature = "datagram")]
     #[inline]
-    async fn handle_unreliable(datagram: impl Unreliable, secret: Secret) -> io::Result<()> {
+    async fn handle_unreliable(datagram: impl Unreliable, secret: Secret) -> Result<()> {
         Self::handle_associate(datagram, secret).await
     }
 
     #[inline]
-    async fn handle_connect(mut stream: impl Reliable, secret: Secret) -> io::Result<()> {
+    async fn handle_connect(mut stream: impl Reliable, secret: Secret) -> Result<()> {
         use tokio::net::TcpStream;
 
         let request = Connect::from_async_read(&mut stream).await?;
 
         if request.secret != secret {
-            return Err(io::Error::new(
-                io::ErrorKind::PermissionDenied,
-                "Secret does not match",
-            ));
+            return Err(Error::PermissionDenied);
         }
 
         let addr = request.address.to_socket_addr().await?;
@@ -55,7 +56,7 @@ impl<T: Acceptor> Server<T> {
 
     #[cfg(feature = "datagram")]
     #[inline]
-    async fn handle_associate(datagram: impl Unreliable, secret: Secret) -> io::Result<()> {
+    async fn handle_associate(datagram: impl Unreliable, secret: Secret) -> Result<()> {
         use std::net::SocketAddr;
 
         use bytes::Bytes;
@@ -125,13 +126,13 @@ impl<T: Acceptor> Server<T> {
         };
 
         match result {
-            Ok(inner_result) => inner_result,
+            Ok(inner_result) => Ok(inner_result?),
             Err(e) if e.is_cancelled() => Ok(()),
-            Err(e) => Err(io::Error::new(io::ErrorKind::Other, e)),
+            Err(e) => Err(e.into()),
         }
     }
 
-    pub async fn listen(self) -> io::Result<()> {
+    pub async fn listen(self) -> Result<()> {
         let secret = self.secret;
 
         let transport = Arc::new(self.transport);
@@ -195,6 +196,6 @@ impl<T: Acceptor> Server<T> {
             }
         };
 
-        Err(error)
+        Err(Error::Io(error))
     }
 }

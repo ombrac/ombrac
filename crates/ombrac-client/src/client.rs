@@ -1,23 +1,26 @@
-use std::io;
-
+#[cfg(feature = "datagram")]
+use bytes::Bytes;
 use ombrac::prelude::*;
-use ombrac_transport::{Initiator, Reliable};
-
 #[cfg(feature = "datagram")]
 use ombrac_transport::Unreliable;
+use ombrac_transport::{Initiator, Reliable};
+
+use crate::Result;
 
 pub struct Client<T> {
     secret: Secret,
     transport: T,
 }
 
-impl<T: Initiator> Client<T> {
+impl<T> Client<T> {
     pub fn new(secret: Secret, transport: T) -> Self {
         Self { secret, transport }
     }
+}
 
+impl<T: Initiator> Client<T> {
     #[inline]
-    pub async fn connect<A>(&self, addr: A) -> io::Result<impl Reliable + '_>
+    pub async fn connect<A>(&self, addr: A) -> Result<impl Reliable>
     where
         A: Into<Address>,
     {
@@ -33,7 +36,7 @@ impl<T: Initiator> Client<T> {
 
     #[cfg(feature = "datagram")]
     #[inline]
-    pub async fn associate(&self) -> io::Result<Datagram<impl Unreliable + '_>> {
+    pub async fn associate(&self) -> Result<Datagram<impl Unreliable>> {
         let stream = self.transport.open_datagram().await?;
 
         Ok(Datagram::with(self.secret, stream))
@@ -50,24 +53,21 @@ impl<U: Unreliable> Datagram<U> {
     }
 
     #[inline]
-    pub async fn send<A, B>(&self, data: B, addr: A) -> io::Result<()>
+    pub async fn send<A, B>(&self, data: B, addr: A) -> Result<()>
     where
         A: Into<Address>,
-        B: Into<bytes::Bytes>,
+        B: Into<Bytes>,
     {
         let packet = Associate::with(self.0, addr, data).to_bytes()?;
 
-        self.1.send(packet).await
+        Ok(self.1.send(packet).await?)
     }
 
     #[inline]
-    pub async fn recv(&self) -> io::Result<(bytes::Bytes, Address)> {
-        match self.1.recv().await {
-            Ok(mut data) => {
-                let packet = Associate::from_bytes(&mut data)?;
-                Ok((packet.data, packet.address))
-            }
-            Err(error) => Err(error),
-        }
+    pub async fn recv(&self) -> Result<(Bytes, Address)> {
+        let mut data = self.1.recv().await?;
+        let packet = Associate::from_bytes(&mut data)?;
+
+        Ok((packet.data, packet.address))
     }
 }
