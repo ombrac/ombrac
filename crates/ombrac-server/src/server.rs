@@ -1,4 +1,4 @@
-use std::{io, sync::Arc};
+use std::sync::Arc;
 
 use ombrac::prelude::*;
 use ombrac_transport::{Acceptor, Reliable};
@@ -85,10 +85,7 @@ impl<T: Acceptor> Server<T> {
 
                 let packet = Associate::from_bytes(&mut bytes)?;
                 if packet.secret != secret {
-                    return Err(io::Error::new(
-                        io::ErrorKind::PermissionDenied,
-                        "Secret does not match",
-                    ));
+                    return Err(Error::PermissionDenied);
                 };
 
                 let target = packet.address.to_socket_addr().await?;
@@ -106,7 +103,7 @@ impl<T: Acceptor> Server<T> {
 
                         datagram_2.send(packet.to_bytes()?).await?;
                     }
-                    Ok(Err(e)) => return Err(e),
+                    Ok(Err(e)) => return Err(Error::Io(e)),
                     Err(_) => break, // Timeout
                 }
             }
