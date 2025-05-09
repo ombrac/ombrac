@@ -15,7 +15,7 @@ pub trait Unreliable: Send + Sync + 'static {
     fn recv(&self) -> impl Future<Output = io::Result<Bytes>> + Send;
 }
 
-pub trait Reliable: AsyncRead + AsyncWrite + Unpin + Send + 'static {}
+pub trait Reliable: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static {}
 
 pub trait Initiator: Send + Sync + 'static {
     #[cfg(feature = "datagram")]

@@ -1,12 +1,11 @@
-use std::io::Result;
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
-use std::{io, path::PathBuf};
 
 use quinn::IdleTimeout;
 
-use super::{Connection, stream::Stream};
+use super::{Connection, Error, Result, stream::Stream};
 
 pub struct Builder {
     listen: SocketAddr,
@@ -89,8 +88,8 @@ impl Builder {
 impl Connection {
     async fn with_server(config: Builder) -> Result<Self> {
         let tls_config = {
+            use quinn::crypto::rustls::QuicServerConfig;
             use rustls::ServerConfig;
-
             use rustls::pki_types::CertificateDer;
             use rustls::pki_types::PrivatePkcs8KeyDer;
 
@@ -106,15 +105,11 @@ impl Connection {
                         let key = super::load_private_key(&key_path)?;
                         (cert, key)
                     }
-                    (Some(_), None) => {
-                        return Err(io::Error::other(
-                            "Private key must be provided when certificate is specified",
-                        ));
-                    }
                     (None, _) => {
-                        return Err(io::Error::other(
-                            "Certificate must be provided when TLS is enabled",
-                        ));
+                        return Err(Error::ServerMissingCertificate);
+                    }
+                    (_, None) => {
+                        return Err(Error::ServerMissingPrivateKey);
                     }
                 };
                 (cert, key)
@@ -122,8 +117,7 @@ impl Connection {
 
             let mut tls_config = ServerConfig::builder()
                 .with_no_client_auth()
-                .with_single_cert(cert, key)
-                .map_err(|e| io::Error::other(e.to_string()))?;
+                .with_single_cert(cert, key)?;
 
             tls_config.alpn_protocols = [b"h3"].iter().map(|&x| x.into()).collect();
 
@@ -132,13 +126,7 @@ impl Connection {
                 tls_config.max_early_data_size = u32::MAX;
             }
 
-            tls_config
-        };
-
-        let quic_config = {
-            use quinn::crypto::rustls::QuicServerConfig;
-
-            QuicServerConfig::try_from(tls_config).map_err(|e| io::Error::other(e.to_string()))?
+            QuicServerConfig::try_from(tls_config)?
         };
 
         let server_config = {
@@ -151,25 +139,21 @@ impl Connection {
                 congestion.initial_window(value);
             }
 
-            if let Some(value) = config.max_idle_timeout {
-                transport.max_idle_timeout(Some(
-                    IdleTimeout::try_from(value).map_err(|e| io::Error::other(e.to_string()))?,
-                ));
-            }
-
             if let Some(value) = config.max_keep_alive_period {
                 transport.keep_alive_interval(Some(value));
             }
 
+            if let Some(value) = config.max_idle_timeout {
+                transport.max_idle_timeout(Some(IdleTimeout::try_from(value)?));
+            }
+
             if let Some(value) = config.max_open_bidirectional_streams {
-                transport.max_concurrent_bidi_streams(
-                    VarInt::from_u64(value).map_err(|e| io::Error::other(e.to_string()))?,
-                );
+                transport.max_concurrent_bidi_streams(VarInt::try_from(value)?);
             }
 
             transport.congestion_controller_factory(Arc::new(congestion));
 
-            let mut config = ServerConfig::with_crypto(Arc::new(quic_config));
+            let mut config = ServerConfig::with_crypto(Arc::new(tls_config));
             config.transport_config(Arc::new(transport));
 
             config

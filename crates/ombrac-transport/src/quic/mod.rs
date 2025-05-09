@@ -9,7 +9,9 @@ use std::path::PathBuf;
 use std::{fs, io};
 
 use async_channel::Receiver;
+use bytes::Bytes;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
+use thiserror::Error;
 use tokio::task::JoinHandle;
 
 use crate::{Acceptor, Initiator};
@@ -90,6 +92,50 @@ fn load_private_key(path: &PathBuf) -> io::Result<PrivateKeyDer<'static>> {
     };
 
     Ok(result)
+}
+
+type Result<T> = std::result::Result<T, Error>;
+
+#[derive(Error, Debug)]
+pub enum Error {
+    #[error("I/O error: {0}")]
+    Io(#[from] std::io::Error),
+
+    #[error("Rustls error: {0}")]
+    NoInitialCipherSuite(#[from] quinn::crypto::rustls::NoInitialCipherSuite),
+
+    #[error("Rustls crypto error: {0}")]
+    QuinnCryptoRustls(#[from] quinn::crypto::rustls::Error),
+
+    #[error("QUIC VarInt bounds exceeded: {0}")]
+    QuinnVarIntBoundsExceeded(#[from] quinn::VarIntBoundsExceeded),
+
+    #[error("QUIC connect error: {0}")]
+    QuinnConnect(#[from] quinn::ConnectError),
+
+    #[error("QUIC connection error: {0}")]
+    QuinnConnection(#[from] quinn::ConnectionError),
+
+    #[error("Async channel receive error: {0}")]
+    ChannelRecv(#[from] async_channel::RecvError),
+
+    #[error("Async channel receive error: {0}")]
+    ChannelSend(#[from] async_channel::SendError<Bytes>),
+
+    // Custom errors
+    #[error(
+        "Server TLS configuration error: Private key must be provided when certificate is specified"
+    )]
+    ServerMissingPrivateKey,
+
+    #[error("Server TLS configuration error: Certificate must be provided when TLS is enabled")]
+    ServerMissingCertificate,
+
+    #[error("Failed to load private key from file")] // More specific message
+    ServerLoadPrivateKey,
+
+    #[error("Connection error: Zero RTT not accepted by server")]
+    ZeroRttNotAccepted,
 }
 
 #[cfg(test)]

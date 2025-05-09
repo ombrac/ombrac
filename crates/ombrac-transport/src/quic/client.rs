@@ -1,12 +1,11 @@
-use std::io::Result;
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
-use std::{io, net::SocketAddr};
 
 use quinn::IdleTimeout;
 
-use super::{Connection, stream::Stream};
+use super::{Connection, Error, Result, stream::Stream};
 
 pub struct Builder {
     bind: Option<SocketAddr>,
@@ -119,6 +118,7 @@ impl Builder {
 impl Connection {
     async fn with_client(config: Builder) -> Result<Self> {
         let tls_config = {
+            use quinn::crypto::rustls::QuicClientConfig;
             use rustls::{ClientConfig, RootCertStore};
 
             let mut roots = RootCertStore::empty();
@@ -146,13 +146,7 @@ impl Connection {
                 tls_config.enable_early_data = true;
             }
 
-            tls_config
-        };
-
-        let quic_config = {
-            use quinn::crypto::rustls::QuicClientConfig;
-
-            QuicClientConfig::try_from(tls_config).map_err(|e| io::Error::other(e.to_string()))?
+            QuicClientConfig::try_from(tls_config)?
         };
 
         let client_config = {
@@ -165,25 +159,21 @@ impl Connection {
                 congestion.initial_window(value);
             }
 
-            if let Some(value) = config.max_idle_timeout {
-                transport.max_idle_timeout(Some(
-                    IdleTimeout::try_from(value).map_err(|e| io::Error::other(e.to_string()))?,
-                ));
-            }
-
             if let Some(value) = config.max_keep_alive_period {
                 transport.keep_alive_interval(Some(value));
             }
 
+            if let Some(value) = config.max_idle_timeout {
+                transport.max_idle_timeout(Some(IdleTimeout::try_from(value)?));
+            }
+
             if let Some(value) = config.max_open_bidirectional_streams {
-                transport.max_concurrent_bidi_streams(
-                    VarInt::from_u64(value).map_err(|e| io::Error::other(e.to_string()))?,
-                );
+                transport.max_concurrent_bidi_streams(VarInt::from_u64(value)?);
             }
 
             transport.congestion_controller_factory(Arc::new(congestion));
 
-            let mut config = ClientConfig::new(Arc::new(quic_config));
+            let mut config = ClientConfig::new(Arc::new(tls_config));
             config.transport_config(Arc::new(transport));
 
             config
@@ -300,15 +290,13 @@ async fn connection(
     name: &str,
     enable_zero_rtt: bool,
 ) -> Result<quinn::Connection> {
-    let connecting = endpoint
-        .connect(addr, name)
-        .map_err(|e| io::Error::other(e.to_string()))?;
+    let connecting = endpoint.connect(addr, name)?;
 
     let connection = if enable_zero_rtt {
         match connecting.into_0rtt() {
             Ok((conn, zero_rtt_accepted)) => {
                 if !zero_rtt_accepted.await {
-                    return Err(io::Error::other("Zero RTT not accepted"));
+                    return Err(Error::ZeroRttNotAccepted);
                 }
 
                 conn

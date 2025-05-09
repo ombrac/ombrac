@@ -6,7 +6,7 @@ use std::time::Duration;
 use clap::Parser;
 use ombrac_client::Client;
 use ombrac_client::endpoint::socks::Server as SocksServer;
-use ombrac_transport::quic::client::Builder;
+use ombrac_client::transport::quic::Builder;
 
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
@@ -226,12 +226,10 @@ async fn quic_from_args(args: &Args) -> Result<Builder, Box<dyn Error>> {
     let mut addrs: Vec<_> = lookup_host(&args.server).await?.collect();
 
     if args.prefer_ipv6 {
-        addrs.sort_by(|a, b| {
-            match (a.is_ipv6(), b.is_ipv6()) {
-                (true, false) => std::cmp::Ordering::Less,
-                (false, true) => std::cmp::Ordering::Greater,
-                _ => std::cmp::Ordering::Equal,
-            }
+        addrs.sort_by(|a, b| match (a.is_ipv6(), b.is_ipv6()) {
+            (true, false) => std::cmp::Ordering::Less,
+            (false, true) => std::cmp::Ordering::Greater,
+            _ => std::cmp::Ordering::Equal,
         });
     }
 
