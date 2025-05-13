@@ -33,7 +33,7 @@ futures = { version = "0.3", default-features = false }
 tokio = { version = "1", default-features = false }
 bytes = { version = "1", default-features = false }
 dashmap = { version = "6", default-features = false }
-thiserror = { version = "1", default-features = false }
+thiserror = { version = "2", default-features = false }
 async-channel = { version = "2", default-features = false }
 
 # socks
