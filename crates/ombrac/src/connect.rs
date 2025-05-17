@@ -114,7 +114,7 @@ mod tests {
     fn test_connect_with_domain_address() {
         let secret = [0xBB; 32];
         let domain = "example.com";
-        let address = Address::Domain(Domain::from(domain), 8080);
+        let address = Address::Domain(Domain::try_from(domain).unwrap(), 8080);
 
         let connect = Connect::with(secret, address);
 
@@ -124,7 +124,7 @@ mod tests {
 
         assert_eq!(parsed.secret, secret);
         if let Address::Domain(d, p) = parsed.address {
-            assert_eq!(d.format_as_str().unwrap(), domain);
+            assert_eq!(d.format_as_str(), domain);
             assert_eq!(p, 8080);
         } else {
             panic!("Parsed address is not Domain type");
@@ -183,7 +183,7 @@ mod tests {
     #[tokio::test]
     async fn test_connect_from_async_read_with_domain() {
         let secret = [0u8; 32];
-        let address = Address::Domain(Domain::from("example.com"), 443);
+        let address = Address::Domain(Domain::try_from("example.com").unwrap(), 443);
 
         let connect = Connect::with(secret, address.clone());
 

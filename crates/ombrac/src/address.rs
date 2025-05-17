@@ -40,35 +40,14 @@ impl Address {
     const IPV4_LENGTH: usize = 4;
     const IPV6_LENGTH: usize = 16;
 
-    const DOMAIN_LENGTH_MAX: usize = (u8::MAX - 1) as usize;
-}
-
-impl Address {
-    #[inline]
-    pub fn format_as_string(&self) -> io::Result<String> {
-        match self {
-            Self::Domain(domain, port) => Ok(format!("{}:{}", domain.format_as_str()?, port)),
-            Self::IPv4(addr) => Ok(addr.to_string()),
-            Self::IPv6(addr) => Ok(addr.to_string()),
-        }
-    }
-
     #[inline]
     pub fn to_bytes(&self) -> io::Result<Bytes> {
         let mut buf = BytesMut::new();
 
         match self {
             Address::Domain(domain, port) => {
-                let domain_len = domain.len();
-                if domain_len > Self::DOMAIN_LENGTH_MAX {
-                    return Err(io::Error::new(
-                        io::ErrorKind::InvalidInput,
-                        "Domain name exceeds maximum length of 254 bytes",
-                    ));
-                }
-
                 buf.put_u8(Self::ADDRESS_ATYP_DOMAIN);
-                buf.put_u8(domain_len as u8);
+                buf.put_u8(domain.len() as u8);
                 buf.put_slice(domain.as_bytes());
                 buf.put_u16(*port);
             }
@@ -117,7 +96,7 @@ impl Address {
 
                 let domain_bytes = buf.copy_to_bytes(len);
                 let port = buf.get_u16();
-                let domain = Domain::from_bytes(domain_bytes);
+                let domain = Domain::from_bytes(domain_bytes)?;
 
                 Ok(Address::Domain(domain, port))
             }
@@ -168,7 +147,7 @@ impl Address {
             Address::IPv4(addr) => Ok(SocketAddr::V4(addr)),
             Address::IPv6(addr) => Ok(SocketAddr::V6(addr)),
             Address::Domain(domain, port) => {
-                let domain = domain.format_as_str()?;
+                let domain = domain.format_as_str();
 
                 lookup_host((domain, port))
                     .await?
@@ -194,13 +173,52 @@ impl From<SocketAddr> for Address {
 
 impl std::fmt::Display for Address {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let message = match self {
-            Self::Domain(domain, port) => format!("Doamin({:?}:{})", domain.0, port),
-            Self::IPv4(addr) => format!("IPv4({})", addr),
-            Self::IPv6(addr) => format!("IPv6({})", addr),
+        let value = match self {
+            Self::Domain(domain, port) => format!("{}:{}", domain.format_as_str(), port),
+            Self::IPv4(addr) => addr.to_string(),
+            Self::IPv6(addr) => addr.to_string(),
         };
 
-        write!(f, "{message}")
+        write!(f, "{value}")
+    }
+}
+
+impl TryFrom<&str> for Address {
+    type Error = io::Error;
+
+    #[inline]
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        use std::str::FromStr;
+
+        if let Ok(ipv4_addr) = SocketAddrV4::from_str(value) {
+            return Ok(Address::IPv4(ipv4_addr));
+        }
+
+        if let Ok(addr) = SocketAddrV6::from_str(value) {
+            return Ok(Address::IPv6(addr));
+        }
+
+        if let Some((domain, port_str)) = value.rsplit_once(':') {
+            if let Ok(port) = port_str.parse::<u16>() {
+                if !domain.is_empty() {
+                    return Ok(Address::Domain(Domain::try_from(domain)?, port));
+                }
+            }
+        }
+
+        Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("Invalid address format: {}", value),
+        ))
+    }
+}
+
+impl TryFrom<String> for Address {
+    type Error = io::Error;
+
+    #[inline]
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Address::try_from(value.as_str())
     }
 }
 
@@ -208,40 +226,41 @@ impl std::fmt::Display for Address {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Domain(Bytes);
 
-impl From<&[u8]> for Domain {
-    #[inline]
-    fn from(value: &[u8]) -> Self {
-        Self(Bytes::copy_from_slice(value))
-    }
-}
-
-impl From<&str> for Domain {
-    #[inline]
-    fn from(value: &str) -> Self {
-        Self(Bytes::copy_from_slice(value.as_bytes()))
-    }
-}
-
-impl From<String> for Domain {
-    #[inline]
-    fn from(value: String) -> Self {
-        Self(Bytes::copy_from_slice(value.as_bytes()))
-    }
-}
-
-impl From<Bytes> for Domain {
-    #[inline]
-    fn from(value: Bytes) -> Self {
-        Self(value)
-    }
-}
-
 impl Domain {
+    const MAX_LENGTH: usize = 254;
+
     #[inline]
-    pub fn format_as_str(&self) -> io::Result<&str> {
+    pub fn from_bytes(bytes: Bytes) -> io::Result<Self> {
+        if bytes.is_empty() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Domain is empty",
+            ));
+        }
+
+        let domain_str = std::str::from_utf8(&bytes)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+
+        if domain_str.len() > Self::MAX_LENGTH {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Punycode domain exceeds maximum length",
+            ));
+        }
+
+        Ok(Self(bytes))
+    }
+
+    #[inline]
+    pub fn from_string(value: String) -> io::Result<Self> {
+        Self::from_bytes(value.into())
+    }
+
+    #[inline]
+    pub fn format_as_str(&self) -> &str {
         use std::str::from_utf8;
 
-        from_utf8(&self.0).map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Invalid UTF-8"))
+        from_utf8(&self.0).expect("Invalid UTF-8")
     }
 
     #[inline]
@@ -255,16 +274,6 @@ impl Domain {
     }
 
     #[inline]
-    pub fn from_bytes(bytes: Bytes) -> Self {
-        Self(bytes)
-    }
-
-    #[inline]
-    pub fn from_string(value: String) -> Self {
-        value.into()
-    }
-
-    #[inline]
     pub fn len(&self) -> usize {
         self.0.len()
     }
@@ -272,6 +281,42 @@ impl Domain {
     #[inline]
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
+    }
+}
+
+impl TryFrom<&[u8]> for Domain {
+    type Error = io::Error;
+
+    #[inline]
+    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
+        Self::from_bytes(Bytes::copy_from_slice(value))
+    }
+}
+
+impl TryFrom<&str> for Domain {
+    type Error = io::Error;
+
+    #[inline]
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        Self::from_bytes(Bytes::copy_from_slice(value.as_bytes()))
+    }
+}
+
+impl TryFrom<String> for Domain {
+    type Error = io::Error;
+
+    #[inline]
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Self::from_string(value)
+    }
+}
+
+impl TryFrom<Bytes> for Domain {
+    type Error = io::Error;
+
+    #[inline]
+    fn try_from(value: Bytes) -> Result<Self, Self::Error> {
+        Self::from_bytes(value)
     }
 }
 
@@ -308,14 +353,15 @@ mod tests {
 
     #[test]
     fn test_domain_serialization() {
-        let domain = Domain::from("example.com");
+        let domain = Domain::try_from("example.com").unwrap();
         let addr = Address::Domain(domain, 8080);
-        let mut bytes = addr.to_bytes().unwrap();
+        let bytes = addr.to_bytes().unwrap();
+        let mut buf = &bytes[..];
 
-        let parsed = Address::from_bytes(&mut bytes).unwrap();
+        let parsed = Address::from_bytes(&mut buf).unwrap();
 
         if let Address::Domain(d, p) = parsed {
-            assert_eq!(d.format_as_str().unwrap(), "example.com");
+            assert_eq!(d.format_as_str(), "example.com");
             assert_eq!(p, 8080);
         } else {
             panic!("Parsed address is not Domain type");
@@ -333,15 +379,13 @@ mod tests {
 
     #[test]
     fn test_domain_too_long() {
-        let domain = Domain::from(vec![b'a'; 255].as_slice());
-        let addr = Address::Domain(domain, 8080);
-        let result = addr.to_bytes();
-        assert!(result.is_err());
+        let result = Domain::try_from(vec![b'a'; 255].as_slice());
+        assert!(result.is_err())
     }
 
     #[tokio::test]
     async fn test_domain_resolution() {
-        let domain = Domain::from("localhost");
+        let domain = Domain::try_from("localhost").unwrap();
         let addr = Address::Domain(domain, 8080);
         let socket_addr = addr.to_socket_addr().await.unwrap();
         assert!(socket_addr.port() == 8080);
@@ -349,9 +393,8 @@ mod tests {
 
     #[test]
     fn test_domain_utf8_error() {
-        let domain = Domain::from(vec![0xff, 0xfe].as_slice());
-        let result = domain.format_as_str();
-        assert!(result.is_err());
+        let result = Domain::from_bytes(Bytes::copy_from_slice(vec![0xff, 0xfe].as_slice()));
+        assert!(result.is_err())
     }
 
     #[test]

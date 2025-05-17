@@ -38,6 +38,9 @@ async-channel = { version = "2", default-features = false }
 
 # socks
 socks-lib = { version = "0.1", default-features = false }
+http = { version = "1", default-features = false }
+hyper = { version = "1", default-features = false }
+http-body-util = { version = "0.1", default-features = false }
 
 # binary
 clap = { version = "4", default-features = false }

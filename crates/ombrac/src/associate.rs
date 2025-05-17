@@ -128,7 +128,7 @@ mod tests {
     fn test_associate_with_domain_address() {
         let secret = [0xBB; 32];
         let domain = "example.com";
-        let address = Address::Domain(Domain::from(domain), 8080);
+        let address = Address::Domain(Domain::try_from(domain).unwrap(), 8080);
         let data = Bytes::from("domain test data");
 
         let associate = Associate::with(secret, address, data.clone());
@@ -139,7 +139,7 @@ mod tests {
 
         assert_eq!(parsed.secret, secret);
         if let Address::Domain(d, p) = parsed.address {
-            assert_eq!(d.format_as_str().unwrap(), domain);
+            assert_eq!(d.format_as_str(), domain);
             assert_eq!(p, 8080);
         } else {
             panic!("Parsed address is not Domain type");

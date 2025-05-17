@@ -23,6 +23,7 @@ tracing = ["dep:tracing", "ombrac-transport/tracing"]
 
 endpoint-default = ["endpoint-socks"]
 endpoint-socks = ["socks-lib"]
+endpoint-http = ["http", "hyper", "http-body-util"]
 
 transport-default = ["transport-quic"]
 transport-quic = ["ombrac-transport/quic"]
@@ -36,7 +37,8 @@ binary = [
     "tracing-appender",
 
     "transport-default",
-    "endpoint-default",
+    "endpoint-socks",
+    "endpoint-http",
     "datagram",
     "tracing"
 ]
@@ -55,6 +57,9 @@ tracing-subscriber = { workspace = true, features = ["ansi"], optional = true }
 tracing-appender = { workspace = true, optional = true }
 
 socks-lib = { workspace = true, optional = true }
+http = { workspace = true, optional = true }
+hyper = { workspace = true, features = ["client", "server", "http1"],optional = true }
+http-body-util = { workspace = true, optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["full"] }
