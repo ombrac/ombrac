@@ -1,10 +1,12 @@
 use std::error::Error;
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
 use clap::Parser;
 use ombrac_client::Client;
+use ombrac_client::endpoint::http::Server as HttpServer;
 use ombrac_client::endpoint::socks::Server as SocksServer;
 use ombrac_client::transport::quic::Builder;
 
@@ -20,6 +22,16 @@ struct Args {
         verbatim_doc_comment
     )]
     secret: String,
+
+    // Endpoint HTTP/HTTPS
+    /// The address to bind for the HTTP/HTTPS server
+    #[clap(
+        long,
+        value_name = "ADDR",
+        help_heading = "Endpoint HTTP",
+        verbatim_doc_comment
+    )]
+    http: Option<SocketAddr>,
 
     // Endpoint SOCKS
     /// The address to bind for the SOCKS server
@@ -196,9 +208,22 @@ async fn main() -> Result<(), Box<dyn Error>> {
             .expect("QUIC Client failed to build"),
     );
 
+    let client = Arc::new(ombrac_client);
     tokio::time::sleep(Duration::from_millis(100)).await;
 
-    SocksServer::bind(args.socks, ombrac_client.into())
+    if let Some(addr) = args.http {
+        let client = client.clone();
+        tokio::spawn(async move {
+            HttpServer::bind(addr, client)
+                .await
+                .expect("HTTP server failed to bind")
+                .listen()
+                .await
+                .unwrap();
+        });
+    }
+
+    SocksServer::bind(args.socks, client)
         .await
         .expect("SOCKS server failed to bind")
         .listen()

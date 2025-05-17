@@ -26,7 +26,7 @@ impl<T: Initiator> Server<T> {
     pub async fn listen(&self) -> io::Result<()> {
         let ombrac = Arc::clone(&self.1);
 
-        info!("SOCKS server listening on {}", self.0.local_addr()?);
+        info!("SOCKS Server Listening on {}", self.0.local_addr()?);
 
         loop {
             match self.0.accept().await {
@@ -105,12 +105,14 @@ impl<T: Initiator> Server<T> {
             .await?;
 
         let addr = match address {
-            Address::Domain(domain, port) => OmbracAddress::Domain(domain.to_bytes().into(), port),
+            Address::Domain(domain, port) => {
+                OmbracAddress::Domain(domain.as_bytes().try_into()?, port)
+            }
             Address::IPv4(addr) => OmbracAddress::IPv4(addr),
             Address::IPv6(addr) => OmbracAddress::IPv6(addr),
         };
 
-        debug!("Connect {}", addr);
+        debug!("Connect {:?}", addr);
 
         let mut retry_count = 0;
         let mut retry_delay = INITIAL_RETRY_DELAY;
@@ -127,7 +129,7 @@ impl<T: Initiator> Server<T> {
                         break;
                     }
 
-                    warn!("Connect {} failed: {}", addr, _error.to_string());
+                    warn!("Connect {:?} failed: {}", addr, _error.to_string());
                     retry_count += 1;
 
                     sleep(retry_delay).await;
@@ -138,7 +140,7 @@ impl<T: Initiator> Server<T> {
                         break;
                     }
 
-                    warn!("Connect {} timed out", addr);
+                    warn!("Connect {:?} timed out", addr);
                     retry_count += 1;
 
                     sleep(retry_delay).await;
@@ -194,7 +196,7 @@ impl<T: Initiator> Server<T> {
 
             let addr = match packet.address {
                 Address::Domain(domain, port) => {
-                    OmbracAddress::Domain(domain.to_bytes().into(), port)
+                    OmbracAddress::Domain(domain.to_bytes().try_into()?, port)
                 }
                 Address::IPv4(addr) => OmbracAddress::IPv4(addr),
                 Address::IPv6(addr) => OmbracAddress::IPv6(addr),
@@ -219,13 +221,17 @@ impl<T: Initiator> Server<T> {
 
                 let addr = match packet.address {
                     Address::Domain(domain, port) => {
-                        OmbracAddress::Domain(domain.to_bytes().into(), port)
+                        OmbracAddress::Domain(domain.to_bytes().try_into()?, port)
                     }
                     Address::IPv4(addr) => OmbracAddress::IPv4(addr),
                     Address::IPv6(addr) => OmbracAddress::IPv6(addr),
                 };
 
-                debug!("Associate send to {}, length: {}", addr, packet.data.len());
+                debug!(
+                    "Associate send to {:?}, length: {}",
+                    addr,
+                    packet.data.len()
+                );
                 datagram_1.send(packet.data, addr).await?;
             }
         });
@@ -234,7 +240,7 @@ impl<T: Initiator> Server<T> {
             loop {
                 match timeout(IDLE_TIMEOUT, datagram_2.recv()).await {
                     Ok(Ok((data, addr))) => {
-                        debug!("Associate recv from {}, length: {}", addr, data.len());
+                        debug!("Associate recv from {:?}, length: {}", addr, data.len());
 
                         let addr = match addr {
                             OmbracAddress::Domain(domain, port) => {
