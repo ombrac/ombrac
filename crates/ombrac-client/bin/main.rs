@@ -219,7 +219,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 .expect("HTTP server failed to bind")
                 .listen()
                 .await
-                .unwrap();
+                .expect("HTTP server failed to start");
         });
     }
 

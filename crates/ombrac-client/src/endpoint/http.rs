@@ -79,7 +79,17 @@ impl<T: Initiator> Server<T> {
         };
 
         let port = req.uri().port_u16().unwrap_or(80);
-        let addr = Address::try_from(format!("{}:{}", host, port)).unwrap();
+
+        let addr = match Address::try_from(format!("{}:{}", host, port)) {
+            Ok(addr) => addr,
+            Err(_error) => {
+                error!("{_error}");
+                let mut resp = Response::default();
+                *resp.status_mut() = http::StatusCode::BAD_REQUEST;
+
+                return Ok(resp);
+            }
+        };
 
         debug!("Connect {:?}", addr);
 
