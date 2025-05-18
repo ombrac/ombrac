@@ -100,6 +100,9 @@ Options:
 Service Secret:
   -k, --secret <STR>  Protocol Secret
 
+Endpoint HTTP:
+      --http <ADDR>  The address to bind for the HTTP/HTTPS server
+
 Endpoint SOCKS:
       --socks <ADDR>  The address to bind for the SOCKS server [default: 127.0.0.1:1080]
 
@@ -117,6 +120,7 @@ Transport QUIC:
                              30 second default recommended by RFC 9308 [default: 30000]
       --keep-alive <TIME>    Keep-alive interval (in milliseconds) [default: 8000]
       --max-streams <NUM>    Maximum number of bidirectional streams that can be open simultaneously [default: 100]
+  -6                         Try to resolve domain name to IPv6 addresses first
 
 Logging:
       --log-level <LEVEL>  Logging level (e.g., INFO, WARN, ERROR) [default: WARN]
