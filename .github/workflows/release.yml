@@ -24,6 +24,10 @@ jobs:
             target: aarch64-unknown-linux-gnu
             file-ext:
 
+          # - arch-name: aarch64-unknown-linux-musl
+          #   os: ubuntu-latest
+          #   target: aarch64-unknown-linux-musl
+
           - arch-name: aarch64-pc-windows-msvc
             os: windows-latest
             target: aarch64-pc-windows-msvc
@@ -37,6 +41,11 @@ jobs:
           - arch-name: x86_64-unknown-linux-gnu
             os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
+            file-ext:
+
+          - arch-name: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
             file-ext:
 
           - arch-name: x86_64-pc-windows-msvc
@@ -61,17 +70,26 @@ jobs:
 
       - name: Install dependencies for Windows
         if: matrix.os == 'windows-latest'
-        run: | 
+        run: |
           choco install nasm
           echo "C:\Program Files\NASM" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
-      - name: Install dependencies for aarch64-unknown-linux-gnu
-        if: matrix.target == 'aarch64-unknown-linux-gnu'
-        run: | 
+      - name: Install general dependencies for Ubuntu
+        if: matrix.os == 'ubuntu-latest'
+        run: |
           sudo apt update
-          sudo apt install -y gcc-aarch64-linux-gnu
-          sudo apt install -y g++-aarch64-linux-gnu
-          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
+          sudo apt install -y \
+            musl-tools \
+            cmake \
+            clang \
+            gcc-x86-64-linux-gnu \
+            gcc-aarch64-linux-gnu
+
+          if [ "${{ matrix.target }}" = "aarch64-unknown-linux-gnu" ]; then
+            echo CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc >> $GITHUB_ENV
+          elif [ "${{ matrix.target }}" = "aarch64-unknown-linux-musl" ]; then
+            echo CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=aarch64-linux-gnu-gcc >> $GITHUB_ENV
+          fi
 
       - name: Build
         run: |
@@ -114,8 +132,84 @@ jobs:
           omitBodyDuringUpdate: true
           omitDraftDuringUpdate: true
 
-  publish:
+
+  build-and-push-docker-images:
     needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      attestations: write
+      id-token: write
+
+    env:
+      REGISTRY: ghcr.io
+      IMAGE_NAME_SERVER: ${{ github.repository }}/ombrac-server
+      IMAGE_NAME_CLIENT: ${{ github.repository }}/ombrac-client
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@main
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@master
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@master
+
+      - name: Log in to the Container registry
+        uses: docker/login-action@master
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata (tags, labels) for Docker images
+        id: meta
+        uses: docker/metadata-action@master
+        with:
+          images: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_SERVER }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_CLIENT }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable=${{ github.ref == format('refs/tags/{0}', github.event.repository.default_branch) || startsWith(github.ref, 'refs/heads/release') }}
+          labels: |
+            org.opencontainers.image.source=${{ github.event.repository.html_url }}
+            org.opencontainers.image.licenses=Apache-2.0
+
+      - name: Build and push Docker images
+        id: push
+        uses: docker/build-push-action@master
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          outputs: |
+            type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME_SERVER }},push=true
+            type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME_CLIENT }},push=true
+
+      - name: Generate artifact attestation for ${{ env.IMAGE_NAME_SERVER }}
+        uses: actions/attest-build-provenance@main
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_SERVER }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
+
+      - name: Generate artifact attestation for ${{ env.IMAGE_NAME_CLIENT }}
+        uses: actions/attest-build-provenance@main
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_CLIENT }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
+
+
+  publish:
+    needs: [release, build-and-push-docker-images]
 
     runs-on: ubuntu-latest
 
