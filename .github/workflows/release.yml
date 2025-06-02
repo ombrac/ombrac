@@ -20,13 +20,14 @@ jobs:
             file-ext:
 
           - arch-name: aarch64-unknown-linux-gnu
-            os: ubuntu-latest
+            os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
             file-ext:
 
-          # - arch-name: aarch64-unknown-linux-musl
-          #   os: ubuntu-latest
-          #   target: aarch64-unknown-linux-musl
+          - arch-name: aarch64-unknown-linux-musl
+            os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+            file-ext:
 
           - arch-name: aarch64-pc-windows-msvc
             os: windows-latest
@@ -69,13 +70,13 @@ jobs:
           targets: ${{ matrix.target }}
 
       - name: Install dependencies for Windows
-        if: matrix.os == 'windows-latest'
+        if: startsWith(matrix.os, 'windows')
         run: |
           choco install nasm
           echo "C:\Program Files\NASM" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Install general dependencies for Ubuntu
-        if: matrix.os == 'ubuntu-latest'
+        if: startsWith(matrix.os, 'ubuntu')
         run: |
           sudo apt update
           sudo apt install -y \
@@ -84,12 +85,6 @@ jobs:
             clang \
             gcc-x86-64-linux-gnu \
             gcc-aarch64-linux-gnu
-
-          if [ "${{ matrix.target }}" = "aarch64-unknown-linux-gnu" ]; then
-            echo CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc >> $GITHUB_ENV
-          elif [ "${{ matrix.target }}" = "aarch64-unknown-linux-musl" ]; then
-            echo CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=aarch64-linux-gnu-gcc >> $GITHUB_ENV
-          fi
 
       - name: Build
         run: |
@@ -135,12 +130,24 @@ jobs:
 
   build-and-push-docker-images:
     needs: release
-    runs-on: ubuntu-latest
+
     permissions:
       contents: read
       packages: write
       attestations: write
       id-token: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - docker-arch: amd64
+            os: ubuntu-latest
+
+          - docker-arch: arm64
+            os: ubuntu-24.04-arm
+
+    runs-on: ${{ matrix.os }}
 
     env:
       REGISTRY: ghcr.io
@@ -150,9 +157,6 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@main
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@master
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@master
@@ -179,33 +183,19 @@ jobs:
             org.opencontainers.image.source=${{ github.event.repository.html_url }}
             org.opencontainers.image.licenses=Apache-2.0
 
-      - name: Build and push Docker images
+      - name: Build and push Docker images for ${{ matrix.docker-arch }}
         id: push
         uses: docker/build-push-action@master
         with:
           context: .
           file: ./Dockerfile
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/${{ matrix.docker-arch }} 
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           outputs: |
             type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME_SERVER }},push=true
             type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME_CLIENT }},push=true
-
-      - name: Generate artifact attestation for ${{ env.IMAGE_NAME_SERVER }}
-        uses: actions/attest-build-provenance@main
-        with:
-          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_SERVER }}
-          subject-digest: ${{ steps.push.outputs.digest }}
-          push-to-registry: true
-
-      - name: Generate artifact attestation for ${{ env.IMAGE_NAME_CLIENT }}
-        uses: actions/attest-build-provenance@main
-        with:
-          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_CLIENT }}
-          subject-digest: ${{ steps.push.outputs.digest }}
-          push-to-registry: true
 
 
   publish:
