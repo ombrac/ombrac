@@ -130,24 +130,12 @@ jobs:
 
   build-and-push-docker-images:
     needs: release
-
+    runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
       attestations: write
       id-token: write
-
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - docker-arch: amd64
-            os: ubuntu-latest
-
-          - docker-arch: arm64
-            os: ubuntu-24.04-arm
-
-    runs-on: ${{ matrix.os }}
 
     env:
       REGISTRY: ghcr.io
@@ -183,13 +171,13 @@ jobs:
             org.opencontainers.image.source=${{ github.event.repository.html_url }}
             org.opencontainers.image.licenses=Apache-2.0
 
-      - name: Build and push Docker images for ${{ matrix.docker-arch }}
+      - name: Build and push Docker images
         id: push
         uses: docker/build-push-action@master
         with:
           context: .
           file: ./Dockerfile
-          platforms: linux/${{ matrix.docker-arch }} 
+          platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
