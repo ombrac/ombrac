@@ -166,18 +166,28 @@ jobs:
 
 
   build-docker:
+    runs-on: ${{ matrix.os }}
+
     strategy:
       fail-fast: false
       matrix:
         include:
-          - docker-arch: amd64
+          - arch: amd64
             os: ubuntu-latest
+            target: ombrac-server
 
-          - docker-arch: arm64
+          - arch: amd64
+            os: ubuntu-latest
+            target: ombrac-client
+
+          - arch: arm64
             os: ubuntu-24.04-arm
+            target: ombrac-server
 
-    runs-on: ${{ matrix.os }}
-    
+          - arch: arm64
+            os: ubuntu-24.04-arm
+            target: ombrac-client
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@main
@@ -185,23 +195,24 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@master
 
-      - name: Build Docker Image for ${{ matrix.docker-arch }}
+      - name: Build Docker image
         uses: docker/build-push-action@master
         with:
           context: .
           file: ./Dockerfile
-          platforms: linux/${{ matrix.docker-arch }}
-          build-args: TARGETARCH=${{ matrix.docker-arch }}
+          target: ${{ matrix.target }}
+          platforms: linux/${{ matrix.arch }}
           push: false
           load: true
-          tags: |
-            ombrac-server:test-${{ matrix.docker-arch }}
-            ombrac-client:test-${{ matrix.docker-arch }}
+          tags: ${{ matrix.target }}:test-${{ matrix.arch }}
+          build-args: TARGETARCH=${{ matrix.arch }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
-      - name: Test
+      - name: Test Docker image
         run: |
-          docker run --rm ombrac-server:test-${{ matrix.docker-arch }} --version
-          docker run --rm ombrac-server:test-${{ matrix.docker-arch }} --help
+          docker run --rm ${{ matrix.target }}:test-${{ matrix.arch }} --version
+          docker run --rm ${{ matrix.target }}:test-${{ matrix.arch }} --help
 
 
   dry-publish:

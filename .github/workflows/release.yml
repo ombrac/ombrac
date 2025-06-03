@@ -124,17 +124,23 @@ jobs:
 
   build-and-push-docker-images:
     needs: release
-    runs-on: ubuntu-latest
+
     permissions:
       contents: read
       packages: write
       attestations: write
       id-token: write
 
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: true
+      matrix:
+        target: [ombrac-server, ombrac-client] 
+
     env:
       REGISTRY: ghcr.io
-      IMAGE_NAME_SERVER: ${{ github.repository }}/ombrac-server
-      IMAGE_NAME_CLIENT: ${{ github.repository }}/ombrac-client
+      IMAGE_NAME: ${{ github.repository }}/${{ matrix.target }}
 
     steps:
       - name: Checkout repository
@@ -150,34 +156,33 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata (tags, labels) for Docker images
+      - name: Extract metadata (tags, labels) for Docker image
         id: meta
         uses: docker/metadata-action@master
         with:
-          images: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_SERVER }}
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_CLIENT }}
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=latest,enable=${{ github.ref == format('refs/tags/{0}', github.event.repository.default_branch) || startsWith(github.ref, 'refs/heads/release') }}
           labels: |
+            org.opencontainers.image.title=${{ matrix.target }}
             org.opencontainers.image.source=${{ github.event.repository.html_url }}
             org.opencontainers.image.licenses=Apache-2.0
 
-      - name: Build and push Docker images
+      - name: Build and push Docker image for ${{ matrix.target }}
         id: push
         uses: docker/build-push-action@master
         with:
           context: .
           file: ./Dockerfile
+          target: ${{ matrix.target }}
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          outputs: |
-            type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME_SERVER }},push=true,target=ombrac-server
-            type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME_CLIENT }},push=true,target=ombrac-client
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
 
   publish:
