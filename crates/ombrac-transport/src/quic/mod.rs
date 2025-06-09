@@ -122,7 +122,6 @@ pub enum Error {
     #[error("Async channel receive error: {0}")]
     ChannelSend(#[from] async_channel::SendError<Bytes>),
 
-    // Custom errors
     #[error(
         "Server TLS configuration error: Private key must be provided when certificate is specified"
     )]
@@ -131,7 +130,7 @@ pub enum Error {
     #[error("Server TLS configuration error: Certificate must be provided when TLS is enabled")]
     ServerMissingCertificate,
 
-    #[error("Failed to load private key from file")] // More specific message
+    #[error("Failed to load private key from file")]
     ServerLoadPrivateKey,
 
     #[error("Connection error: Zero RTT not accepted by server")]

@@ -46,7 +46,16 @@ impl<T: Initiator> Server<T> {
 
                         let result = match request {
                             Request::Connect(address) => {
-                                Self::handle_connect(ombrac, address, stream).await
+                                match Self::handle_connect(ombrac, address.clone(), stream).await {
+                                    Ok(_copy) => {
+                                        info!(
+                                            "Connect {:?}, Send: {}, Recv: {}",
+                                            address, _copy.0, _copy.1
+                                        );
+                                        Ok(())
+                                    }
+                                    Err(err) => Err(err),
+                                }
                             }
                             #[cfg(feature = "datagram")]
                             Request::Associate(address) => {
@@ -91,7 +100,7 @@ impl<T: Initiator> Server<T> {
         ombrac: Arc<Client<T>>,
         address: Address,
         mut stream: Stream<impl AsyncRead + AsyncWrite + Unpin>,
-    ) -> Result<()> {
+    ) -> Result<(u64, u64)> {
         use ombrac::address::Address as OmbracAddress;
         use ombrac::io::util::copy_bidirectional;
         use tokio::time::{sleep, timeout};
@@ -116,12 +125,14 @@ impl<T: Initiator> Server<T> {
 
         let mut retry_count = 0;
         let mut retry_delay = INITIAL_RETRY_DELAY;
+        let mut inbound = 0;
+        let mut outbound = 0;
 
         loop {
             match timeout(CONNECT_TIMEOUT, ombrac.connect(addr.clone())).await {
-                Ok(Ok(mut outbound)) => {
-                    let _copy = copy_bidirectional(&mut stream, &mut outbound).await?;
-                    info!("Connect {}, Send: {}, Recv: {}", addr, _copy.0, _copy.1);
+                Ok(Ok(mut outbound_stream)) => {
+                    (outbound, inbound) =
+                        copy_bidirectional(&mut stream, &mut outbound_stream).await?;
                     break;
                 }
                 Ok(Err(_error)) => {
@@ -149,7 +160,7 @@ impl<T: Initiator> Server<T> {
             }
         }
 
-        Ok(())
+        Ok((outbound, inbound))
     }
 
     #[cfg(feature = "datagram")]

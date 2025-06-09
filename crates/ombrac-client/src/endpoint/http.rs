@@ -27,7 +27,7 @@ impl<T: Initiator> Server<T> {
     pub async fn listen(&self) -> io::Result<()> {
         let ombrac = Arc::clone(&self.1);
 
-        info!("HTTP Server Listening on {}", self.0.local_addr()?);
+        info!("HTTP/HTTPS Server Listening on {}", self.0.local_addr()?);
 
         loop {
             match self.0.accept().await {

@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
+use ombrac_macros::{info, warn};
 use quinn::IdleTimeout;
 
 use super::{Connection, Error, Result, stream::Stream};
@@ -137,6 +138,7 @@ impl Connection {
             tls_config.alpn_protocols = [b"h3"].iter().map(|&x| x.into()).collect();
 
             if config.tls_skip {
+                warn!("TLS certificate verification is DISABLED - this is not secure!");
                 tls_config
                     .dangerous()
                     .set_certificate_verifier(Arc::new(cert_verifier::NullVerifier));
@@ -290,6 +292,7 @@ async fn connection(
     name: &str,
     enable_zero_rtt: bool,
 ) -> Result<quinn::Connection> {
+    let mut is_zero_rtt = false;
     let connecting = endpoint.connect(addr, name)?;
 
     let connection = if enable_zero_rtt {
@@ -299,6 +302,8 @@ async fn connection(
                     return Err(Error::ZeroRttNotAccepted);
                 }
 
+                is_zero_rtt = true;
+
                 conn
             }
             Err(conn) => conn.await?,
@@ -306,6 +311,16 @@ async fn connection(
     } else {
         connecting.await?
     };
+
+    info!(
+        "QUIC Connection{} established with {} at {}",
+        match is_zero_rtt {
+            true => "(0-RTT)",
+            _ => "",
+        },
+        name,
+        addr
+    );
 
     Ok(connection)
 }
