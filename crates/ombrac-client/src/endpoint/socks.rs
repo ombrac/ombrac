@@ -1,190 +1,85 @@
-use std::io;
-use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use ombrac_macros::{debug, error, info, warn};
+use ombrac::address::Address as OmbracAddress;
+use ombrac_macros::{debug, info, warn};
 use ombrac_transport::Initiator;
-use socks_lib::v5::{Address, Method, Request, Response, Stream};
-use tokio::{
-    io::{AsyncRead, AsyncWrite},
-    net::TcpListener,
-};
+use socks_lib::io::{self, AsyncRead, AsyncWrite};
+#[cfg(feature = "datagram")]
+use socks_lib::net::UdpSocket;
+#[cfg(feature = "datagram")]
+use socks_lib::v5::UdpPacket;
+use socks_lib::v5::server::Handler;
+use socks_lib::v5::{Address as SocksAddress, Request, Stream};
 
 use crate::Client;
 
-use crate::{Error, Result};
+pub struct CommandHandler<I: Initiator>(Arc<Client<I>>);
 
-pub struct Server<T: Initiator>(TcpListener, Arc<Client<T>>);
-
-impl<T: Initiator> Server<T> {
-    pub async fn bind<A: Into<SocketAddr>>(addr: A, ombrac: Arc<Client<T>>) -> io::Result<Self> {
-        let inner = TcpListener::bind(addr.into()).await?;
-        Ok(Self(inner, ombrac))
-    }
-
-    pub async fn listen(&self) -> io::Result<()> {
-        let ombrac = Arc::clone(&self.1);
-
-        info!("SOCKS Server Listening on {}", self.0.local_addr()?);
-
-        loop {
-            match self.0.accept().await {
-                Ok((inner, _addr)) => {
-                    let ombrac = ombrac.clone();
-
-                    tokio::spawn(async move {
-                        let mut stream = Stream::with(inner);
-
-                        let request = match Self::handle_socks_request(&mut stream).await {
-                            Ok(request) => request,
-                            Err(_error) => {
-                                error!("Failed to accept socks: {}", _error);
-                                return;
-                            }
-                        };
-
-                        let result = match request {
-                            Request::Connect(address) => {
-                                match Self::handle_connect(ombrac, address.clone(), stream).await {
-                                    Ok(_copy) => {
-                                        info!(
-                                            "Connect {:?}, Send: {}, Recv: {}",
-                                            address, _copy.0, _copy.1
-                                        );
-                                        Ok(())
-                                    }
-                                    Err(err) => Err(err),
-                                }
-                            }
-                            #[cfg(feature = "datagram")]
-                            Request::Associate(address) => {
-                                Self::handle_associate(ombrac, address, stream).await
-                            }
-                            _ => {
-                                match stream.write_response(&Response::CommandNotSupported).await {
-                                    Ok(_) => Ok(()),
-                                    Err(e) => Err(Error::Io(e)),
-                                }
-                            }
-                        };
-
-                        if let Err(_error) = result {
-                            error!("{}", _error);
-                        }
-                    });
-                }
-
-                Err(_error) => {
-                    error!("Failed to accept: {}", _error);
-                    continue;
-                }
-            }
-        }
-    }
-
-    #[inline]
-    async fn handle_socks_request(
-        stream: &mut Stream<impl AsyncRead + AsyncWrite + Unpin>,
-    ) -> Result<Request> {
-        let _methods = stream.read_methods().await?;
-        stream.write_auth_method(Method::NoAuthentication).await?;
-
-        let request = stream.read_request().await?;
-
-        Ok(request)
+impl<I: Initiator> CommandHandler<I> {
+    pub fn new(inner: Arc<Client<I>>) -> Self {
+        Self(inner)
     }
 
     #[inline]
     async fn handle_connect(
-        ombrac: Arc<Client<T>>,
-        address: Address,
-        mut stream: Stream<impl AsyncRead + AsyncWrite + Unpin>,
-    ) -> Result<(u64, u64)> {
-        use ombrac::address::Address as OmbracAddress;
+        &self,
+        address: SocksAddress,
+        stream: &mut Stream<impl AsyncRead + AsyncWrite + Unpin>,
+    ) -> io::Result<(u64, u64)> {
         use ombrac::io::util::copy_bidirectional;
         use tokio::time::{sleep, timeout};
 
-        const MAX_RETRIES: usize = 1;
+        const MAX_ATTEMPTS: usize = 2;
         const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
         const INITIAL_RETRY_DELAY: Duration = Duration::from_secs(1);
 
-        stream
-            .write_response(&Response::Success(Address::unspecified()))
-            .await?;
+        let addr = util::socks_to_ombrac_addr(address)?;
 
-        let addr = match address {
-            Address::Domain(domain, port) => {
-                OmbracAddress::Domain(domain.as_bytes().try_into()?, port)
-            }
-            Address::IPv4(addr) => OmbracAddress::IPv4(addr),
-            Address::IPv6(addr) => OmbracAddress::IPv6(addr),
-        };
-
-        debug!("Connect {:?}", addr);
-
-        let mut retry_count = 0;
+        let mut last_error: Option<io::Error> = None;
         let mut retry_delay = INITIAL_RETRY_DELAY;
-        let mut inbound = 0;
-        let mut outbound = 0;
 
-        loop {
-            match timeout(CONNECT_TIMEOUT, ombrac.connect(addr.clone())).await {
+        for attempt in 1..=MAX_ATTEMPTS {
+            if attempt > 1 {
+                sleep(retry_delay).await;
+                retry_delay *= 2;
+            }
+
+            warn!("Attempt {} to connect to {:?}", attempt, addr);
+
+            match timeout(CONNECT_TIMEOUT, self.0.connect(addr.clone())).await {
                 Ok(Ok(mut outbound_stream)) => {
-                    (outbound, inbound) =
-                        copy_bidirectional(&mut stream, &mut outbound_stream).await?;
-                    break;
+                    return copy_bidirectional(stream, &mut outbound_stream).await;
                 }
-                Ok(Err(_error)) => {
-                    if retry_count >= MAX_RETRIES {
-                        break;
-                    }
 
-                    warn!("Connect {:?} failed: {}", addr, _error.to_string());
-                    retry_count += 1;
-
-                    sleep(retry_delay).await;
-                    retry_delay *= 2;
-                }
                 Err(_) => {
-                    if retry_count >= MAX_RETRIES {
-                        break;
-                    }
+                    let err =
+                        io::Error::new(io::ErrorKind::TimedOut, "connection attempt timed out");
+                    warn!("Connect to {:?} failed: {}", addr, err);
+                    last_error = Some(err);
+                }
 
-                    warn!("Connect {:?} timed out", addr);
-                    retry_count += 1;
-
-                    sleep(retry_delay).await;
-                    retry_delay *= 2;
+                Ok(Err(e)) => {
+                    warn!("Connect to {:?} failed: {}", addr, e);
+                    last_error = Some(io::Error::other(e));
                 }
             }
         }
 
-        Ok((outbound, inbound))
+        Err(last_error.unwrap_or_else(|| {
+            io::Error::other("All connection attempts failed without a specific error")
+        }))
     }
 
     #[cfg(feature = "datagram")]
     #[inline]
-    async fn handle_associate(
-        ombrac: Arc<Client<T>>,
-        _address: Address,
-        mut stream: Stream<impl AsyncRead + AsyncWrite + Unpin>,
-    ) -> Result<()> {
-        use ombrac::address::Address as OmbracAddress;
-        use socks_lib::v5::{Domain, UdpPacket};
-        use tokio::net::UdpSocket;
+    async fn handle_associate(&self, socket: UdpSocket) -> io::Result<()> {
         use tokio::time::timeout;
 
         const DEFAULT_BUF_SIZE: usize = 2 * 1024;
         const IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 
-        let socket = UdpSocket::bind("0.0.0.0:0").await?;
-        let addr = Address::from_socket_addr(socket.local_addr()?);
-
-        stream.write_response(&Response::Success(&addr)).await?;
-        drop(stream);
-
-        let outbound = ombrac.associate().await?;
+        let outbound = self.0.associate().await.unwrap();
 
         let socket_1 = Arc::new(socket);
         let socket_2 = Arc::clone(&socket_1);
@@ -197,23 +92,23 @@ impl<T: Initiator> Server<T> {
         let client_addr = {
             let (n, client_addr) = match timeout(IDLE_TIMEOUT, socket_1.recv_from(&mut buf)).await {
                 Ok(Ok((n, addr))) => (n, addr),
-                Ok(Err(e)) => return Err(Error::Io(e)),
+                Ok(Err(e)) => return Err(e),
                 Err(_) => {
-                    return Err(Error::Timeout("No initial packet received".to_string()));
+                    return Err(io::Error::new(
+                        io::ErrorKind::TimedOut,
+                        "No initial packet received",
+                    ));
                 }
             };
 
             let packet = UdpPacket::from_bytes(&mut &buf[..n])?;
 
-            let addr = match packet.address {
-                Address::Domain(domain, port) => {
-                    OmbracAddress::Domain(domain.to_bytes().try_into()?, port)
-                }
-                Address::IPv4(addr) => OmbracAddress::IPv4(addr),
-                Address::IPv6(addr) => OmbracAddress::IPv6(addr),
-            };
+            let addr = util::socks_to_ombrac_addr(SocksAddress::from(client_addr)).unwrap();
 
-            datagram_1.send(packet.data, addr).await?;
+            datagram_1
+                .send(packet.data, addr)
+                .await
+                .map_err(io::Error::other)?;
 
             client_addr
         };
@@ -229,14 +124,7 @@ impl<T: Initiator> Server<T> {
                 }
 
                 let packet = UdpPacket::from_bytes(&mut &buf[..n])?;
-
-                let addr = match packet.address {
-                    Address::Domain(domain, port) => {
-                        OmbracAddress::Domain(domain.to_bytes().try_into()?, port)
-                    }
-                    Address::IPv4(addr) => OmbracAddress::IPv4(addr),
-                    Address::IPv6(addr) => OmbracAddress::IPv6(addr),
-                };
+                let addr = OmbracAddress::from(addr);
 
                 debug!(
                     "Associate send to {:?}, length: {}",
@@ -253,14 +141,7 @@ impl<T: Initiator> Server<T> {
                     Ok(Ok((data, addr))) => {
                         debug!("Associate recv from {:?}, length: {}", addr, data.len());
 
-                        let addr = match addr {
-                            OmbracAddress::Domain(domain, port) => {
-                                Address::Domain(Domain::from_bytes(domain.to_bytes()), port)
-                            }
-                            OmbracAddress::IPv4(addr) => Address::IPv4(addr),
-                            OmbracAddress::IPv6(addr) => Address::IPv6(addr),
-                        };
-
+                        let addr = util::ombrac_to_socks_addr(addr).unwrap();
                         let packet = UdpPacket::un_frag(addr, data);
 
                         socket_2.send_to(&packet.data, client_addr).await?;
@@ -285,9 +166,86 @@ impl<T: Initiator> Server<T> {
         };
 
         match result {
-            Ok(inner_result) => inner_result,
+            Ok(inner) => Ok(inner.map_err(io::Error::other)?),
             Err(e) if e.is_cancelled() => Ok(()),
-            Err(e) => Err(Error::JoinError(e)),
+            Err(e) => Err(io::Error::other(e)),
         }
+    }
+}
+
+impl<I: Initiator> Handler for CommandHandler<I> {
+    async fn handle<T>(&self, stream: &mut Stream<T>, request: Request) -> io::Result<()>
+    where
+        T: AsyncRead + AsyncWrite + Unpin + Send + Sync,
+    {
+        debug!("SOCKS Request: {:?}", request);
+
+        match &request {
+            Request::Connect(address) => {
+                stream.write_response_unspecified().await?;
+
+                match self.handle_connect(address.clone(), stream).await {
+                    Ok(_copy) => {
+                        info!(
+                            "{} Connect {}, Send: {}, Recv: {}",
+                            stream.peer_addr(),
+                            address,
+                            _copy.0,
+                            _copy.1
+                        );
+                    }
+                    Err(err) => return Err(err),
+                }
+            }
+            #[cfg(feature = "datagram")]
+            Request::Associate(_addr) => {
+                use socks_lib::v5::Response;
+
+                let socket = UdpSocket::bind("0.0.0.0:0").await?;
+                let addr = SocksAddress::from(socket.local_addr()?);
+
+                stream.write_response(&Response::Success(&addr)).await?;
+
+                self.handle_associate(socket).await?;
+            }
+            _ => {
+                stream.write_response_unsupported().await?;
+            }
+        }
+
+        Ok(())
+    }
+}
+
+mod util {
+    use std::io;
+
+    use ombrac::address::Address as OmbracAddress;
+    use socks_lib::v5::Address as SocksAddress;
+
+    #[inline]
+    pub(super) fn socks_to_ombrac_addr(addr: SocksAddress) -> io::Result<OmbracAddress> {
+        let result = match addr {
+            SocksAddress::IPv4(value) => OmbracAddress::IPv4(value),
+            SocksAddress::IPv6(value) => OmbracAddress::IPv6(value),
+            SocksAddress::Domain(domain, port) => {
+                OmbracAddress::Domain(domain.as_bytes().clone().try_into()?, port)
+            }
+        };
+
+        Ok(result)
+    }
+
+    #[inline]
+    pub(super) fn ombrac_to_socks_addr(addr: OmbracAddress) -> io::Result<SocksAddress> {
+        let result = match addr {
+            OmbracAddress::IPv4(value) => SocksAddress::IPv4(value),
+            OmbracAddress::IPv6(value) => SocksAddress::IPv6(value),
+            OmbracAddress::Domain(domain, port) => {
+                SocksAddress::Domain(domain.to_bytes().try_into()?, port)
+            }
+        };
+
+        Ok(result)
     }
 }

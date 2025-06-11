@@ -1,14 +1,15 @@
 use std::error::Error;
+use std::io;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
 
 use clap::Parser;
 use ombrac_client::Client;
-use ombrac_client::endpoint::http::Server as HttpServer;
-use ombrac_client::endpoint::socks::Server as SocksServer;
 use ombrac_client::transport::quic::Builder;
+use ombrac_macros::info;
+use ombrac_transport::Initiator;
+use tokio::task::JoinHandle;
 
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
@@ -209,25 +210,24 @@ async fn main() -> Result<(), Box<dyn Error>> {
     );
 
     let client = Arc::new(ombrac_client);
-    tokio::time::sleep(Duration::from_millis(100)).await;
 
-    if let Some(addr) = args.http {
+    if let Some(address) = args.http {
         let client = client.clone();
-        tokio::spawn(async move {
-            HttpServer::bind(addr, client)
+        run_http_server(client, address, async {
+            tokio::signal::ctrl_c()
                 .await
-                .expect("HTTP server failed to bind")
-                .listen()
-                .await
-                .expect("HTTP server failed to start");
-        });
+                .expect("Failed to listen for event");
+        })
+        .await?;
     }
 
-    SocksServer::bind(args.socks, client)
-        .await
-        .expect("SOCKS server failed to bind")
-        .listen()
-        .await?;
+    run_socks_server(client, args.socks, async {
+        tokio::signal::ctrl_c()
+            .await
+            .expect("Failed to listen for event");
+    })
+    .await?
+    .await?;
 
     Ok(())
 }
@@ -298,4 +298,50 @@ async fn quic_from_args(args: &Args) -> Result<Builder, Box<dyn Error>> {
     builder = builder.with_enable_connection_multiplexing(!args.no_multiplex);
 
     Ok(builder)
+}
+
+async fn run_http_server<I: Initiator>(
+    ombrac: Arc<Client<I>>,
+    address: SocketAddr,
+    _shutdown_signal: impl Future<Output = ()> + Send + 'static,
+) -> io::Result<JoinHandle<()>> {
+    use ombrac_client::endpoint::http::Server;
+
+    let handle = tokio::spawn(async move {
+        info!("HTTP Server Listening on {}", address);
+
+        Server::bind(address, ombrac)
+            .await
+            .expect("Failed to bind HTTP server")
+            .listen()
+            .await
+            .expect("Failed to run HTTP server");
+    });
+
+    Ok(handle)
+}
+
+async fn run_socks_server<I: Initiator>(
+    ombrac: Arc<Client<I>>,
+    address: SocketAddr,
+    shutdown_signal: impl Future<Output = ()> + Send + 'static,
+) -> io::Result<JoinHandle<()>> {
+    use ombrac_client::endpoint::socks::CommandHandler;
+    use socks_lib::net::TcpListener;
+    use socks_lib::v5::server::auth::NoAuthentication;
+    use socks_lib::v5::server::{Config, Server};
+
+    let listener = TcpListener::bind(address).await?;
+
+    let handle = tokio::spawn(async move {
+        info!("SOCKS Server Listening on {}", address);
+
+        let config = Config::new(NoAuthentication, CommandHandler::new(ombrac));
+
+        Server::run(listener, config.into(), shutdown_signal)
+            .await
+            .expect("Failed to run SOCKS server");
+    });
+
+    Ok(handle)
 }
