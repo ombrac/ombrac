@@ -79,7 +79,7 @@ impl<I: Initiator> CommandHandler<I> {
         const DEFAULT_BUF_SIZE: usize = 2 * 1024;
         const IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 
-        let outbound = self.0.associate().await.unwrap();
+        let outbound = self.0.associate().await.map_err(io::Error::other)?;
 
         let socket_1 = Arc::new(socket);
         let socket_2 = Arc::clone(&socket_1);
@@ -103,7 +103,7 @@ impl<I: Initiator> CommandHandler<I> {
 
             let packet = UdpPacket::from_bytes(&mut &buf[..n])?;
 
-            let addr = util::socks_to_ombrac_addr(SocksAddress::from(client_addr)).unwrap();
+            let addr = util::socks_to_ombrac_addr(SocksAddress::from(client_addr))?;
 
             datagram_1
                 .send(packet.data, addr)
@@ -141,7 +141,7 @@ impl<I: Initiator> CommandHandler<I> {
                     Ok(Ok((data, addr))) => {
                         debug!("Associate recv from {:?}, length: {}", addr, data.len());
 
-                        let addr = util::ombrac_to_socks_addr(addr).unwrap();
+                        let addr = util::ombrac_to_socks_addr(addr)?;
                         let packet = UdpPacket::un_frag(addr, data);
 
                         socket_2.send_to(&packet.data, client_addr).await?;
