@@ -5,6 +5,7 @@ use std::sync::Arc;
 use bytes::Bytes;
 use http_body_util::{BodyExt, combinators::BoxBody};
 use hyper::{Method, Request, Response};
+use hyper_util::rt::TokioIo;
 use tokio::net::TcpListener;
 
 use ombrac::prelude::Address;
@@ -26,8 +27,6 @@ impl<T: Initiator> Server<T> {
 
     pub async fn listen(&self) -> io::Result<()> {
         let ombrac = Arc::clone(&self.1);
-
-        info!("HTTP Server Listening on {}", self.0.local_addr()?);
 
         loop {
             match self.0.accept().await {
@@ -146,154 +145,5 @@ impl<T: Initiator> Server<T> {
         }
 
         Ok(Response::default())
-    }
-}
-
-// ===== Tokio IO =====
-pub struct TokioIo<T: Unpin> {
-    inner: T,
-}
-
-mod tokiort {
-    use super::TokioIo;
-
-    use std::io::{Error, IoSlice};
-    use std::pin::Pin;
-    use std::task::{Context, Poll};
-
-    use hyper::rt::{Read, ReadBuf as HyperReadBuf, ReadBufCursor, Write};
-    use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
-
-    impl<T: Unpin> TokioIo<T> {
-        pub fn new(inner: T) -> Self {
-            Self { inner }
-        }
-    }
-
-    impl<T> Read for TokioIo<T>
-    where
-        T: AsyncRead + Unpin,
-    {
-        fn poll_read(
-            mut self: Pin<&mut Self>,
-            cx: &mut Context<'_>,
-            mut buf: ReadBufCursor<'_>,
-        ) -> Poll<Result<(), Error>> {
-            let n = unsafe {
-                let mut tbuf = ReadBuf::uninit(buf.as_mut());
-                match AsyncRead::poll_read(Pin::new(&mut self.inner), cx, &mut tbuf) {
-                    Poll::Ready(Ok(())) => tbuf.filled().len(),
-                    other => return other,
-                }
-            };
-
-            unsafe {
-                buf.advance(n);
-            }
-            Poll::Ready(Ok(()))
-        }
-    }
-
-    impl<T> Write for TokioIo<T>
-    where
-        T: AsyncWrite + Unpin,
-    {
-        fn poll_write(
-            mut self: Pin<&mut Self>,
-            cx: &mut Context<'_>,
-            buf: &[u8],
-        ) -> Poll<Result<usize, Error>> {
-            AsyncWrite::poll_write(Pin::new(&mut self.inner), cx, buf)
-        }
-
-        fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
-            AsyncWrite::poll_flush(Pin::new(&mut self.inner), cx)
-        }
-
-        fn poll_shutdown(
-            mut self: Pin<&mut Self>,
-            cx: &mut Context<'_>,
-        ) -> Poll<Result<(), Error>> {
-            AsyncWrite::poll_shutdown(Pin::new(&mut self.inner), cx)
-        }
-
-        fn is_write_vectored(&self) -> bool {
-            AsyncWrite::is_write_vectored(&self.inner)
-        }
-
-        fn poll_write_vectored(
-            mut self: Pin<&mut Self>,
-            cx: &mut Context<'_>,
-            bufs: &[IoSlice<'_>],
-        ) -> Poll<Result<usize, Error>> {
-            AsyncWrite::poll_write_vectored(Pin::new(&mut self.inner), cx, bufs)
-        }
-    }
-
-    impl<T> AsyncRead for TokioIo<T>
-    where
-        T: Read + Unpin,
-    {
-        fn poll_read(
-            mut self: Pin<&mut Self>,
-            cx: &mut Context<'_>,
-            tbuf: &mut ReadBuf<'_>,
-        ) -> Poll<Result<(), Error>> {
-            let filled = tbuf.filled().len();
-            let sub_filled = unsafe {
-                let mut buf = HyperReadBuf::uninit(tbuf.unfilled_mut());
-
-                match Read::poll_read(Pin::new(&mut self.inner), cx, buf.unfilled()) {
-                    Poll::Ready(Ok(())) => buf.filled().len(),
-                    other => return other,
-                }
-            };
-
-            let n_filled = filled + sub_filled;
-
-            let n_init = sub_filled;
-            unsafe {
-                tbuf.assume_init(n_init);
-                tbuf.set_filled(n_filled);
-            }
-
-            Poll::Ready(Ok(()))
-        }
-    }
-
-    impl<T> AsyncWrite for TokioIo<T>
-    where
-        T: Write + Unpin,
-    {
-        fn poll_write(
-            mut self: Pin<&mut Self>,
-            cx: &mut Context<'_>,
-            buf: &[u8],
-        ) -> Poll<Result<usize, Error>> {
-            Write::poll_write(Pin::new(&mut self.inner), cx, buf)
-        }
-
-        fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
-            Write::poll_flush(Pin::new(&mut self.inner), cx)
-        }
-
-        fn poll_shutdown(
-            mut self: Pin<&mut Self>,
-            cx: &mut Context<'_>,
-        ) -> Poll<Result<(), Error>> {
-            Write::poll_shutdown(Pin::new(&mut self.inner), cx)
-        }
-
-        fn is_write_vectored(&self) -> bool {
-            Write::is_write_vectored(&self.inner)
-        }
-
-        fn poll_write_vectored(
-            mut self: Pin<&mut Self>,
-            cx: &mut Context<'_>,
-            bufs: &[IoSlice<'_>],
-        ) -> Poll<Result<usize, Error>> {
-            Write::poll_write_vectored(Pin::new(&mut self.inner), cx, bufs)
-        }
     }
 }

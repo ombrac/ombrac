@@ -59,6 +59,7 @@ tracing-appender = { workspace = true, optional = true }
 socks-lib = { workspace = true, optional = true }
 http = { workspace = true, optional = true }
 hyper = { workspace = true, features = ["client", "server", "http1"],optional = true }
+hyper-util = { workspace = true, features = ["tokio"] }
 http-body-util = { workspace = true, optional = true }
 
 [dev-dependencies]
