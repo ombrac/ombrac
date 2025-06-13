@@ -36,6 +36,12 @@ cargo install ombrac-client ombrac-server --features binary
 brew tap ombrac/tap && brew install ombrac
 ```
 
+### Docker
+#### Pull from GitHub Container Registry
+```shell
+docker pull ghcr.io/ombrac/ombrac/ombrac-server:latest
+docker pull ghcr.io/ombrac/ombrac/ombrac-client:latest
+```
 
 ## Usage
 ### Server
@@ -54,6 +60,29 @@ When using a self-signed certificate, the client requires both the `--server-nam
 
 Alternatively, you can use the `--insecure` option to skip TLS verification. **This is not recommended for production environments as it bypasses certificate validation, potentially exposing your communication to security risks.**
 
+
+#### Run the container
+```shell
+docker run --name ombrac-server \
+  --restart always \
+  -p 2098:2098/udp \
+  -dit ghcr.io/ombrac/ombrac/ombrac-server:latest \
+  -l 0.0.0.0:2098 \
+  -k secret \
+  --insecure
+```
+
+```shell
+docker run --name ombrac-client \
+  --restart always \
+  -p 1080:1080/tcp \
+  -dit ghcr.io/ombrac/ombrac/ombrac-client:latest \
+  -s example.com:2098 \
+  -k secret \
+  --socks 0.0.0.0:1080 \
+  --log-level INFO \
+  --insecure
+```
 
 ## Full Options
 

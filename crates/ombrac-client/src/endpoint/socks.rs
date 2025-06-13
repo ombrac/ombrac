@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use ombrac::address::Address as OmbracAddress;
-use ombrac_macros::{debug, info, warn};
+use ombrac_macros::{debug, info};
 use ombrac_transport::Initiator;
 use socks_lib::io::{self, AsyncRead, AsyncWrite};
 #[cfg(feature = "datagram")]
@@ -28,47 +28,20 @@ impl<I: Initiator> CommandHandler<I> {
         stream: &mut Stream<impl AsyncRead + AsyncWrite + Unpin>,
     ) -> io::Result<(u64, u64)> {
         use ombrac::io::util::copy_bidirectional;
-        use tokio::time::{sleep, timeout};
+        use tokio::time::timeout;
 
-        const MAX_ATTEMPTS: usize = 2;
-        const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
-        const INITIAL_RETRY_DELAY: Duration = Duration::from_secs(1);
+        const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_millis(8000);
 
         let addr = util::socks_to_ombrac_addr(address)?;
 
-        let mut last_error: Option<io::Error> = None;
-        let mut retry_delay = INITIAL_RETRY_DELAY;
-
-        for attempt in 1..=MAX_ATTEMPTS {
-            if attempt > 1 {
-                sleep(retry_delay).await;
-                retry_delay *= 2;
-            }
-
-            warn!("Attempt {} to connect to {:?}", attempt, addr);
-
-            match timeout(CONNECT_TIMEOUT, self.0.connect(addr.clone())).await {
-                Ok(Ok(mut outbound_stream)) => {
-                    return copy_bidirectional(stream, &mut outbound_stream).await;
-                }
-
-                Err(_) => {
-                    let err =
-                        io::Error::new(io::ErrorKind::TimedOut, "connection attempt timed out");
-                    warn!("Connect to {:?} failed: {}", addr, err);
-                    last_error = Some(err);
-                }
-
-                Ok(Err(e)) => {
-                    warn!("Connect to {:?} failed: {}", addr, e);
-                    last_error = Some(io::Error::other(e));
-                }
-            }
+        match timeout(DEFAULT_CONNECT_TIMEOUT, self.0.connect(addr.clone())).await {
+            Ok(Ok(mut outbound)) => copy_bidirectional(stream, &mut outbound).await,
+            Ok(Err(e)) => Err(io::Error::other(e)),
+            Err(_) => Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "Connection attempt timed out",
+            )),
         }
-
-        Err(last_error.unwrap_or_else(|| {
-            io::Error::other("All connection attempts failed without a specific error")
-        }))
     }
 
     #[cfg(feature = "datagram")]
