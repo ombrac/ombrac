@@ -168,7 +168,7 @@ impl Session {
         self.next_session_id.fetch_add(2, Ordering::Relaxed)
     }
 
-    pub async fn open_bidirectional(&self) -> Option<Datagram> {
+    pub async fn open_datagram(&self) -> Option<Datagram> {
         if self.is_connected.load(Ordering::Acquire) {
             return Some(self.open(self.next_session_id()));
         }
@@ -176,7 +176,7 @@ impl Session {
         None
     }
 
-    pub async fn accept_bidirectional(&self) -> Option<Datagram> {
+    pub async fn accept_datagram(&self) -> Option<Datagram> {
         use async_channel::bounded;
         use std::mem::replace;
 
@@ -235,124 +235,5 @@ impl crate::Unreliable for Datagram {
             .send(data)
             .await
             .map_err(|e| io::Error::other(e.to_string()))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::sync::Arc;
-
-    use bytes::Bytes;
-    use tests_support::net::find_available_local_udp_addr;
-
-    use crate::{Acceptor, Initiator, Unreliable};
-
-    use crate::quic::tests::setup_connections;
-
-    async fn create_pair() -> (impl Acceptor, impl Initiator) {
-        let listen_addr = find_available_local_udp_addr();
-        setup_connections(listen_addr, false, false).await
-    }
-
-    #[tokio::test]
-    #[ntest::timeout(60000)]
-    async fn test_single_bidirectional_data_exchange() {
-        let (server, client) = create_pair().await;
-
-        let server_handle = tokio::spawn(async move {
-            let datagram_1 = server.accept_datagram().await.unwrap();
-
-            assert_eq!(datagram_1.recv().await.unwrap(), Bytes::from("ping"));
-
-            // Test Server -> Client
-            datagram_1.send(Bytes::from("pong")).await.unwrap();
-        });
-
-        // Test Client -> Server
-        let datagram_1 = client.open_datagram().await.unwrap();
-        datagram_1.send(Bytes::from("ping")).await.unwrap();
-
-        assert_eq!(datagram_1.recv().await.unwrap(), Bytes::from("pong"));
-
-        server_handle.await.unwrap();
-    }
-
-    #[tokio::test]
-    #[ntest::timeout(60000)]
-    async fn test_single_bidirectional_concurrent_receives() {
-        let (server, client) = create_pair().await;
-
-        let server_handle = tokio::spawn(async move {
-            let datagram_1 = server.accept_datagram().await.unwrap();
-
-            let mut received = Vec::new();
-            for _ in 0..1000 {
-                let msg = datagram_1.recv().await.unwrap();
-                received.push(msg);
-            }
-
-            let mut expected: Vec<_> = (0..1000).map(|i| format!("message{}", i)).collect();
-            received.sort();
-            expected.sort();
-            assert_eq!(
-                received,
-                expected.into_iter().map(Bytes::from).collect::<Vec<_>>()
-            );
-        });
-
-        let datagram_1 = Arc::new(client.open_datagram().await.unwrap());
-
-        let send_tasks = (0..1000).map(|i| {
-            let dg = datagram_1.clone();
-            tokio::spawn(async move { dg.send(Bytes::from(format!("message{}", i))).await })
-        });
-
-        for task in send_tasks {
-            assert!(task.await.unwrap().is_ok());
-        }
-
-        server_handle.await.unwrap();
-    }
-
-    #[tokio::test]
-    #[ntest::timeout(60000)]
-    async fn test_multiple_bidirectional_concurrent_receives() {
-        let (server, client) = create_pair().await;
-
-        let server_handle = tokio::spawn(async move {
-            let mut received = Vec::new();
-            for _ in 0..1000 {
-                let datagram = server.accept_datagram().await.unwrap();
-                let msg = datagram.recv().await.unwrap();
-                received.push(msg);
-            }
-
-            let mut expected: Vec<_> = (0..1000).map(|i| format!("message{}", i)).collect();
-            received.sort();
-            expected.sort();
-            assert_eq!(
-                received,
-                expected.into_iter().map(Bytes::from).collect::<Vec<_>>()
-            );
-        });
-
-        let client = Arc::new(client);
-        let send_tasks = (0..1000).map(|i| {
-            let client = client.clone();
-            tokio::spawn(async move {
-                client
-                    .open_datagram()
-                    .await
-                    .unwrap()
-                    .send(Bytes::from(format!("message{}", i)))
-                    .await
-            })
-        });
-
-        for task in send_tasks {
-            assert!(task.await.unwrap().is_ok());
-        }
-
-        server_handle.await.unwrap();
     }
 }

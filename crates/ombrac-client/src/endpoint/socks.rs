@@ -1,148 +1,136 @@
 use std::sync::Arc;
-use std::time::Duration;
 
-use ombrac::address::Address as OmbracAddress;
+use ombrac::Secret;
+use ombrac::client::Client;
 use ombrac_macros::{debug, info};
 use ombrac_transport::Initiator;
 use socks_lib::io::{self, AsyncRead, AsyncWrite};
-#[cfg(feature = "datagram")]
-use socks_lib::net::UdpSocket;
-#[cfg(feature = "datagram")]
-use socks_lib::v5::UdpPacket;
 use socks_lib::v5::server::Handler;
 use socks_lib::v5::{Address as SocksAddress, Request, Stream};
 
-use crate::Client;
-
-pub struct CommandHandler<I: Initiator>(Arc<Client<I>>);
+pub struct CommandHandler<I: Initiator> {
+    ombrac_client: Arc<Client<I>>,
+    secret: Secret,
+}
 
 impl<I: Initiator> CommandHandler<I> {
-    pub fn new(inner: Arc<Client<I>>) -> Self {
-        Self(inner)
+    pub fn new(inner: Arc<Client<I>>, secret: Secret) -> Self {
+        Self {
+            ombrac_client: inner,
+            secret,
+        }
     }
 
-    #[inline]
     async fn handle_connect(
         &self,
         address: SocksAddress,
         stream: &mut Stream<impl AsyncRead + AsyncWrite + Unpin>,
     ) -> io::Result<(u64, u64)> {
-        use ombrac::io::util::copy_bidirectional;
-        use tokio::time::timeout;
-
-        const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_millis(8000);
-
         let addr = util::socks_to_ombrac_addr(address)?;
+        let mut outbound = self.ombrac_client.connect(addr, self.secret).await?;
+        ombrac::io::util::copy_bidirectional(stream, &mut outbound).await
+    }
+}
 
-        match timeout(DEFAULT_CONNECT_TIMEOUT, self.0.connect(addr.clone())).await {
-            Ok(Ok(mut outbound)) => copy_bidirectional(stream, &mut outbound).await,
-            Ok(Err(e)) => Err(io::Error::other(e)),
-            Err(_) => Err(io::Error::new(
-                io::ErrorKind::TimedOut,
-                "Connection attempt timed out",
-            )),
+#[cfg(feature = "datagram")]
+mod datagram {
+    use std::time::Duration;
+
+    use ombrac::client::Datagram;
+    use ombrac_transport::{Initiator, Unreliable};
+    use socks_lib::v5::UdpPacket;
+    use tokio::{net::UdpSocket, time::timeout};
+
+    use super::*;
+
+    const IDLE_TIMEOUT: Duration = Duration::from_secs(30);
+    const DEFAULT_BUFFER_SIZE: usize = 1500;
+
+    impl<I: Initiator> CommandHandler<I> {
+        pub async fn handle_associate(&self, socket: UdpSocket) -> io::Result<()> {
+            let outbound = self.ombrac_client.associate().await?;
+            let mut buf = vec![0u8; DEFAULT_BUFFER_SIZE];
+            let (first_packet, source_addr) =
+                match timeout(IDLE_TIMEOUT, socket.recv_from(&mut buf)).await {
+                    Ok(Ok((_size, from))) => (UdpPacket::from_bytes(&mut (&buf[..]))?, from),
+                    Ok(Err(e)) => return Err(e),
+                    Err(_) => return Ok(()),
+                };
+
+            let packet = util::socks_to_ombrac_packet(first_packet, self.secret)?;
+            outbound.send(packet).await?;
+            socket.connect(source_addr).await?;
+
+            let datagram = Arc::new(outbound);
+            let udp_socket = Arc::new(socket);
+
+            let client_to_target_task = tokio::spawn(proxy_ombrac_to_target(
+                Arc::clone(&datagram),
+                Arc::clone(&udp_socket),
+                IDLE_TIMEOUT,
+            ));
+
+            let target_to_client_task = tokio::spawn(proxy_target_to_ombrac_server(
+                datagram,
+                udp_socket,
+                self.secret,
+                IDLE_TIMEOUT,
+            ));
+
+            let (client_res, target_res) =
+                tokio::join!(client_to_target_task, target_to_client_task);
+
+            client_res??;
+            target_res??;
+
+            Ok(())
         }
     }
 
-    #[cfg(feature = "datagram")]
-    #[inline]
-    async fn handle_associate(&self, socket: UdpSocket) -> io::Result<()> {
-        use tokio::time::timeout;
-
-        const DEFAULT_BUF_SIZE: usize = 2 * 1024;
-        const IDLE_TIMEOUT: Duration = Duration::from_secs(30);
-
-        let outbound = self.0.associate().await.map_err(io::Error::other)?;
-
-        let socket_1 = Arc::new(socket);
-        let socket_2 = Arc::clone(&socket_1);
-        let datagram_1 = Arc::new(outbound);
-        let datagram_2 = Arc::clone(&datagram_1);
-
-        let mut buf = [0u8; DEFAULT_BUF_SIZE];
-
-        // Accpet first client
-        let client_addr = {
-            let (n, client_addr) = match timeout(IDLE_TIMEOUT, socket_1.recv_from(&mut buf)).await {
-                Ok(Ok((n, addr))) => (n, addr),
+    async fn proxy_ombrac_to_target<U>(
+        datagram: Arc<Datagram<U>>,
+        udp_socket: Arc<UdpSocket>,
+        idle_timeout: Duration,
+    ) -> io::Result<()>
+    where
+        U: Unreliable,
+    {
+        loop {
+            let ombrac_packet = match timeout(idle_timeout, datagram.recv()).await {
+                Ok(Ok(packet)) => packet,
                 Ok(Err(e)) => return Err(e),
-                Err(_) => {
-                    return Err(io::Error::new(
-                        io::ErrorKind::TimedOut,
-                        "No initial packet received",
-                    ));
-                }
+                Err(_) => break, // Timeout
             };
 
-            let packet = UdpPacket::from_bytes(&mut &buf[..n])?;
-
-            let addr = util::socks_to_ombrac_addr(SocksAddress::from(client_addr))?;
-
-            datagram_1
-                .send(packet.data, addr)
-                .await
-                .map_err(io::Error::other)?;
-
-            client_addr
-        };
-
-        let mut handle_1 = tokio::spawn(async move {
-            loop {
-                let (n, addr) = socket_1.recv_from(&mut buf).await?;
-
-                // Only accept packets from the first client
-                if addr != client_addr {
-                    buf = [0u8; DEFAULT_BUF_SIZE];
-                    continue;
-                }
-
-                let packet = UdpPacket::from_bytes(&mut &buf[..n])?;
-                let addr = OmbracAddress::from(addr);
-
-                debug!(
-                    "Associate send to {:?}, length: {}",
-                    addr,
-                    packet.data.len()
-                );
-                datagram_1.send(packet.data, addr).await?;
-            }
-        });
-
-        let mut handle_2 = tokio::spawn(async move {
-            loop {
-                match timeout(IDLE_TIMEOUT, datagram_2.recv()).await {
-                    Ok(Ok((data, addr))) => {
-                        debug!("Associate recv from {:?}, length: {}", addr, data.len());
-
-                        let addr = util::ombrac_to_socks_addr(addr)?;
-                        let packet = UdpPacket::un_frag(addr, data);
-
-                        socket_2.send_to(&packet.data, client_addr).await?;
-                    }
-                    Ok(Err(e)) => return Err(e),
-                    Err(_) => break, // Timeout
-                }
-            }
-
-            Ok(())
-        });
-
-        let result = tokio::select! {
-            result = &mut handle_1 => {
-                handle_2.abort();
-                result
-            },
-            result = &mut handle_2 => {
-                handle_1.abort();
-                result
-            },
-        };
-
-        match result {
-            Ok(inner) => Ok(inner.map_err(io::Error::other)?),
-            Err(e) if e.is_cancelled() => Ok(()),
-            Err(e) => Err(io::Error::other(e)),
+            let socks_packet = util::ombrac_to_socks_packet(ombrac_packet)?;
+            udp_socket.send(&socks_packet.to_bytes()).await?;
         }
+        Ok(())
+    }
+
+    async fn proxy_target_to_ombrac_server<U>(
+        datagram: Arc<Datagram<U>>,
+        udp_socket: Arc<UdpSocket>,
+        session_secret: Secret,
+        idle_timeout: Duration,
+    ) -> io::Result<()>
+    where
+        U: Unreliable,
+    {
+        let mut buf = vec![0u8; DEFAULT_BUFFER_SIZE];
+        loop {
+            let n = match timeout(idle_timeout, udp_socket.recv(&mut buf)).await {
+                Ok(Ok(result)) => result,
+                Ok(Err(e)) => return Err(e),
+                Err(_) => break,
+            };
+
+            let socks_packet = UdpPacket::from_bytes(&mut (&buf[..n]))?;
+            let packet = util::socks_to_ombrac_packet(socks_packet, session_secret)?;
+
+            datagram.send(packet).await?;
+        }
+        Ok(())
     }
 }
 
@@ -173,6 +161,7 @@ impl<I: Initiator> Handler for CommandHandler<I> {
             #[cfg(feature = "datagram")]
             Request::Associate(_addr) => {
                 use socks_lib::v5::Response;
+                use tokio::net::UdpSocket;
 
                 let socket = UdpSocket::bind("0.0.0.0:0").await?;
                 let addr = SocksAddress::from(socket.local_addr()?);
@@ -193,32 +182,51 @@ impl<I: Initiator> Handler for CommandHandler<I> {
 mod util {
     use std::io;
 
-    use ombrac::address::Address as OmbracAddress;
-    use socks_lib::v5::Address as SocksAddress;
+    use ombrac::address::{Address as OmbracAddress, Domain as OmbracDoamin};
+    #[cfg(feature = "datagram")]
+    use ombrac::{Secret as OmbracSecret, associate::Associate as OmbracPacket};
+    use socks_lib::v5::Address as Socks5Address;
+    #[cfg(feature = "datagram")]
+    use socks_lib::v5::UdpPacket as Socks5Packet;
 
     #[inline]
-    pub(super) fn socks_to_ombrac_addr(addr: SocksAddress) -> io::Result<OmbracAddress> {
+    #[cfg(feature = "datagram")]
+    pub(super) fn socks_to_ombrac_packet(
+        packet: Socks5Packet,
+        secret: OmbracSecret,
+    ) -> io::Result<OmbracPacket> {
+        let addr = socks_to_ombrac_addr(packet.address)?;
+        let data = packet.data;
+
+        Ok(OmbracPacket::with(secret, addr, data))
+    }
+
+    #[inline]
+    pub(super) fn socks_to_ombrac_addr(addr: Socks5Address) -> io::Result<OmbracAddress> {
         let result = match addr {
-            SocksAddress::IPv4(value) => OmbracAddress::IPv4(value),
-            SocksAddress::IPv6(value) => OmbracAddress::IPv6(value),
-            SocksAddress::Domain(domain, port) => {
-                OmbracAddress::Domain(domain.as_bytes().clone().try_into()?, port)
-            }
+            Socks5Address::IPv4(value) => OmbracAddress::IPv4(value),
+            Socks5Address::IPv6(value) => OmbracAddress::IPv6(value),
+            Socks5Address::Domain(domain, port) => OmbracAddress::Domain(
+                OmbracDoamin::from_bytes(domain.as_bytes().to_owned())?,
+                port,
+            ),
         };
 
         Ok(result)
     }
 
     #[inline]
-    pub(super) fn ombrac_to_socks_addr(addr: OmbracAddress) -> io::Result<SocksAddress> {
-        let result = match addr {
-            OmbracAddress::IPv4(value) => SocksAddress::IPv4(value),
-            OmbracAddress::IPv6(value) => SocksAddress::IPv6(value),
+    #[cfg(feature = "datagram")]
+    pub(super) fn ombrac_to_socks_packet(packet: OmbracPacket) -> io::Result<Socks5Packet> {
+        let addr = match packet.address {
+            OmbracAddress::IPv4(value) => Socks5Address::IPv4(value),
+            OmbracAddress::IPv6(value) => Socks5Address::IPv6(value),
             OmbracAddress::Domain(domain, port) => {
-                SocksAddress::Domain(domain.to_bytes().try_into()?, port)
+                Socks5Address::Domain(domain.to_bytes().try_into()?, port)
             }
         };
+        let data = packet.data;
 
-        Ok(result)
+        Ok(Socks5Packet::un_frag(addr, data))
     }
 }

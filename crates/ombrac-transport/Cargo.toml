@@ -26,10 +26,9 @@ quic = [
 ]
 
 [dependencies]
-ombrac = { workspace = true }
 ombrac-macros = { workspace = true }
 bytes = { workspace = true }
-tokio = { workspace = true, features = ["rt", "sync"] }
+tokio = { workspace = true, features = ["rt", "sync", "io-util"] }
 thiserror = { workspace = true }
 async-channel = { workspace = true, features = ["std"] }
 quinn = { workspace = true, features = ["runtime-tokio", "rustls-aws-lc-rs"], optional = true }
@@ -40,6 +39,7 @@ rustls-pemfile = { workspace = true, features = ["std"], optional = true }
 rcgen = { workspace = true, features = ["crypto", "aws_lc_rs"], optional = true }
 tracing = { workspace = true, optional = true }
 dashmap = { workspace = true, optional = true }
+arc-swap = { workspace = true }
 
 [dev-dependencies]
 tests-support = { path = "../../tests/support" }

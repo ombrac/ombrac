@@ -21,14 +21,14 @@ Download the latest release from the [releases page](https://github.com/ombrac/o
 
 ### Build
 ```shell
-cargo build --bin ombrac-client --bin ombrac-server --features binary
+cargo build --bin ombrac-client --bin ombrac-server
 ```
 
 **NOTE**: On linux systems, [`aws-lc-rs`](https://github.com/aws/aws-lc-rs) will be used for cryptographic operations. A C compiler and CMake may be required on these systems for installation.
 
 ### Crates
 ```shell
-cargo install ombrac-client ombrac-server --features binary
+cargo install ombrac-client ombrac-server
 ```
 
 ### Homebrew

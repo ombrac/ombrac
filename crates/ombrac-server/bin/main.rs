@@ -1,11 +1,16 @@
-use std::error::Error;
+use std::io;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::time::Duration;
 
 use clap::Parser;
-use ombrac_server::Server;
+#[cfg(feature = "datagram")]
+use ombrac::server::datagram::UdpHandlerConfig;
+use ombrac::server::{SecretValid, Server};
+use ombrac_macros::{error, info};
+#[cfg(feature = "transport-quic")]
 use ombrac_transport::quic::server::Builder;
+use tokio::task::JoinHandle;
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -99,6 +104,28 @@ struct Args {
     )]
     max_streams: Option<u64>,
 
+    /// Maximum idle time for a UDP association (in milliseconds)
+    #[cfg(feature = "datagram")]
+    #[clap(
+        long,
+        help_heading = "Transport UDP",
+        value_name = "TIME",
+        default_value = "30000",
+        verbatim_doc_comment
+    )]
+    udp_idle_timeout: u64,
+
+    /// Buffer size for receiving UDP packets (in bytes)
+    #[cfg(feature = "datagram")]
+    #[clap(
+        long,
+        help_heading = "Transport UDP",
+        value_name = "BYTES",
+        default_value = "1500",
+        verbatim_doc_comment
+    )]
+    udp_buffer_size: usize,
+
     /// Logging level (e.g., INFO, WARN, ERROR)
     #[cfg(feature = "tracing")]
     #[clap(
@@ -133,7 +160,7 @@ struct Args {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn Error>> {
+async fn main() -> io::Result<()> {
     let args = Args::parse();
 
     #[cfg(feature = "tracing")]
@@ -153,54 +180,104 @@ async fn main() -> Result<(), Box<dyn Error>> {
         subscriber.with_writer(non_blocking).init()
     }
 
-    let secret = blake3::hash(args.secret.as_bytes());
-    let transport = quic_config_from_args(&args)
-        .build()
-        .await
-        .expect("QUIC Server failed to build");
+    #[cfg(feature = "transport-quic")]
+    let quic_server = quic_server_from_args(&args).await?;
 
-    let ombrac_server = Server::new(*secret.as_bytes(), transport);
-
-    #[cfg(feature = "tracing")]
-    tracing::info!("Server listening on {}", args.listen);
-
-    ombrac_server
-        .listen()
-        .await
-        .expect("Server failed to listen");
+    tokio::join!(quic_server).0?;
 
     Ok(())
 }
 
-fn quic_config_from_args(args: &Args) -> Builder {
-    let mut builder = Builder::new(args.listen);
+#[cfg(feature = "transport-quic")]
+async fn quic_server_from_args(args: &Args) -> io::Result<JoinHandle<()>> {
+    let bind_addr = args.listen;
+    let mut builder = Builder::new(bind_addr);
 
-    if let Some(value) = &args.tls_cert {
-        builder = builder.with_tls_cert(value.clone())
-    }
-
-    if let Some(value) = &args.tls_key {
-        builder = builder.with_tls_key(value.clone())
-    }
-
-    if let Some(value) = args.cwnd_init {
-        builder = builder.with_congestion_initial_window(value);
+    if let Some(cert) = &args.tls_cert
+        && let Some(key) = &args.tls_key
+    {
+        builder.with_tls((cert.to_path_buf(), key.to_path_buf()));
     }
 
     if let Some(value) = args.idle_timeout {
-        builder = builder.with_max_idle_timeout(Duration::from_millis(value));
+        builder.with_max_idle_timeout(Duration::from_millis(value))?;
     }
 
     if let Some(value) = args.keep_alive {
-        builder = builder.with_max_keep_alive_period(Duration::from_millis(value));
+        builder.with_max_keep_alive_period(Duration::from_millis(value));
     }
 
     if let Some(value) = args.max_streams {
-        builder = builder.with_max_open_bidirectional_streams(value);
+        builder.with_max_open_bidirectional_streams(value)?;
     }
 
-    builder = builder.with_tls_skip(args.insecure);
-    builder = builder.with_enable_zero_rtt(args.zero_rtt);
+    builder.with_enable_self_signed(args.insecure);
+    builder.with_enable_zero_rtt(args.zero_rtt);
 
-    builder
+    let secret = *blake3::hash(args.secret.as_bytes()).as_bytes();
+
+    #[cfg(feature = "datagram")]
+    let udp_config = std::sync::Arc::new(UdpHandlerConfig {
+        idle_timeout: Duration::from_millis(args.udp_idle_timeout),
+        buffer_size: args.udp_buffer_size,
+    });
+
+    let validator = SecretValid(secret);
+    let transport = Server::new(builder.build().await?);
+
+    let task = tokio::spawn(async move {
+        let handle_connect = |result| async move {
+            match result {
+                Ok(stream) => {
+                    if let Err(e) = Server::handle_connect(&validator, stream).await {
+                        error!("{e}");
+                    }
+                }
+                Err(e) => {
+                    error!("Failed to accept connection: {e}")
+                }
+            }
+        };
+
+        #[cfg(feature = "datagram")]
+        let handle_associate = |result, config: std::sync::Arc<UdpHandlerConfig>| async move {
+            match result {
+                Ok(datagram) => {
+                    if let Err(e) = Server::handle_associate(&validator, datagram, config).await {
+                        error!("{e}");
+                    }
+                }
+                Err(e) => {
+                    error!("Failed to accept association: {e}")
+                }
+            }
+        };
+
+        info!("Server listening on {bind_addr}");
+
+        loop {
+            #[cfg(feature = "datagram")]
+            {
+                let config = udp_config.clone();
+                tokio::select! {
+                    biased;
+                    result = transport.accept_connect() =>
+                        tokio::spawn(handle_connect(result)),
+                    result = transport.accept_associate() =>
+                        tokio::spawn(handle_associate(result, config)),
+                };
+            }
+
+            #[cfg(not(feature = "datagram"))]
+            {
+                tokio::select! {
+                    biased;
+                    result = transport.accept_connect() =>
+                        tokio::spawn(handle_connect(result)),
+                };
+            }
+        }
+    });
+
+    Ok(task)
 }

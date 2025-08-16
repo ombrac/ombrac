@@ -35,6 +35,7 @@ bytes = { version = "1", default-features = false }
 dashmap = { version = "6", default-features = false }
 thiserror = { version = "2", default-features = false }
 async-channel = { version = "2", default-features = false }
+arc-swap = { version = "1.7", default-features = false }
 
 # socks
 socks-lib = { version = "0.1", default-features = false }

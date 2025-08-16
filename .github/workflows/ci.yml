@@ -93,13 +93,19 @@ jobs:
 
       - name: Build Binaries
         run: |
-          cargo build --verbose --bin ombrac-client --features binary --target ${{ matrix.target }}
-          cargo build --verbose --bin ombrac-server --features binary --target ${{ matrix.target }}
+          cargo build --verbose --bin ombrac-client --target ${{ matrix.target }}
+          cargo build --verbose --bin ombrac-client --features datagram --target ${{ matrix.target }}
+
+          cargo build --verbose --bin ombrac-server --target ${{ matrix.target }}
+          cargo build --verbose --bin ombrac-server --features datagram --target ${{ matrix.target }}
 
       - name: Build Binaries Release
         run: |
-          cargo build --release --verbose --bin ombrac-client --features binary --target ${{ matrix.target }}
-          cargo build --release --verbose --bin ombrac-server --features binary --target ${{ matrix.target }}
+          cargo build --release --verbose --bin ombrac-client --target ${{ matrix.target }}
+          cargo build --release --verbose --bin ombrac-client --features datagram --target ${{ matrix.target }}
+
+          cargo build --release --verbose --bin ombrac-server --target ${{ matrix.target }}
+          cargo build --release --verbose --bin ombrac-server --features datagram --target ${{ matrix.target }}
 
       - name: Test
         if: |

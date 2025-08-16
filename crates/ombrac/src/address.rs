@@ -135,7 +135,7 @@ impl Address {
 
             _ => Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                format!("Invalid address type value: {}", atyp),
+                format!("Invalid address type value: {atyp}"),
             )),
         }
     }
@@ -153,8 +153,7 @@ impl Address {
                     .await?
                     .next()
                     .ok_or(io::Error::other(format!(
-                        "Failed to resolve domain {}",
-                        domain
+                        "Failed to resolve domain {domain}"
                     )))
             }
         }
@@ -208,7 +207,7 @@ impl TryFrom<&str> for Address {
 
         Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            format!("Invalid address format: {}", value),
+            format!("Invalid address format: {value}"),
         ))
     }
 }
