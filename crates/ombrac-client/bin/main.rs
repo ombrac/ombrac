@@ -98,6 +98,7 @@ struct Args {
     #[clap(long, help_heading = "Transport QUIC", action, verbatim_doc_comment)]
     no_multiplex: bool,
 
+    #[cfg(feature = "transport-quic")]
     /// Congestion control algorithm to use (e.g. bbr, cubic, newreno)
     #[clap(
         long,
@@ -108,6 +109,7 @@ struct Args {
     )]
     congestion: Congestion,
 
+    #[cfg(feature = "transport-quic")]
     /// Initial congestion window size in bytes
     #[clap(
         long,

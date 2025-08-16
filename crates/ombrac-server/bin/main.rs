@@ -64,6 +64,7 @@ struct Args {
     #[clap(long, help_heading = "Transport QUIC", action, verbatim_doc_comment)]
     zero_rtt: bool,
 
+    #[cfg(feature = "transport-quic")]
     /// Congestion control algorithm to use (e.g. bbr, cubic, newreno)
     #[clap(
         long,
