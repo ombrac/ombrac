@@ -148,12 +148,24 @@ struct Args {
     )]
     max_streams: Option<u64>,
 
+    /// Try to resolve domain name to IPv4 addresses first
+    #[clap(
+        long,
+        short = '4',
+        help_heading = "Transport QUIC",
+        action,
+        verbatim_doc_comment,
+        conflicts_with = "prefer_ipv6"
+    )]
+    prefer_ipv4: bool,
+
     /// Try to resolve domain name to IPv6 addresses first
     #[clap(
         short = '6',
         help_heading = "Transport QUIC",
         action,
-        verbatim_doc_comment
+        verbatim_doc_comment,
+        conflicts_with = "prefer_ipv4"
     )]
     prefer_ipv6: bool,
 
@@ -270,6 +282,12 @@ async fn quic_from_args(args: &Args) -> Result<Builder, Box<dyn Error>> {
 
     if args.prefer_ipv6 {
         addrs.sort_by(|a, b| match (a.is_ipv6(), b.is_ipv6()) {
+            (true, false) => std::cmp::Ordering::Less,
+            (false, true) => std::cmp::Ordering::Greater,
+            _ => std::cmp::Ordering::Equal,
+        });
+    } else if args.prefer_ipv4 {
+        addrs.sort_by(|a, b| match (a.is_ipv4(), b.is_ipv4()) {
             (true, false) => std::cmp::Ordering::Less,
             (false, true) => std::cmp::Ordering::Greater,
             _ => std::cmp::Ordering::Equal,
