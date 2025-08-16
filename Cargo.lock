@@ -179,7 +179,7 @@ checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
 name = "benches"
-version = "0.5.9"
+version = "0.5.10"
 dependencies = [
  "criterion",
  "ombrac",
@@ -784,9 +784,9 @@ dependencies = [
 
 [[package]]
 name = "hyper-util"
-version = "0.1.15"
+version = "0.1.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f66d5bd4c6f02bf0542fad85d626775bab9258cf795a4256dcaf3161114d1df"
+checksum = "8d9b05277c7e8da2c93a568989bb6207bef0112e8d17df7a6eda4a3cf143bc5e"
 dependencies = [
  "bytes",
  "futures-core",
@@ -1048,7 +1048,7 @@ dependencies = [
 
 [[package]]
 name = "ombrac"
-version = "0.5.9"
+version = "0.5.10"
 dependencies = [
  "bytes",
  "futures",
@@ -1058,7 +1058,7 @@ dependencies = [
 
 [[package]]
 name = "ombrac-client"
-version = "0.5.9"
+version = "0.5.10"
 dependencies = [
  "blake3",
  "bytes",
@@ -1079,11 +1079,11 @@ dependencies = [
 
 [[package]]
 name = "ombrac-macros"
-version = "0.5.9"
+version = "0.5.10"
 
 [[package]]
 name = "ombrac-server"
-version = "0.5.9"
+version = "0.5.10"
 dependencies = [
  "blake3",
  "bytes",
@@ -1099,7 +1099,7 @@ dependencies = [
 
 [[package]]
 name = "ombrac-transport"
-version = "0.5.9"
+version = "0.5.10"
 dependencies = [
  "arc-swap",
  "async-channel",
@@ -1691,7 +1691,7 @@ dependencies = [
 
 [[package]]
 name = "tests-integration"
-version = "0.5.9"
+version = "0.5.10"
 dependencies = [
  "curl",
  "ntest",
@@ -1702,7 +1702,7 @@ dependencies = [
 
 [[package]]
 name = "tests-support"
-version = "0.5.9"
+version = "0.5.10"
 dependencies = [
  "rcgen",
  "tokio",
