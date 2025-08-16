@@ -25,6 +25,9 @@ pub enum Error {
 
     #[error("Certificate or Key must be provided when TLS is enabled")]
     ServerMissingCertificate,
+
+    #[error("Invalid congestion algorithm")]
+    InvalidCongestion,
 }
 
 impl From<Error> for io::Error {

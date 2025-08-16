@@ -17,6 +17,7 @@ use crate::quic::datagram::{Datagram, Session};
 use crate::quic::stream::Stream;
 use crate::{Acceptor, Reliable};
 
+use super::Congestion;
 use super::error::{Error, Result};
 
 #[derive(Debug)]
@@ -51,6 +52,43 @@ impl Builder {
 
     pub fn with_enable_self_signed(&mut self, value: bool) -> &mut Self {
         self.enable_self_signed = value;
+        self
+    }
+
+    pub fn with_congestion(
+        &mut self,
+        congestion: Congestion,
+        initial_window: Option<u64>,
+    ) -> &mut Self {
+        use quinn::congestion;
+
+        let congestion: Arc<dyn congestion::ControllerFactory + Send + Sync + 'static> =
+            match congestion {
+                Congestion::Bbr => {
+                    let mut config = congestion::BbrConfig::default();
+                    if let Some(value) = initial_window {
+                        config.initial_window(value);
+                    }
+                    Arc::new(config)
+                }
+                Congestion::Cubic => {
+                    let mut config = congestion::CubicConfig::default();
+                    if let Some(value) = initial_window {
+                        config.initial_window(value);
+                    }
+                    Arc::new(config)
+                }
+                Congestion::NewReno => {
+                    let mut config = congestion::NewRenoConfig::default();
+                    if let Some(value) = initial_window {
+                        config.initial_window(value);
+                    }
+                    Arc::new(config)
+                }
+            };
+
+        self.transport_config
+            .congestion_controller_factory(congestion);
         self
     }
 

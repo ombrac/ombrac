@@ -9,7 +9,7 @@ use ombrac::server::datagram::UdpHandlerConfig;
 use ombrac::server::{SecretValid, Server};
 use ombrac_macros::{error, info};
 #[cfg(feature = "transport-quic")]
-use ombrac_transport::quic::server::Builder;
+use ombrac_transport::quic::{Congestion, server::Builder};
 use tokio::task::JoinHandle;
 
 #[derive(Parser, Debug)]
@@ -63,6 +63,17 @@ struct Args {
     /// Enable 0-RTT for faster connection establishment (may reduce security)
     #[clap(long, help_heading = "Transport QUIC", action, verbatim_doc_comment)]
     zero_rtt: bool,
+
+    #[cfg(feature = "transport-quic")]
+    /// Congestion control algorithm to use (e.g. bbr, cubic, newreno)
+    #[clap(
+        long,
+        help_heading = "Transport QUIC",
+        value_name = "ALGORITHM",
+        default_value = "bbr",
+        verbatim_doc_comment
+    )]
+    congestion: Congestion,
 
     /// Initial congestion window size in bytes
     #[clap(
@@ -215,6 +226,7 @@ async fn quic_server_from_args(args: &Args) -> io::Result<JoinHandle<()>> {
 
     builder.with_enable_self_signed(args.insecure);
     builder.with_enable_zero_rtt(args.zero_rtt);
+    builder.with_congestion(args.congestion, args.cwnd_init);
 
     let secret = *blake3::hash(args.secret.as_bytes()).as_bytes();
 

@@ -17,7 +17,7 @@ use crate::quic::datagram::Session;
 use crate::quic::stream::Stream;
 use crate::{Initiator, Reliable};
 
-use super::Result;
+use super::{Congestion, Result};
 
 #[derive(Debug)]
 pub struct Builder {
@@ -80,10 +80,42 @@ impl Builder {
         self
     }
 
-    // pub fn with_congestion_initial_window(mut self, value: u64) -> Self {
-    //     self.congestion_initial_window = Some(value);
-    //     self
-    // }
+    pub fn with_congestion(
+        &mut self,
+        congestion: Congestion,
+        initial_window: Option<u64>,
+    ) -> &mut Self {
+        use quinn::congestion;
+
+        let congestion: Arc<dyn congestion::ControllerFactory + Send + Sync + 'static> =
+            match congestion {
+                Congestion::Bbr => {
+                    let mut config = congestion::BbrConfig::default();
+                    if let Some(value) = initial_window {
+                        config.initial_window(value);
+                    }
+                    Arc::new(config)
+                }
+                Congestion::Cubic => {
+                    let mut config = congestion::CubicConfig::default();
+                    if let Some(value) = initial_window {
+                        config.initial_window(value);
+                    }
+                    Arc::new(config)
+                }
+                Congestion::NewReno => {
+                    let mut config = congestion::NewRenoConfig::default();
+                    if let Some(value) = initial_window {
+                        config.initial_window(value);
+                    }
+                    Arc::new(config)
+                }
+            };
+
+        self.transport_config
+            .congestion_controller_factory(congestion);
+        self
+    }
 
     pub fn with_max_idle_timeout(&mut self, value: Duration) -> Result<&mut Self> {
         self.transport_config
