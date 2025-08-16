@@ -11,6 +11,15 @@
 [![Build Status][ci-badge]][ci-url]
 [![Build Status][release-badge]][release-url]
 
+## Structure
+The codebase is organized into focused crates
+
+| Crate                  | Description                                                                 |
+|------------------------|-----------------------------------------------------------------------------|
+| `crates/ombrac`        | Core protocol implementation                                                |
+| `crates/ombrac-client` | Client binary with HTTP/SOCKS proxy entry points                            |
+| `crates/ombrac-server` | Server binary (wrapper around the core protocol)                            |
+| `crates/ombrac-transport` | QUIC transport layer implementation                                      |
 
 
 ## Install
@@ -99,18 +108,19 @@ Service Secret:
   -k, --secret <STR>  Protocol Secret
 
 Transport QUIC:
-  -l, --listen <ADDR>        The address to bind for QUIC transport
-      --tls-cert <FILE>      Path to the TLS certificate file
-      --tls-key <FILE>       Path to the TLS private key file
-      --insecure             When enabled, the server will generate a self-signed TLS certificate
-                             and use it for the QUIC connection. This mode is useful for testing
-                             but should not be used in production
-      --zero-rtt             Enable 0-RTT for faster connection establishment (may reduce security)
-      --cwnd-init <NUM>      Initial congestion window size in bytes
-      --idle-timeout <TIME>  Maximum idle time (in milliseconds) before closing the connection
-                             30 second default recommended by RFC 9308 [default: 30000]
-      --keep-alive <TIME>    Keep-alive interval (in milliseconds) [default: 8000]
-      --max-streams <NUM>    Maximum number of bidirectional streams that can be open simultaneously [default: 100]
+  -l, --listen <ADDR>           The address to bind for QUIC transport
+      --tls-cert <FILE>         Path to the TLS certificate file
+      --tls-key <FILE>          Path to the TLS private key file
+      --insecure                When enabled, the server will generate a self-signed TLS certificate
+                                and use it for the QUIC connection. This mode is useful for testing
+                                but should not be used in production
+      --zero-rtt                Enable 0-RTT for faster connection establishment (may reduce security)
+      --congestion <ALGORITHM>  Congestion control algorithm to use (e.g. bbr, cubic, newreno) [default: bbr]
+      --cwnd-init <NUM>         Initial congestion window size in bytes
+      --idle-timeout <TIME>     Maximum idle time (in milliseconds) before closing the connection
+                                30 second default recommended by RFC 9308 [default: 30000]
+      --keep-alive <TIME>       Keep-alive interval (in milliseconds) [default: 8000]
+      --max-streams <NUM>       Maximum number of bidirectional streams that can be open simultaneously [default: 100]
 
 Logging:
       --log-level <LEVEL>  Logging level (e.g., INFO, WARN, ERROR) [default: WARN]
@@ -136,20 +146,22 @@ Endpoint SOCKS:
       --socks <ADDR>  The address to bind for the SOCKS server [default: 127.0.0.1:1080]
 
 Transport QUIC:
-      --bind <ADDR>          The address to bind for QUIC transport
-  -s, --server <ADDR>        Address of the server to connect to
-      --server-name <STR>    Name of the server to connect (derived from `server` if not provided)
-      --tls-cert <FILE>      Path to the TLS certificate file
-      --insecure             Skip TLS certificate verification (insecure, for testing only)
-      --zero-rtt             Enable 0-RTT for faster connection establishment (may reduce security)
-      --no-multiplex         Disable connection multiplexing (each stream uses a separate QUIC connection)
-                             This may be useful in special network environments where multiplexing causes issues
-      --cwnd-init <NUM>      Initial congestion window size in bytes
-      --idle-timeout <TIME>  Maximum idle time (in milliseconds) before closing the connection
-                             30 second default recommended by RFC 9308 [default: 30000]
-      --keep-alive <TIME>    Keep-alive interval (in milliseconds) [default: 8000]
-      --max-streams <NUM>    Maximum number of bidirectional streams that can be open simultaneously [default: 100]
-  -6                         Try to resolve domain name to IPv6 addresses first
+      --bind <ADDR>             The address to bind for QUIC transport
+  -s, --server <ADDR>           Address of the server to connect to
+      --server-name <STR>       Name of the server to connect (derived from `server` if not provided)
+      --tls-cert <FILE>         Path to the TLS certificate file
+      --insecure                Skip TLS certificate verification (insecure, for testing only)
+      --zero-rtt                Enable 0-RTT for faster connection establishment (may reduce security)
+      --no-multiplex            Disable connection multiplexing (each stream uses a separate QUIC connection)
+                                This may be useful in special network environments where multiplexing causes issues
+      --congestion <ALGORITHM>  Congestion control algorithm to use (e.g. bbr, cubic, newreno) [default: bbr]
+      --cwnd-init <NUM>         Initial congestion window size in bytes
+      --idle-timeout <TIME>     Maximum idle time (in milliseconds) before closing the connection
+                                30 second default recommended by RFC 9308 [default: 30000]
+      --keep-alive <TIME>       Keep-alive interval (in milliseconds) [default: 8000]
+      --max-streams <NUM>       Maximum number of bidirectional streams that can be open simultaneously [default: 100]
+  -4, --prefer-ipv4             Try to resolve domain name to IPv4 addresses first
+  -6                            Try to resolve domain name to IPv6 addresses first
 
 Logging:
       --log-level <LEVEL>  Logging level (e.g., INFO, WARN, ERROR) [default: WARN]
