@@ -88,8 +88,8 @@ jobs:
 
       - name: Build binaries
         run: |
-          cargo build --release --bin ombrac-client --features binary --target ${{ matrix.target }}
-          cargo build --release --bin ombrac-server --features binary --target ${{ matrix.target }}
+          cargo build --release --bin ombrac-client --target ${{ matrix.target }}
+          cargo build --release --bin ombrac-server --target ${{ matrix.target }}
 
       - name: Move binaries
         shell: bash

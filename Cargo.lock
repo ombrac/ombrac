@@ -83,6 +83,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "arc-swap"
+version = "1.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "69f7f8c3906b62b754cd5326047894316021dcfe5a194c8ea52bdd94934a3457"
+
+[[package]]
 name = "arrayref"
 version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -177,8 +183,6 @@ version = "0.5.9"
 dependencies = [
  "criterion",
  "ombrac",
- "ombrac-client",
- "ombrac-server",
  "tests-support",
 ]
 
@@ -1048,6 +1052,7 @@ version = "0.5.9"
 dependencies = [
  "bytes",
  "futures",
+ "ombrac-transport",
  "tokio",
 ]
 
@@ -1066,7 +1071,6 @@ dependencies = [
  "ombrac-macros",
  "ombrac-transport",
  "socks-lib",
- "thiserror 2.0.12",
  "tokio",
  "tracing",
  "tracing-appender",
@@ -1087,7 +1091,6 @@ dependencies = [
  "ombrac",
  "ombrac-macros",
  "ombrac-transport",
- "thiserror 2.0.12",
  "tokio",
  "tracing",
  "tracing-appender",
@@ -1098,13 +1101,13 @@ dependencies = [
 name = "ombrac-transport"
 version = "0.5.9"
 dependencies = [
+ "arc-swap",
  "async-channel",
  "aws-lc-rs",
  "bytes",
  "dashmap",
  "futures",
  "ntest",
- "ombrac",
  "ombrac-macros",
  "quinn",
  "rcgen",
@@ -1692,8 +1695,6 @@ version = "0.5.9"
 dependencies = [
  "curl",
  "ntest",
- "ombrac-client",
- "ombrac-server",
  "ombrac-transport",
  "tests-support",
  "tokio",

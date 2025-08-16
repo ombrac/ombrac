@@ -14,8 +14,6 @@ readme = "../../README.md"
 tests-support = { path = "../tests/support" }
 
 ombrac = { workspace = true }
-ombrac-client = { workspace = true }
-ombrac-server = { workspace = true }
 criterion = { workspace = true, features = ["default"] }
 
 

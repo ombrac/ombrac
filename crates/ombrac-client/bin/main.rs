@@ -5,10 +5,12 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use clap::Parser;
-use ombrac_client::Client;
-use ombrac_client::transport::quic::Builder;
+use ombrac::Secret;
+use ombrac::client::Client;
 use ombrac_macros::info;
 use ombrac_transport::Initiator;
+#[cfg(feature = "transport-quic")]
+use ombrac_transport::quic::client::Builder;
 use tokio::task::JoinHandle;
 
 #[derive(Parser)]
@@ -97,13 +99,13 @@ struct Args {
     no_multiplex: bool,
 
     /// Initial congestion window size in bytes
-    #[clap(
-        long,
-        help_heading = "Transport QUIC",
-        value_name = "NUM",
-        verbatim_doc_comment
-    )]
-    cwnd_init: Option<u64>,
+    // #[clap(
+    //     long,
+    //     help_heading = "Transport QUIC",
+    //     value_name = "NUM",
+    //     verbatim_doc_comment
+    // )]
+    // cwnd_init: Option<u64>,
 
     /// Maximum idle time (in milliseconds) before closing the connection
     /// 30 second default recommended by RFC 9308
@@ -199,39 +201,45 @@ async fn main() -> Result<(), Box<dyn Error>> {
         subscriber.with_writer(non_blocking).init()
     }
 
-    let secret = blake3::hash(args.secret.as_bytes());
-    let ombrac_client = Client::new(
-        *secret.as_bytes(),
-        quic_from_args(&args)
-            .await?
-            .build()
-            .await
-            .expect("QUIC Client failed to build"),
-    );
+    #[cfg(feature = "transport-quic")]
+    {
+        let secret = blake3::hash(args.secret.as_bytes());
+        let ombrac_client = Client::new(
+            quic_from_args(&args)
+                .await?
+                .build()
+                .await
+                .expect("QUIC Client failed to build"),
+        );
 
-    let client = Arc::new(ombrac_client);
+        let client = Arc::new(ombrac_client);
+        let secret = *secret.as_bytes();
 
-    if let Some(address) = args.http {
-        let client = client.clone();
-        run_http_server(client, address, async {
+        #[cfg(feature = "endpoint-http")]
+        if let Some(address) = args.http {
+            let client = client.clone();
+            run_http_server(client, secret, address, async {
+                tokio::signal::ctrl_c()
+                    .await
+                    .expect("Failed to listen for event");
+            })
+            .await?;
+        }
+
+        #[cfg(feature = "endpoint-socks")]
+        run_socks_server(client, secret, args.socks, async {
             tokio::signal::ctrl_c()
                 .await
                 .expect("Failed to listen for event");
         })
+        .await?
         .await?;
     }
-
-    run_socks_server(client, args.socks, async {
-        tokio::signal::ctrl_c()
-            .await
-            .expect("Failed to listen for event");
-    })
-    .await?
-    .await?;
 
     Ok(())
 }
 
+#[cfg(feature = "transport-quic")]
 async fn quic_from_args(args: &Args) -> Result<Builder, Box<dyn Error>> {
     use std::time::Duration;
     use tokio::net::lookup_host;
@@ -266,54 +274,56 @@ async fn quic_from_args(args: &Args) -> Result<Builder, Box<dyn Error>> {
     let mut builder = Builder::new(addr, name);
 
     if let Some(value) = args.bind {
-        builder = builder.with_bind(value);
+        builder.with_bind(value);
     }
 
     if let Some(value) = &args.server_name {
-        builder = builder.with_server_name(value.to_string());
+        builder.with_server_name(value.to_string());
     }
 
     if let Some(value) = &args.tls_cert {
-        builder = builder.with_tls_cert(value.clone());
+        builder.with_tls(value.clone());
     }
 
-    if let Some(value) = args.cwnd_init {
-        builder = builder.with_congestion_initial_window(value);
-    }
+    // if let Some(value) = args.cwnd_init {
+    //     builder.with_congestion_initial_window(value);
+    // }
 
     if let Some(value) = args.idle_timeout {
-        builder = builder.with_max_idle_timeout(Duration::from_millis(value));
+        builder.with_max_idle_timeout(Duration::from_millis(value))?;
     }
 
     if let Some(value) = args.keep_alive {
-        builder = builder.with_max_keep_alive_period(Duration::from_millis(value));
+        builder.with_max_keep_alive_period(Duration::from_millis(value));
     }
 
     if let Some(value) = args.max_streams {
-        builder = builder.with_max_open_bidirectional_streams(value);
+        builder.with_max_open_bidirectional_streams(value)?;
     }
 
-    builder = builder.with_tls_skip(args.insecure);
-    builder = builder.with_enable_zero_rtt(args.zero_rtt);
-    builder = builder.with_enable_connection_multiplexing(!args.no_multiplex);
+    builder.with_tls_skip(args.insecure);
+    builder.with_enable_zero_rtt(args.zero_rtt);
+    builder.with_enable_connection_multiplexing(!args.no_multiplex);
 
     Ok(builder)
 }
 
+#[cfg(feature = "endpoint-http")]
 async fn run_http_server<I: Initiator>(
     ombrac: Arc<Client<I>>,
+    secret: Secret,
     address: SocketAddr,
-    _shutdown_signal: impl Future<Output = ()> + Send + 'static,
+    shutdown_signal: impl Future<Output = ()> + Send + 'static,
 ) -> io::Result<JoinHandle<()>> {
-    use ombrac_client::endpoint::http::Server;
+    use ombrac_client::endpoint::http::Server as HttpServer;
+    use tokio::net::TcpListener;
+
+    let listener = TcpListener::bind(address).await?;
 
     let handle = tokio::spawn(async move {
         info!("HTTP Server Listening on {}", address);
 
-        Server::bind(address, ombrac)
-            .await
-            .expect("Failed to bind HTTP server")
-            .listen()
+        HttpServer::run(listener, secret, ombrac, shutdown_signal)
             .await
             .expect("Failed to run HTTP server");
     });
@@ -321,24 +331,26 @@ async fn run_http_server<I: Initiator>(
     Ok(handle)
 }
 
+#[cfg(feature = "endpoint-socks")]
 async fn run_socks_server<I: Initiator>(
     ombrac: Arc<Client<I>>,
+    secret: Secret,
     address: SocketAddr,
     shutdown_signal: impl Future<Output = ()> + Send + 'static,
 ) -> io::Result<JoinHandle<()>> {
     use ombrac_client::endpoint::socks::CommandHandler;
     use socks_lib::net::TcpListener;
     use socks_lib::v5::server::auth::NoAuthentication;
-    use socks_lib::v5::server::{Config, Server};
+    use socks_lib::v5::server::{Config, Server as SocksServer};
 
     let listener = TcpListener::bind(address).await?;
 
     let handle = tokio::spawn(async move {
-        info!("SOCKS Server Listening on {}", address);
+        info!("SOCKS Server Listening on {address}");
 
-        let config = Config::new(NoAuthentication, CommandHandler::new(ombrac));
+        let config = Config::new(NoAuthentication, CommandHandler::new(ombrac, secret));
 
-        Server::run(listener, config.into(), shutdown_signal)
+        SocksServer::run(listener, config.into(), shutdown_signal)
             .await
             .expect("Failed to run SOCKS server");
     });

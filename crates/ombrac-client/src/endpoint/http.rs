@@ -1,38 +1,49 @@
-use std::io;
-use std::net::SocketAddr;
 use std::sync::Arc;
+use std::{io, net::SocketAddr};
 
 use bytes::Bytes;
 use http_body_util::{BodyExt, combinators::BoxBody};
 use hyper::{Method, Request, Response};
 use hyper_util::rt::TokioIo;
-use tokio::net::TcpListener;
-
-use ombrac::prelude::Address;
-use ombrac_macros::{debug, error, info};
+use ombrac::prelude::{Address, Client, Secret};
+use ombrac_macros::{error, info};
 use ombrac_transport::Initiator;
-
-use crate::Client;
+use tokio::net::TcpListener;
 
 type ClientBuilder = hyper::client::conn::http1::Builder;
 type ServerBuilder = hyper::server::conn::http1::Builder;
 
-pub struct Server<T: Initiator>(TcpListener, Arc<Client<T>>);
+pub struct Server;
 
-impl<T: Initiator> Server<T> {
-    pub async fn bind<A: Into<SocketAddr>>(addr: A, ombrac: Arc<Client<T>>) -> io::Result<Self> {
-        let inner = TcpListener::bind(addr.into()).await?;
-        Ok(Self(inner, ombrac))
-    }
+impl Server {
+    pub async fn run<I>(
+        listener: TcpListener,
+        secret: Secret,
+        ombrac_client: Arc<Client<I>>,
+        shutdown_signal: impl Future<Output = ()>,
+    ) -> io::Result<()>
+    where
+        I: Initiator,
+    {
+        let ombrac = Arc::clone(&ombrac_client);
 
-    pub async fn listen(&self) -> io::Result<()> {
-        let ombrac = Arc::clone(&self.1);
+        tokio::pin!(shutdown_signal);
 
         loop {
-            match self.0.accept().await {
-                Ok((stream, _addr)) => {
-                    let ombrac = ombrac.clone();
+            tokio::select! {
+                biased;
+                _ = &mut shutdown_signal => return Ok(()),
 
+                result = listener.accept() => {
+                    let (stream, addr) = match result {
+                        Ok(res) => res,
+                        Err(_err) => {
+                            error!("Failed to accept connection: {}", _err);
+                            continue;
+                        }
+                    };
+
+                    let ombrac = ombrac.clone();
                     tokio::spawn(async move {
                         let io = TokioIo::new(stream);
                         if let Err(_error) = ServerBuilder::new()
@@ -41,7 +52,7 @@ impl<T: Initiator> Server<T> {
                             .serve_connection(
                                 io,
                                 hyper::service::service_fn(|req| async {
-                                    Self::tunnel(req, ombrac.clone()).await
+                                    Self::tunnel(req, ombrac.clone(), secret, addr).await
                                 }),
                             )
                             .with_upgrades()
@@ -51,19 +62,19 @@ impl<T: Initiator> Server<T> {
                         }
                     });
                 }
-
-                Err(_error) => {
-                    error!("Failed to accept: {}", _error);
-                    continue;
-                }
             }
         }
     }
 
-    async fn tunnel(
+    async fn tunnel<I>(
         req: Request<hyper::body::Incoming>,
-        conn: Arc<Client<T>>,
-    ) -> Result<Response<BoxBody<Bytes, hyper::Error>>, hyper::Error> {
+        conn: Arc<Client<I>>,
+        secret: Secret,
+        _from_addr: SocketAddr,
+    ) -> Result<Response<BoxBody<Bytes, hyper::Error>>, hyper::Error>
+    where
+        I: Initiator,
+    {
         use ombrac::io::util::copy_bidirectional;
 
         let host = match req.uri().host() {
@@ -79,7 +90,7 @@ impl<T: Initiator> Server<T> {
 
         let port = req.uri().port_u16().unwrap_or(80);
 
-        let addr = match Address::try_from(format!("{}:{}", host, port)) {
+        let target_addr = match Address::try_from(format!("{host}:{port}")) {
             Ok(addr) => addr,
             Err(_error) => {
                 error!("{_error}");
@@ -90,9 +101,7 @@ impl<T: Initiator> Server<T> {
             }
         };
 
-        debug!("Connect {:?}", addr);
-
-        let mut outbound = match conn.connect(addr.clone()).await {
+        let mut outbound = match conn.connect(target_addr.clone(), secret).await {
             Ok(conn) => conn,
             Err(_error) => {
                 let mut resp = Response::default();
@@ -110,7 +119,10 @@ impl<T: Initiator> Server<T> {
 
                         match copy_bidirectional(&mut stream, &mut outbound).await {
                             Ok(_copy) => {
-                                info!("Connect {}, Send: {}, Recv: {}", addr, _copy.0, _copy.1);
+                                info!(
+                                    "{} Connect {}, Send: {}, Recv: {}",
+                                    _from_addr, target_addr, _copy.0, _copy.1
+                                );
                             }
 
                             Err(_error) => {
@@ -133,7 +145,7 @@ impl<T: Initiator> Server<T> {
                 .await?;
 
             tokio::spawn(async move {
-                info!("Connect {}", addr);
+                info!("{_from_addr } Connect {target_addr}");
                 if let Err(err) = conn.await {
                     error!("Connection failed: {:?}", err);
                 }

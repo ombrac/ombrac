@@ -1,218 +1,272 @@
+use std::io;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use quinn::IdleTimeout;
+use ombrac_macros::{error, info};
+use quinn::crypto::rustls::QuicServerConfig;
+use quinn::{Endpoint, ServerConfig, TransportConfig, VarInt};
+use rustls::pki_types::{CertificateDer, PrivatePkcs8KeyDer};
+use tokio::sync::watch;
 
-use super::{Connection, Error, Result, stream::Stream};
+#[cfg(feature = "datagram")]
+use crate::Unreliable;
+#[cfg(feature = "datagram")]
+use crate::quic::datagram::{Datagram, Session};
+use crate::quic::stream::Stream;
+use crate::{Acceptor, Reliable};
 
+use super::error::{Error, Result};
+
+#[derive(Debug)]
 pub struct Builder {
     listen: SocketAddr,
-
-    tls_key: Option<PathBuf>,
-    tls_cert: Option<PathBuf>,
-    tls_skip: bool,
-
     enable_zero_rtt: bool,
-    congestion_initial_window: Option<u64>,
-
-    max_idle_timeout: Option<Duration>,
-    max_keep_alive_period: Option<Duration>,
-    max_open_bidirectional_streams: Option<u64>,
+    enable_self_signed: bool,
+    tls_paths: Option<(PathBuf, PathBuf)>,
+    transport_config: TransportConfig,
 }
 
 impl Builder {
-    pub fn new<A>(addr: A) -> Self
-    where
-        A: Into<SocketAddr>,
-    {
-        Builder {
-            listen: addr.into(),
-            tls_cert: None,
-            tls_key: None,
-            tls_skip: false,
+    pub fn new(listen: SocketAddr) -> Self {
+        Self {
+            listen,
+            tls_paths: None,
             enable_zero_rtt: false,
-            congestion_initial_window: None,
-            max_idle_timeout: None,
-            max_keep_alive_period: None,
-            max_open_bidirectional_streams: None,
+            enable_self_signed: false,
+            transport_config: TransportConfig::default(),
         }
     }
 
-    pub fn with_tls_cert(mut self, value: PathBuf) -> Self {
-        self.tls_cert = Some(value);
+    pub fn with_tls(&mut self, paths: (PathBuf, PathBuf)) -> &mut Self {
+        self.tls_paths = Some(paths);
         self
     }
 
-    pub fn with_tls_key(mut self, value: PathBuf) -> Self {
-        self.tls_key = Some(value);
-        self
-    }
-
-    pub fn with_tls_skip(mut self, value: bool) -> Self {
-        self.tls_skip = value;
-        self
-    }
-
-    pub fn with_enable_zero_rtt(mut self, value: bool) -> Self {
+    pub fn with_enable_zero_rtt(&mut self, value: bool) -> &mut Self {
         self.enable_zero_rtt = value;
         self
     }
 
-    pub fn with_congestion_initial_window(mut self, value: u64) -> Self {
-        self.congestion_initial_window = Some(value);
+    pub fn with_enable_self_signed(&mut self, value: bool) -> &mut Self {
+        self.enable_self_signed = value;
         self
     }
 
-    pub fn with_max_idle_timeout(mut self, value: Duration) -> Self {
-        self.max_idle_timeout = Some(value);
+    pub fn with_max_idle_timeout(&mut self, value: Duration) -> Result<&mut Self> {
+        use quinn::IdleTimeout;
+        self.transport_config
+            .max_idle_timeout(Some(IdleTimeout::try_from(value)?));
+        Ok(self)
+    }
+
+    pub fn with_max_keep_alive_period(&mut self, value: Duration) -> &mut Self {
+        self.transport_config.keep_alive_interval(Some(value));
         self
     }
 
-    pub fn with_max_keep_alive_period(mut self, value: Duration) -> Self {
-        self.max_keep_alive_period = Some(value);
-        self
+    pub fn with_max_open_bidirectional_streams(&mut self, value: u64) -> Result<&mut Self> {
+        self.transport_config
+            .max_concurrent_bidi_streams(VarInt::try_from(value)?);
+        Ok(self)
     }
 
-    pub fn with_max_open_bidirectional_streams(mut self, value: u64) -> Self {
-        self.max_open_bidirectional_streams = Some(value);
-        self
+    pub async fn build(self) -> Result<QuicServer> {
+        let server_config = self.build_server_config()?;
+        let endpoint = Endpoint::server(server_config, self.listen)?;
+
+        let (stream_sender, stream_receiver) = async_channel::bounded(1024);
+        #[cfg(feature = "datagram")]
+        let (datagram_sender, datagram_receiver) = async_channel::bounded(1024);
+        let (shutdown_sender, shutdown_receiver) = watch::channel(());
+
+        tokio::spawn(run(
+            endpoint,
+            stream_sender,
+            #[cfg(feature = "datagram")]
+            datagram_sender,
+            shutdown_receiver,
+        ));
+
+        Ok(QuicServer {
+            stream_receiver,
+            #[cfg(feature = "datagram")]
+            datagram_receiver,
+            shutdown_sender,
+        })
     }
 
-    pub async fn build(self) -> Result<Connection> {
-        Connection::with_server(self).await
+    fn build_server_config(&self) -> Result<ServerConfig> {
+        let (certs, key) = if self.enable_self_signed {
+            let cert = rcgen::generate_simple_self_signed(vec!["localhost".into()])?;
+            let key = PrivatePkcs8KeyDer::from(cert.key_pair.serialize_der()).into();
+            let certs = vec![CertificateDer::from(cert.cert)];
+            (certs, key)
+        } else {
+            let (cert, key) = self
+                .tls_paths
+                .as_ref()
+                .ok_or(Error::ServerMissingCertificate)?;
+            let certs = super::load_certificates(cert)?;
+            let key = super::load_private_key(key)?;
+            (certs, key)
+        };
+
+        let mut server_crypto = rustls::ServerConfig::builder()
+            .with_no_client_auth()
+            .with_single_cert(certs, key)?;
+
+        server_crypto.alpn_protocols = vec![b"h3".to_vec()];
+
+        // Zero RTT
+        if self.enable_zero_rtt {
+            server_crypto.send_half_rtt_data = true;
+            server_crypto.max_early_data_size = u32::MAX;
+        }
+
+        let server_config =
+            ServerConfig::with_crypto(Arc::new(QuicServerConfig::try_from(server_crypto)?));
+
+        Ok(server_config)
     }
 }
 
-impl Connection {
-    async fn with_server(config: Builder) -> Result<Self> {
-        let tls_config = {
-            use quinn::crypto::rustls::QuicServerConfig;
-            use rustls::ServerConfig;
-            use rustls::pki_types::CertificateDer;
-            use rustls::pki_types::PrivatePkcs8KeyDer;
+pub struct QuicServer {
+    stream_receiver: async_channel::Receiver<Stream>,
+    #[cfg(feature = "datagram")]
+    datagram_receiver: async_channel::Receiver<Datagram>,
+    shutdown_sender: watch::Sender<()>,
+}
 
-            let (cert, key) = if config.tls_skip {
-                let signed = rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
-                let cert = vec![CertificateDer::from(signed.cert)];
-                let key = PrivatePkcs8KeyDer::from(signed.key_pair.serialize_der()).into();
-                (cert, key)
-            } else {
-                let (cert, key) = match (config.tls_cert, config.tls_key) {
-                    (Some(cert_path), Some(key_path)) => {
-                        let cert = super::load_certificates(&cert_path)?;
-                        let key = super::load_private_key(&key_path)?;
-                        (cert, key)
+impl QuicServer {
+    pub fn shutdown(&self) {
+        let _ = self.shutdown_sender.send(());
+    }
+}
+
+impl Acceptor for QuicServer {
+    async fn accept_bidirectional(&self) -> io::Result<impl Reliable> {
+        self.stream_receiver.recv().await.map_err(io::Error::other)
+    }
+
+    #[cfg(feature = "datagram")]
+    async fn accept_datagram(&self) -> io::Result<impl Unreliable> {
+        self.datagram_receiver
+            .recv()
+            .await
+            .map_err(io::Error::other)
+    }
+}
+
+async fn run(
+    endpoint: quinn::Endpoint,
+    stream_sender: async_channel::Sender<Stream>,
+    #[cfg(feature = "datagram")] datagram_sender: async_channel::Sender<Datagram>,
+    mut shutdown_receiver: watch::Receiver<()>,
+) {
+    loop {
+        tokio::select! {
+            biased;
+            _ = shutdown_receiver.changed() => {
+                endpoint.close(0u32.into(), b"");
+                endpoint.wait_idle().await;
+                break;
+            }
+
+            maybe_conn = endpoint.accept() => {
+                match maybe_conn {
+                    Some(conn) => {
+                        tokio::spawn(handle_connection(
+                            conn,
+                            stream_sender.clone(),
+                            #[cfg(feature = "datagram")]
+                            datagram_sender.clone(),
+                        ));
                     }
-                    (None, _) => {
-                        return Err(Error::ServerMissingCertificate);
+                    None => {
+                        break;
                     }
-                    (_, None) => {
-                        return Err(Error::ServerMissingPrivateKey);
+                }
+            }
+        }
+    }
+}
+
+macro_rules! select_loop {
+    ($connection:expr, $stream_sender:expr, $remote_addr:expr) => {
+        loop {
+            match $connection.accept_bi().await {
+                Ok((send, recv)) => {
+                    let stream = Stream(send, recv);
+                    if $stream_sender.send(stream).await.is_err() {
+                        break;
                     }
-                };
-                (cert, key)
-            };
-
-            let mut tls_config = ServerConfig::builder()
-                .with_no_client_auth()
-                .with_single_cert(cert, key)?;
-
-            tls_config.alpn_protocols = [b"h3"].iter().map(|&x| x.into()).collect();
-
-            if config.enable_zero_rtt {
-                tls_config.send_half_rtt_data = true;
-                tls_config.max_early_data_size = u32::MAX;
+                }
+                Err(_e) => break,
             }
+        }
+    };
 
-            QuicServerConfig::try_from(tls_config)?
-        };
-
-        let server_config = {
-            use quinn::{ServerConfig, TransportConfig, VarInt, congestion};
-
-            let mut transport = TransportConfig::default();
-            let mut congestion = congestion::BbrConfig::default();
-
-            if let Some(value) = config.congestion_initial_window {
-                congestion.initial_window(value);
-            }
-
-            if let Some(value) = config.max_keep_alive_period {
-                transport.keep_alive_interval(Some(value));
-            }
-
-            if let Some(value) = config.max_idle_timeout {
-                transport.max_idle_timeout(Some(IdleTimeout::try_from(value)?));
-            }
-
-            if let Some(value) = config.max_open_bidirectional_streams {
-                transport.max_concurrent_bidi_streams(VarInt::try_from(value)?);
-            }
-
-            transport.congestion_controller_factory(Arc::new(congestion));
-
-            let mut config = ServerConfig::with_crypto(Arc::new(tls_config));
-            config.transport_config(Arc::new(transport));
-
-            config
-        };
-
-        let endpoint = {
-            use quinn::Endpoint;
-
-            Endpoint::server(server_config, config.listen)?
-        };
-
-        let (sender, receiver) = async_channel::unbounded();
-
-        #[cfg(feature = "datagram")]
-        let (datagram_sender, datagram_receiver) = async_channel::unbounded();
-
-        let handle = tokio::spawn(async move {
-            while let Some(connecting) = endpoint.accept().await {
-                let sender = sender.clone();
-
-                #[cfg(feature = "datagram")]
-                let datagram_sender = datagram_sender.clone();
-
-                tokio::spawn(async move {
-                    let connection = match connecting.await {
-                        Ok(conn) => conn,
-                        Err(_) => return,
-                    };
-
-                    #[cfg(feature = "datagram")]
-                    {
-                        use crate::quic::datagram::Session;
-
-                        let conn = connection.clone();
-                        tokio::spawn(async move {
-                            let session = Session::with_server(conn);
-
-                            while let Some(datagram) = session.accept_bidirectional().await {
-                                if datagram_sender.send(datagram).await.is_err() {
-                                    break;
-                                }
-                            }
-                        });
+    ($connection:expr, $stream_sender:expr, $datagram_sender:expr, $session:expr, $remote_addr:expr) => {
+        loop {
+            tokio::select! {
+                stream_result = async {
+                    match $connection.accept_bi().await {
+                        Ok((send, recv)) => Ok(Stream(send, recv)),
+                        Err(e) => Err(e),
                     }
-
-                    while let Ok((send_stream, recv_stream)) = connection.accept_bi().await {
-                        if sender.send(Stream(send_stream, recv_stream)).await.is_err() {
+                } => match stream_result {
+                    Ok(stream) => {
+                        if $stream_sender.send(stream).await.is_err() {
                             break;
                         }
                     }
-                });
-            }
-        });
+                    Err(_e) => break
+                },
 
-        Ok(Connection {
-            handle,
-            stream: receiver,
+                datagram = $session.accept_datagram() => match datagram {
+                    Some(value) => {
+                        if $datagram_sender.send(value).await.is_err() {
+                            break;
+                        }
+                    }
+                    None => break
+                },
+            }
+        }
+    };
+}
+
+async fn handle_connection(
+    conn: quinn::Incoming,
+    stream_sender: async_channel::Sender<Stream>,
+    #[cfg(feature = "datagram")] datagram_sender: async_channel::Sender<Datagram>,
+) {
+    match conn.await {
+        Ok(connection) => {
+            let remote_addr = connection.remote_address();
+            info!("New connection from: {}", remote_addr);
+
             #[cfg(feature = "datagram")]
-            datagram: datagram_receiver,
-        })
+            {
+                let session = Session::with_server(connection.clone());
+                select_loop!(
+                    connection,
+                    stream_sender,
+                    datagram_sender,
+                    session,
+                    remote_addr
+                );
+            }
+
+            #[cfg(not(feature = "datagram"))]
+            {
+                select_loop!(connection, stream_sender, remote_addr);
+            }
+        }
+        Err(e) => {
+            error!("Failed to accept connection: {}", e)
+        }
     }
 }

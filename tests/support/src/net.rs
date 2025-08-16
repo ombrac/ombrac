@@ -3,7 +3,7 @@ use std::thread;
 use std::time::Duration;
 
 pub fn find_available_tcp_addr(ip: IpAddr) -> SocketAddr {
-    let listener = TcpListener::bind(format!("{}:0", ip)).unwrap();
+    let listener = TcpListener::bind(format!("{ip}:0")).unwrap();
     let port = listener.local_addr().unwrap().port();
     drop(listener);
 
@@ -19,7 +19,7 @@ pub fn find_available_local_tcp_addr() -> SocketAddr {
 }
 
 pub fn find_available_udp_addr(ip: IpAddr) -> SocketAddr {
-    let listener = UdpSocket::bind(format!("{}:0", ip)).unwrap();
+    let listener = UdpSocket::bind(format!("{ip}:0")).unwrap();
     let port = listener.local_addr().unwrap().port();
     drop(listener);
 
@@ -132,12 +132,12 @@ pub mod tcp {
                                 if let Err(e) =
                                     Self::handle_connection(stream, responses, delay_ms).await
                                 {
-                                    eprintln!("Error handling connection: {}", e);
+                                    eprintln!("Error handling connection: {e}");
                                 }
                             });
                         }
                         Err(e) => {
-                            eprintln!("Error accepting connection: {}", e);
+                            eprintln!("Error accepting connection: {e}");
                             break;
                         }
                     }
@@ -212,12 +212,12 @@ pub mod tcp {
                         Ok((stream, _)) => {
                             tokio::spawn(async move {
                                 if let Err(e) = Self::handle_connection(stream).await {
-                                    eprintln!("Error handling connection: {}", e);
+                                    eprintln!("Error handling connection: {e}");
                                 }
                             });
                         }
                         Err(e) => {
-                            eprintln!("Error accepting connection: {}", e);
+                            eprintln!("Error accepting connection: {e}");
                             break;
                         }
                     }
@@ -387,13 +387,13 @@ pub mod udp {
                                     }
 
                                     if let Err(e) = socket.send_to(response, addr).await {
-                                        eprintln!("Error sending UDP response: {}", e);
+                                        eprintln!("Error sending UDP response: {e}");
                                     }
                                 }
                             });
                         }
                         Err(e) => {
-                            eprintln!("Error receiving UDP packet: {}", e);
+                            eprintln!("Error receiving UDP packet: {e}");
                             break;
                         }
                     }
@@ -450,12 +450,12 @@ pub mod udp {
 
                             tokio::spawn(async move {
                                 if let Err(e) = socket.send_to(&data, addr).await {
-                                    eprintln!("Error sending UDP response: {}", e);
+                                    eprintln!("Error sending UDP response: {e}");
                                 }
                             });
                         }
                         Err(e) => {
-                            eprintln!("Error receiving UDP packet: {}", e);
+                            eprintln!("Error receiving UDP packet: {e}");
                             break;
                         }
                     }

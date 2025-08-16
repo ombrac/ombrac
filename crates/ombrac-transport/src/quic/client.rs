@@ -1,332 +1,286 @@
-use std::net::SocketAddr;
+use std::io;
+use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use ombrac_macros::{info, warn};
-use quinn::IdleTimeout;
+use arc_swap::{ArcSwap, Guard};
+use ombrac_macros::{debug, warn};
+use quinn::crypto::rustls::QuicClientConfig;
+use quinn::{IdleTimeout, TransportConfig, VarInt};
+use tokio::sync::Mutex;
 
-use super::{Connection, Error, Result, stream::Stream};
+#[cfg(feature = "datagram")]
+use crate::Unreliable;
+#[cfg(feature = "datagram")]
+use crate::quic::datagram::Session;
+use crate::quic::stream::Stream;
+use crate::{Initiator, Reliable};
 
+use super::Result;
+
+#[derive(Debug)]
 pub struct Builder {
-    bind: Option<SocketAddr>,
-
+    bind_addr: SocketAddr,
     server_name: String,
-    server_address: SocketAddr,
-
-    tls_skip: bool,
+    server_addr: SocketAddr,
     tls_cert: Option<PathBuf>,
-
+    tls_skip: bool,
     enable_zero_rtt: bool,
-    enable_connection_multiplexing: bool,
-    congestion_initial_window: Option<u64>,
+    transport_config: TransportConfig,
 
-    max_idle_timeout: Option<Duration>,
-    max_keep_alive_period: Option<Duration>,
-    max_open_bidirectional_streams: Option<u64>,
+    enable_connection_multiplexing: bool,
 }
 
 impl Builder {
-    pub fn new<A, N>(addr: A, name: N) -> Self
-    where
-        A: Into<SocketAddr>,
-        N: Into<String>,
-    {
-        Builder {
-            bind: None,
-            server_name: name.into(),
-            server_address: addr.into(),
+    pub fn new(server_addr: SocketAddr, server_name: String) -> Self {
+        let bind_addr = match server_addr {
+            SocketAddr::V4(_) => SocketAddr::new(Ipv4Addr::UNSPECIFIED.into(), 0),
+            SocketAddr::V6(_) => SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), 0),
+        };
+        Self {
+            bind_addr,
+            server_addr,
+            server_name,
             tls_cert: None,
             tls_skip: false,
             enable_zero_rtt: false,
-            enable_connection_multiplexing: false,
-            congestion_initial_window: None,
-            max_idle_timeout: None,
-            max_keep_alive_period: None,
-            max_open_bidirectional_streams: None,
+            transport_config: TransportConfig::default(),
+            enable_connection_multiplexing: true,
         }
     }
 
-    pub fn with_server_name(mut self, value: String) -> Self {
+    pub fn with_server_name(&mut self, value: String) -> &mut Self {
         self.server_name = value;
         self
     }
 
-    pub fn with_bind(mut self, value: SocketAddr) -> Self {
-        self.bind = Some(value);
+    pub fn with_bind(&mut self, value: SocketAddr) -> &mut Self {
+        self.bind_addr = value;
         self
     }
 
-    pub fn with_tls_cert(mut self, value: PathBuf) -> Self {
+    pub fn with_tls(&mut self, value: PathBuf) -> &mut Self {
         self.tls_cert = Some(value);
         self
     }
 
-    pub fn with_tls_skip(mut self, value: bool) -> Self {
+    pub fn with_tls_skip(&mut self, value: bool) -> &mut Self {
         self.tls_skip = value;
         self
     }
 
-    pub fn with_enable_zero_rtt(mut self, value: bool) -> Self {
+    pub fn with_enable_zero_rtt(&mut self, value: bool) -> &mut Self {
         self.enable_zero_rtt = value;
         self
     }
 
-    pub fn with_enable_connection_multiplexing(mut self, value: bool) -> Self {
+    pub fn with_enable_connection_multiplexing(&mut self, value: bool) -> &mut Self {
         self.enable_connection_multiplexing = value;
         self
     }
 
-    pub fn with_congestion_initial_window(mut self, value: u64) -> Self {
-        self.congestion_initial_window = Some(value);
+    // pub fn with_congestion_initial_window(mut self, value: u64) -> Self {
+    //     self.congestion_initial_window = Some(value);
+    //     self
+    // }
+
+    pub fn with_max_idle_timeout(&mut self, value: Duration) -> Result<&mut Self> {
+        self.transport_config
+            .max_idle_timeout(Some(IdleTimeout::try_from(value)?));
+        Ok(self)
+    }
+
+    pub fn with_max_keep_alive_period(&mut self, value: Duration) -> &mut Self {
+        self.transport_config.keep_alive_interval(Some(value));
         self
     }
 
-    pub fn with_max_idle_timeout(mut self, value: Duration) -> Self {
-        self.max_idle_timeout = Some(value);
+    pub fn with_max_open_bidirectional_streams(&mut self, value: u64) -> Result<&mut Self> {
+        self.transport_config
+            .max_concurrent_bidi_streams(VarInt::try_from(value)?);
+        Ok(self)
+    }
+
+    pub fn with_bind_addr(mut self, addr: SocketAddr) -> Self {
+        self.bind_addr = addr;
         self
     }
 
-    pub fn with_max_keep_alive_period(mut self, value: Duration) -> Self {
-        self.max_keep_alive_period = Some(value);
-        self
-    }
-
-    pub fn with_max_open_bidirectional_streams(mut self, value: u64) -> Self {
-        self.max_open_bidirectional_streams = Some(value);
-        self
-    }
-
-    pub async fn build(self) -> Result<Connection> {
-        Connection::with_client(self).await
-    }
-
-    fn bind_address(&self) -> SocketAddr {
-        use std::net::{Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6};
-
-        match self.bind {
-            Some(value) => value,
-            None => match self.server_address {
-                SocketAddr::V4(_) => SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0)),
-                SocketAddr::V6(_) => {
-                    SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, 0, 0, 0))
-                }
-            },
+    fn build_tls_config(&self) -> Result<rustls::ClientConfig> {
+        let mut roots = rustls::RootCertStore::empty();
+        if let Some(path) = &self.tls_cert {
+            let certs = super::load_certificates(path)?;
+            roots.add_parsable_certificates(certs);
+        } else {
+            roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
         }
-    }
-}
 
-impl Connection {
-    async fn with_client(config: Builder) -> Result<Self> {
-        let tls_config = {
-            use quinn::crypto::rustls::QuicClientConfig;
-            use rustls::{ClientConfig, RootCertStore};
+        let mut config = rustls::ClientConfig::builder()
+            .with_root_certificates(roots)
+            .with_no_client_auth();
 
-            let mut roots = RootCertStore::empty();
+        config.alpn_protocols = vec![b"h3".to_vec()];
 
-            if let Some(path) = &config.tls_cert {
-                let certs = super::load_certificates(path)?;
-                roots.add_parsable_certificates(certs);
-            } else {
-                roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-            }
-
-            let mut tls_config = ClientConfig::builder()
-                .with_root_certificates(roots)
-                .with_no_client_auth();
-
-            tls_config.alpn_protocols = [b"h3"].iter().map(|&x| x.into()).collect();
-
-            if config.tls_skip {
-                warn!("TLS certificate verification is DISABLED - this is not secure!");
-                tls_config
-                    .dangerous()
-                    .set_certificate_verifier(Arc::new(cert_verifier::NullVerifier));
-            }
-
-            if config.enable_zero_rtt {
-                tls_config.enable_early_data = true;
-            }
-
-            QuicClientConfig::try_from(tls_config)?
-        };
-
-        let client_config = {
-            use quinn::{ClientConfig, TransportConfig, VarInt, congestion};
-
-            let mut transport = TransportConfig::default();
-            let mut congestion = congestion::BbrConfig::default();
-
-            if let Some(value) = config.congestion_initial_window {
-                congestion.initial_window(value);
-            }
-
-            if let Some(value) = config.max_keep_alive_period {
-                transport.keep_alive_interval(Some(value));
-            }
-
-            if let Some(value) = config.max_idle_timeout {
-                transport.max_idle_timeout(Some(IdleTimeout::try_from(value)?));
-            }
-
-            if let Some(value) = config.max_open_bidirectional_streams {
-                transport.max_concurrent_bidi_streams(VarInt::from_u64(value)?);
-            }
-
-            transport.congestion_controller_factory(Arc::new(congestion));
-
-            let mut config = ClientConfig::new(Arc::new(tls_config));
-            config.transport_config(Arc::new(transport));
-
+        if self.tls_skip {
+            warn!("TLS certificate verification is DISABLED - this is not secure!");
             config
-        };
+                .dangerous()
+                .set_certificate_verifier(Arc::new(cert_verifier::NullVerifier));
+        }
 
-        let endpoint = {
-            use quinn::Endpoint;
+        if self.enable_zero_rtt {
+            config.enable_early_data = true;
+        }
 
-            let mut endpoint = Endpoint::client(config.bind_address())?;
-            endpoint.set_default_client_config(client_config);
+        Ok(config)
+    }
 
-            endpoint
-        };
+    pub async fn build(self) -> Result<QuicClient> {
+        let client_crypto = self.build_tls_config()?;
+        let client_config =
+            quinn::ClientConfig::new(Arc::new(QuicClientConfig::try_from(client_crypto)?));
 
-        let server_name = config.server_name;
-        let server_address = config.server_address;
+        let mut endpoint = quinn::Endpoint::client(self.bind_addr)?;
+        endpoint.set_default_client_config(client_config);
 
-        let enable_zero_rtt = config.enable_zero_rtt;
-        let enable_connection_multiplexing = config.enable_connection_multiplexing;
+        let connection = endpoint
+            .connect(self.server_addr, &self.server_name)?
+            .await
+            .map_err(io::Error::other)?;
 
-        let tcp_endpoint = endpoint.clone();
-        let tcp_server_name = server_name.clone();
-
-        let (sender, receiver) = async_channel::bounded(1);
-
-        #[cfg(feature = "datagram")]
-        let (datagram_sender, datagram_receiver) = async_channel::bounded(1);
-
-        let handle = tokio::spawn(async move {
-            use ombrac_macros::error;
-
-            tokio::spawn(async move {
-                'connection: loop {
-                    let connection = match connection(
-                        &tcp_endpoint,
-                        server_address,
-                        &tcp_server_name,
-                        enable_zero_rtt,
-                    )
-                    .await
-                    {
-                        Ok(value) => value,
-                        Err(_error) => {
-                            error!("{}", _error);
-                            continue 'connection;
-                        }
-                    };
-
-                    'stream: loop {
-                        let stream = match connection.open_bi().await {
-                            Ok(value) => value,
-                            Err(_error) => {
-                                error!("{}", _error);
-                                break 'stream;
-                            }
-                        };
-
-                        if sender.send(Stream(stream.0, stream.1)).await.is_err() {
-                            break 'connection;
-                        }
-
-                        if !enable_connection_multiplexing {
-                            break 'stream;
-                        }
-                    }
+        Ok(QuicClient {
+            config: self,
+            endpoint,
+            connection: ArcSwap::new(
+                Connection {
+                    inner: connection.clone(),
+                    #[cfg(feature = "datagram")]
+                    datagram_session: Session::with_client(connection),
                 }
-            });
-
-            #[cfg(feature = "datagram")]
-            tokio::spawn(async move {
-                use crate::quic::datagram::Session;
-
-                'connection: loop {
-                    let connection =
-                        match connection(&endpoint, server_address, &server_name, enable_zero_rtt)
-                            .await
-                        {
-                            Ok(value) => value,
-                            Err(_error) => {
-                                error!("{}", _error);
-                                continue 'connection;
-                            }
-                        };
-
-                    let session = Session::with_client(connection);
-
-                    'datagram: loop {
-                        let datagram = match session.open_bidirectional().await {
-                            Some(value) => value,
-                            None => break 'datagram,
-                        };
-
-                        if datagram_sender.send(datagram).await.is_err() {
-                            break 'connection;
-                        };
-                    }
-                }
-            });
-        });
-
-        Ok(Connection {
-            handle,
-            stream: receiver,
-            #[cfg(feature = "datagram")]
-            datagram: datagram_receiver,
+                .into(),
+            ),
+            reconnect_lock: Mutex::new(()),
         })
     }
 }
 
-#[inline]
-async fn connection(
-    endpoint: &quinn::Endpoint,
-    addr: SocketAddr,
-    name: &str,
-    enable_zero_rtt: bool,
-) -> Result<quinn::Connection> {
-    let mut _is_zero_rtt = false;
-    let connecting = endpoint.connect(addr, name)?;
+pub struct Connection {
+    inner: quinn::Connection,
+    #[cfg(feature = "datagram")]
+    datagram_session: Session,
+}
 
-    let connection = if enable_zero_rtt {
-        match connecting.into_0rtt() {
-            Ok((conn, zero_rtt_accepted)) => {
-                if !zero_rtt_accepted.await {
-                    return Err(Error::ZeroRttNotAccepted);
+pub struct QuicClient {
+    config: Builder,
+    endpoint: quinn::Endpoint,
+    connection: ArcSwap<Connection>,
+    reconnect_lock: Mutex<()>,
+}
+
+impl Initiator for QuicClient {
+    async fn open_bidirectional(&self) -> io::Result<impl Reliable> {
+        let conn_arc = self.connection.load();
+        if !self.config.enable_connection_multiplexing {
+            let (send, recv) = self.reconnect_and_open_bi(conn_arc).await?;
+            Ok(Stream(send, recv))
+        } else {
+            match conn_arc.inner.open_bi().await {
+                Ok((send, recv)) => Ok(Stream(send, recv)),
+                Err(_e @ quinn::ConnectionError::ConnectionClosed(_))
+                | Err(_e @ quinn::ConnectionError::LocallyClosed)
+                | Err(_e @ quinn::ConnectionError::ApplicationClosed(_)) => {
+                    let (send, recv) = self.reconnect_and_open_bi(conn_arc).await?;
+                    Ok(Stream(send, recv))
                 }
-
-                _is_zero_rtt = true;
-
-                conn
+                Err(e) => Err(io::Error::other(e)),
             }
-            Err(conn) => conn.await?,
         }
-    } else {
-        connecting.await?
-    };
+    }
 
-    info!(
-        "QUIC Connection{} established with {} at {}",
-        match _is_zero_rtt {
-            true => "(0-RTT)",
-            _ => "",
-        },
-        name,
-        addr
-    );
+    #[cfg(feature = "datagram")]
+    async fn open_datagram(&self) -> io::Result<impl Unreliable> {
+        let conn_arc = self.connection.load();
+        conn_arc
+            .datagram_session
+            .open_datagram()
+            .await
+            .ok_or(io::Error::other("connection closed"))
+    }
+}
 
-    Ok(connection)
+impl QuicClient {
+    async fn reconnect_and_open_bi(
+        &self,
+        old_conn_arc: Guard<Arc<Connection>>,
+    ) -> io::Result<(quinn::SendStream, quinn::RecvStream)> {
+        let _lock = self.reconnect_lock.lock().await;
+
+        if !Arc::ptr_eq(&*old_conn_arc, &*self.connection.load()) {
+            return self
+                .connection
+                .load()
+                .inner
+                .open_bi()
+                .await
+                .map_err(io::Error::other);
+        }
+
+        let new_connection = { self.connect().await? };
+
+        self.connection.store(Arc::new(Connection {
+            inner: new_connection.clone(),
+            #[cfg(feature = "datagram")]
+            datagram_session: Session::with_client(new_connection),
+        }));
+
+        self.connection
+            .load()
+            .inner
+            .open_bi()
+            .await
+            .map_err(io::Error::other)
+    }
+
+    async fn connect(&self) -> io::Result<quinn::Connection> {
+        let mut _is_zero_rtt = false;
+        let connecting = self
+            .endpoint
+            .connect(self.config.server_addr, &self.config.server_name)
+            .map_err(io::Error::other)?;
+
+        let connection = if self.config.enable_zero_rtt {
+            match connecting.into_0rtt() {
+                Ok((conn, zero_rtt_accepted)) => {
+                    if !zero_rtt_accepted.await {
+                        return Err(io::Error::other("Zero RTT not accept"));
+                    }
+
+                    _is_zero_rtt = true;
+
+                    conn
+                }
+                Err(conn) => conn.await?,
+            }
+        } else {
+            connecting.await?
+        };
+
+        debug!(
+            "QUIC Connection{} established with {} at {}",
+            match _is_zero_rtt {
+                true => "(0-RTT)",
+                _ => "",
+            },
+            &self.config.server_name,
+            &self.config.server_addr
+        );
+
+        Ok(connection)
+    }
 }
 
 mod cert_verifier {
-    use rustls::Error;
     use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
     use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
     use rustls::{DigitallySignedStruct, SignatureScheme};
@@ -337,37 +291,33 @@ mod cert_verifier {
     impl ServerCertVerifier for NullVerifier {
         fn verify_server_cert(
             &self,
-            _end_entity: &CertificateDer<'_>,
-            _intermediates: &[CertificateDer<'_>],
-            _server_name: &ServerName<'_>,
-            _ocsp_response: &[u8],
-            _now: UnixTime,
-        ) -> Result<ServerCertVerified, Error> {
+            _: &CertificateDer<'_>,
+            _: &[CertificateDer<'_>],
+            _: &ServerName<'_>,
+            _: &[u8],
+            _: UnixTime,
+        ) -> Result<ServerCertVerified, rustls::Error> {
             Ok(ServerCertVerified::assertion())
         }
-
         fn verify_tls12_signature(
             &self,
-            _message: &[u8],
-            _cert: &CertificateDer<'_>,
-            _dss: &DigitallySignedStruct,
-        ) -> Result<HandshakeSignatureValid, Error> {
+            _: &[u8],
+            _: &CertificateDer<'_>,
+            _: &DigitallySignedStruct,
+        ) -> Result<HandshakeSignatureValid, rustls::Error> {
             Ok(HandshakeSignatureValid::assertion())
         }
-
         fn verify_tls13_signature(
             &self,
-            _message: &[u8],
-            _cert: &CertificateDer<'_>,
-            _dss: &DigitallySignedStruct,
-        ) -> Result<HandshakeSignatureValid, Error> {
+            _: &[u8],
+            _: &CertificateDer<'_>,
+            _: &DigitallySignedStruct,
+        ) -> Result<HandshakeSignatureValid, rustls::Error> {
             Ok(HandshakeSignatureValid::assertion())
         }
-
         fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
             vec![
                 SignatureScheme::RSA_PKCS1_SHA1,
-                SignatureScheme::ECDSA_SHA1_Legacy,
                 SignatureScheme::RSA_PKCS1_SHA256,
                 SignatureScheme::ECDSA_NISTP256_SHA256,
                 SignatureScheme::RSA_PKCS1_SHA384,
