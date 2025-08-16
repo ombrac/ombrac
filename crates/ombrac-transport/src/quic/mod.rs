@@ -7,11 +7,31 @@ pub mod client;
 pub mod server;
 
 use std::path::Path;
+use std::str::FromStr;
 use std::{fs, io};
 
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 
 type Result<T> = std::result::Result<T, error::Error>;
+
+#[derive(Debug, Clone, Copy)]
+pub enum Congestion {
+    Bbr,
+    Cubic,
+    NewReno,
+}
+
+impl FromStr for Congestion {
+    type Err = error::Error;
+    fn from_str(value: &str) -> Result<Self> {
+        match value.to_lowercase().as_str() {
+            "bbr" => Ok(Congestion::Bbr),
+            "cubic" => Ok(Congestion::Cubic),
+            "newreno" => Ok(Congestion::NewReno),
+            _ => Err(Self::Err::InvalidCongestion),
+        }
+    }
+}
 
 fn load_certificates(path: &Path) -> io::Result<Vec<CertificateDer<'static>>> {
     let content = fs::read(path)?;

@@ -10,7 +10,7 @@ use ombrac::client::Client;
 use ombrac_macros::info;
 use ombrac_transport::Initiator;
 #[cfg(feature = "transport-quic")]
-use ombrac_transport::quic::client::Builder;
+use ombrac_transport::quic::{Congestion, client::Builder};
 use tokio::task::JoinHandle;
 
 #[derive(Parser)]
@@ -98,14 +98,24 @@ struct Args {
     #[clap(long, help_heading = "Transport QUIC", action, verbatim_doc_comment)]
     no_multiplex: bool,
 
+    /// Congestion control algorithm to use (e.g. bbr, cubic, newreno)
+    #[clap(
+        long,
+        help_heading = "Transport QUIC",
+        value_name = "ALGORITHM",
+        default_value = "bbr",
+        verbatim_doc_comment
+    )]
+    congestion: Congestion,
+
     /// Initial congestion window size in bytes
-    // #[clap(
-    //     long,
-    //     help_heading = "Transport QUIC",
-    //     value_name = "NUM",
-    //     verbatim_doc_comment
-    // )]
-    // cwnd_init: Option<u64>,
+    #[clap(
+        long,
+        help_heading = "Transport QUIC",
+        value_name = "NUM",
+        verbatim_doc_comment
+    )]
+    cwnd_init: Option<u64>,
 
     /// Maximum idle time (in milliseconds) before closing the connection
     /// 30 second default recommended by RFC 9308
@@ -285,10 +295,6 @@ async fn quic_from_args(args: &Args) -> Result<Builder, Box<dyn Error>> {
         builder.with_tls(value.clone());
     }
 
-    // if let Some(value) = args.cwnd_init {
-    //     builder.with_congestion_initial_window(value);
-    // }
-
     if let Some(value) = args.idle_timeout {
         builder.with_max_idle_timeout(Duration::from_millis(value))?;
     }
@@ -304,6 +310,7 @@ async fn quic_from_args(args: &Args) -> Result<Builder, Box<dyn Error>> {
     builder.with_tls_skip(args.insecure);
     builder.with_enable_zero_rtt(args.zero_rtt);
     builder.with_enable_connection_multiplexing(!args.no_multiplex);
+    builder.with_congestion(args.congestion, args.cwnd_init);
 
     Ok(builder)
 }
