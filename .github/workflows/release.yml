@@ -203,16 +203,16 @@ jobs:
         with:
           toolchain: stable
 
-      - name: Publish ombrac
-        working-directory: crates/ombrac
-        run: cargo publish
-
       - name: Publish ombrac-macros
         working-directory: crates/ombrac-macros
         run: cargo publish
 
       - name: Publish ombrac-transport
         working-directory: crates/ombrac-transport
+        run: cargo publish
+
+      - name: Publish ombrac
+        working-directory: crates/ombrac
         run: cargo publish
 
       - name: Publish ombrac-server
