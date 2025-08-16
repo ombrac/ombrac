@@ -28,7 +28,7 @@ quic = [
 [dependencies]
 ombrac-macros = { workspace = true }
 bytes = { workspace = true }
-tokio = { workspace = true, features = ["rt", "sync", "io-util"] }
+tokio = { workspace = true, features = ["rt", "sync", "io-util", "macros"] }
 thiserror = { workspace = true }
 async-channel = { workspace = true, features = ["std"] }
 quinn = { workspace = true, features = ["runtime-tokio", "rustls-aws-lc-rs"], optional = true }

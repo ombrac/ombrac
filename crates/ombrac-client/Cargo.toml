@@ -51,7 +51,7 @@ ombrac-macros = { workspace = true }
 ombrac-transport = { workspace = true }
 bytes = { workspace = true }
 blake3 = { workspace = true }
-tokio = { workspace = true, features = ["rt-multi-thread", "net"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "net", "macros"] }
 clap = { workspace = true, features = ["std", "derive", "color", "help", "usage", "error-context", "suggestions"] }
 tracing = { workspace = true, optional = true }
 tracing-appender = { workspace = true, optional = true}
