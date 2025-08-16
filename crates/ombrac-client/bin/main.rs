@@ -99,13 +99,13 @@ struct Args {
     no_multiplex: bool,
 
     /// Initial congestion window size in bytes
-    #[clap(
-        long,
-        help_heading = "Transport QUIC",
-        value_name = "NUM",
-        verbatim_doc_comment
-    )]
-    cwnd_init: Option<u64>,
+    // #[clap(
+    //     long,
+    //     help_heading = "Transport QUIC",
+    //     value_name = "NUM",
+    //     verbatim_doc_comment
+    // )]
+    // cwnd_init: Option<u64>,
 
     /// Maximum idle time (in milliseconds) before closing the connection
     /// 30 second default recommended by RFC 9308
@@ -201,37 +201,40 @@ async fn main() -> Result<(), Box<dyn Error>> {
         subscriber.with_writer(non_blocking).init()
     }
 
-    let secret = blake3::hash(args.secret.as_bytes());
-    let ombrac_client = Client::new(
-        quic_from_args(&args)
-            .await?
-            .build()
-            .await
-            .expect("QUIC Client failed to build"),
-    );
+    #[cfg(feature = "transport-quic")]
+    {
+        let secret = blake3::hash(args.secret.as_bytes());
+        let ombrac_client = Client::new(
+            quic_from_args(&args)
+                .await?
+                .build()
+                .await
+                .expect("QUIC Client failed to build"),
+        );
 
-    let client = Arc::new(ombrac_client);
-    let secret = *secret.as_bytes();
+        let client = Arc::new(ombrac_client);
+        let secret = *secret.as_bytes();
 
-    #[cfg(feature = "endpoint-http")]
-    if let Some(address) = args.http {
-        let client = client.clone();
-        run_http_server(client, secret, address, async {
+        #[cfg(feature = "endpoint-http")]
+        if let Some(address) = args.http {
+            let client = client.clone();
+            run_http_server(client, secret, address, async {
+                tokio::signal::ctrl_c()
+                    .await
+                    .expect("Failed to listen for event");
+            })
+            .await?;
+        }
+
+        #[cfg(feature = "endpoint-socks")]
+        run_socks_server(client, secret, args.socks, async {
             tokio::signal::ctrl_c()
                 .await
                 .expect("Failed to listen for event");
         })
+        .await?
         .await?;
     }
-
-    #[cfg(feature = "endpoint-socks")]
-    run_socks_server(client, secret, args.socks, async {
-        tokio::signal::ctrl_c()
-            .await
-            .expect("Failed to listen for event");
-    })
-    .await?
-    .await?;
 
     Ok(())
 }

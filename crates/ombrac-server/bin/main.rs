@@ -181,9 +181,11 @@ async fn main() -> io::Result<()> {
     }
 
     #[cfg(feature = "transport-quic")]
-    let quic_server = quic_server_from_args(&args).await?;
+    {
+        let quic_server = quic_server_from_args(&args).await?;
 
-    tokio::join!(quic_server).0?;
+        tokio::join!(quic_server).0?;
+    }
 
     Ok(())
 }
