@@ -111,7 +111,7 @@ struct Args {
         long,
         help_heading = "Transport QUIC",
         value_name = "NUM",
-        default_value = "100",
+        default_value = "1000",
         verbatim_doc_comment
     )]
     max_streams: Option<u64>,

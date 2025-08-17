@@ -21,6 +21,7 @@ impl<T: Acceptor> Server<T> {
         Self { transport }
     }
 
+    #[inline]
     pub async fn accept_connect(&self) -> io::Result<Stream<impl Reliable>> {
         let stream = self.transport.accept_bidirectional().await?;
         Ok(Stream(stream))
@@ -81,6 +82,7 @@ pub mod datagram {
 
     impl<T: Acceptor> Server<T> {
         #[cfg(feature = "datagram")]
+        #[inline]
         pub async fn accept_associate(&self) -> io::Result<Datagram<impl Unreliable>> {
             let datagram = self.transport.accept_datagram().await?;
             Ok(Datagram(datagram))
