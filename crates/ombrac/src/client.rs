@@ -30,7 +30,7 @@ impl<T: Initiator> Client<T> {
         let request = Connect::with(secret, target);
         stream.write_all(&request.to_bytes()?).await?;
 
-        Ok(Stream(stream, request))
+        Ok(Stream(stream))
     }
 
     #[cfg(feature = "datagram")]
@@ -41,7 +41,7 @@ impl<T: Initiator> Client<T> {
     }
 }
 
-pub struct Stream<R: Reliable>(pub(crate) R, pub(crate) Connect);
+pub struct Stream<R: Reliable>(pub(crate) R);
 
 mod impl_async_read {
     use std::io;

@@ -204,12 +204,12 @@ async fn main() -> io::Result<()> {
     {
         info!("Server listening on {}", args.listen);
         let transport = Arc::new(Server::new(quic_server_from_args(&args).await?));
-        tokio::spawn(run_server(
+        run_server(
             transport,
             validator,
             #[cfg(feature = "datagram")]
             udp_config,
-        )).await??;
+        ).await?;
     }
 
     Ok(())
