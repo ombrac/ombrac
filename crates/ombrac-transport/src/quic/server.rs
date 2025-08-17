@@ -184,11 +184,13 @@ impl QuicServer {
 }
 
 impl Acceptor for QuicServer {
+    #[inline]
     async fn accept_bidirectional(&self) -> io::Result<impl Reliable> {
         self.stream_receiver.recv().await.map_err(io::Error::other)
     }
 
     #[cfg(feature = "datagram")]
+    #[inline]
     async fn accept_datagram(&self) -> io::Result<impl Unreliable> {
         self.datagram_receiver
             .recv()
