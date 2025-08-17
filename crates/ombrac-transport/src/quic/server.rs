@@ -205,7 +205,6 @@ async fn run(
 ) {
     loop {
         tokio::select! {
-            biased;
             _ = shutdown_receiver.changed() => {
                 endpoint.close(0u32.into(), b"");
                 endpoint.wait_idle().await;
