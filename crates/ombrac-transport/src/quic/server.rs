@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use ombrac_macros::{error, info};
+use ombrac_macros::{debug, error};
 use quinn::crypto::rustls::QuicServerConfig;
 use quinn::{Endpoint, ServerConfig, TransportConfig, VarInt};
 use rustls::pki_types::{CertificateDer, PrivatePkcs8KeyDer};
@@ -114,9 +114,9 @@ impl Builder {
         let server_config = self.build_server_config()?;
         let endpoint = Endpoint::server(server_config, self.listen)?;
 
-        let (stream_sender, stream_receiver) = async_channel::bounded(1024);
+        let (stream_sender, stream_receiver) = async_channel::unbounded();
         #[cfg(feature = "datagram")]
-        let (datagram_sender, datagram_receiver) = async_channel::bounded(1024);
+        let (datagram_sender, datagram_receiver) = async_channel::unbounded();
         let (shutdown_sender, shutdown_receiver) = watch::channel(());
 
         tokio::spawn(run(
@@ -231,51 +231,6 @@ async fn run(
     }
 }
 
-macro_rules! select_loop {
-    ($connection:expr, $stream_sender:expr, $remote_addr:expr) => {
-        loop {
-            match $connection.accept_bi().await {
-                Ok((send, recv)) => {
-                    let stream = Stream(send, recv);
-                    if $stream_sender.send(stream).await.is_err() {
-                        break;
-                    }
-                }
-                Err(_e) => break,
-            }
-        }
-    };
-
-    ($connection:expr, $stream_sender:expr, $datagram_sender:expr, $session:expr, $remote_addr:expr) => {
-        loop {
-            tokio::select! {
-                stream_result = async {
-                    match $connection.accept_bi().await {
-                        Ok((send, recv)) => Ok(Stream(send, recv)),
-                        Err(e) => Err(e),
-                    }
-                } => match stream_result {
-                    Ok(stream) => {
-                        if $stream_sender.send(stream).await.is_err() {
-                            break;
-                        }
-                    }
-                    Err(_e) => break
-                },
-
-                datagram = $session.accept_datagram() => match datagram {
-                    Some(value) => {
-                        if $datagram_sender.send(value).await.is_err() {
-                            break;
-                        }
-                    }
-                    None => break
-                },
-            }
-        }
-    };
-}
-
 async fn handle_connection(
     conn: quinn::Incoming,
     stream_sender: async_channel::Sender<Stream>,
@@ -284,23 +239,28 @@ async fn handle_connection(
     match conn.await {
         Ok(connection) => {
             let remote_addr = connection.remote_address();
-            info!("New connection from: {}", remote_addr);
+            debug!("QUIC Connection from {}", remote_addr);
 
             #[cfg(feature = "datagram")]
             {
                 let session = Session::with_server(connection.clone());
-                select_loop!(
-                    connection,
-                    stream_sender,
-                    datagram_sender,
-                    session,
-                    remote_addr
-                );
+                tokio::spawn(async move {
+                    while let Some(datagram) = session.accept_datagram().await {
+                        if datagram_sender.send(datagram).await.is_err() {
+                            break;
+                        }
+                    }
+                });
             }
 
-            #[cfg(not(feature = "datagram"))]
-            {
-                select_loop!(connection, stream_sender, remote_addr);
+            while let Ok((send_stream, recv_stream)) = connection.accept_bi().await {
+                if stream_sender
+                    .send(Stream(send_stream, recv_stream))
+                    .await
+                    .is_err()
+                {
+                    break;
+                }
             }
         }
         Err(e) => {
