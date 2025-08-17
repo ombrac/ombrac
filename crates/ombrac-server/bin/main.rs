@@ -11,7 +11,7 @@ use ombrac::server::{SecretValid, Server};
 use ombrac_macros::{error, info};
 use ombrac_transport::Acceptor;
 #[cfg(feature = "transport-quic")]
-use ombrac_transport::quic::{Congestion, server::Builder};
+use ombrac_transport::quic::{Congestion, TransportConfig, server::Builder};
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -209,7 +209,8 @@ async fn main() -> io::Result<()> {
             validator,
             #[cfg(feature = "datagram")]
             udp_config,
-        ).await?;
+        )
+        .await?;
     }
 
     Ok(())
@@ -222,32 +223,28 @@ fn secret_validator_from_args(args: &Args) -> SecretValid {
 
 #[cfg(feature = "transport-quic")]
 async fn quic_server_from_args(args: &Args) -> io::Result<impl Acceptor> {
-    let bind_addr = args.listen;
-    let mut builder = Builder::new(bind_addr);
-
+    let mut builder = Builder::new(args.listen);
     if let Some(cert) = &args.tls_cert
         && let Some(key) = &args.tls_key
     {
         builder.with_tls((cert.to_path_buf(), key.to_path_buf()));
     }
-
-    if let Some(value) = args.idle_timeout {
-        builder.with_max_idle_timeout(Duration::from_millis(value))?;
-    }
-
-    if let Some(value) = args.keep_alive {
-        builder.with_max_keep_alive_period(Duration::from_millis(value));
-    }
-
-    if let Some(value) = args.max_streams {
-        builder.with_max_open_bidirectional_streams(value)?;
-    }
-
     builder.with_enable_self_signed(args.insecure);
     builder.with_enable_zero_rtt(args.zero_rtt);
-    builder.with_congestion(args.congestion, args.cwnd_init);
 
-    Ok(builder.build().await?)
+    let mut transport_config = TransportConfig::default();
+    if let Some(value) = args.idle_timeout {
+        transport_config.with_max_idle_timeout(Duration::from_millis(value))?;
+    }
+    if let Some(value) = args.keep_alive {
+        transport_config.with_max_keep_alive_period(Duration::from_millis(value))?;
+    }
+    if let Some(value) = args.max_streams {
+        transport_config.with_max_open_bidirectional_streams(value)?;
+    }
+    transport_config.with_congestion(args.congestion, args.cwnd_init)?;
+
+    Ok(builder.build(transport_config).await?)
 }
 
 async fn run_server(

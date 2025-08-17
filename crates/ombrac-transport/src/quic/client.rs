@@ -2,12 +2,11 @@ use std::io;
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
 
 use arc_swap::{ArcSwap, Guard};
 use ombrac_macros::{debug, warn};
+use quinn::ClientConfig;
 use quinn::crypto::rustls::QuicClientConfig;
-use quinn::{IdleTimeout, TransportConfig, VarInt};
 use tokio::sync::Mutex;
 
 #[cfg(feature = "datagram")]
@@ -17,7 +16,8 @@ use crate::quic::datagram::Session;
 use crate::quic::stream::Stream;
 use crate::{Initiator, Reliable};
 
-use super::{Congestion, Result};
+use super::Result;
+use super::TransportConfig;
 
 #[derive(Debug)]
 pub struct Builder {
@@ -27,8 +27,6 @@ pub struct Builder {
     tls_cert: Option<PathBuf>,
     tls_skip: bool,
     enable_zero_rtt: bool,
-    transport_config: TransportConfig,
-
     enable_connection_multiplexing: bool,
 }
 
@@ -45,7 +43,6 @@ impl Builder {
             tls_cert: None,
             tls_skip: false,
             enable_zero_rtt: false,
-            transport_config: TransportConfig::default(),
             enable_connection_multiplexing: true,
         }
     }
@@ -80,63 +77,47 @@ impl Builder {
         self
     }
 
-    pub fn with_congestion(
-        &mut self,
-        congestion: Congestion,
-        initial_window: Option<u64>,
-    ) -> &mut Self {
-        use quinn::congestion;
-
-        let congestion: Arc<dyn congestion::ControllerFactory + Send + Sync + 'static> =
-            match congestion {
-                Congestion::Bbr => {
-                    let mut config = congestion::BbrConfig::default();
-                    if let Some(value) = initial_window {
-                        config.initial_window(value);
-                    }
-                    Arc::new(config)
-                }
-                Congestion::Cubic => {
-                    let mut config = congestion::CubicConfig::default();
-                    if let Some(value) = initial_window {
-                        config.initial_window(value);
-                    }
-                    Arc::new(config)
-                }
-                Congestion::NewReno => {
-                    let mut config = congestion::NewRenoConfig::default();
-                    if let Some(value) = initial_window {
-                        config.initial_window(value);
-                    }
-                    Arc::new(config)
-                }
-            };
-
-        self.transport_config
-            .congestion_controller_factory(congestion);
-        self
-    }
-
-    pub fn with_max_idle_timeout(&mut self, value: Duration) -> Result<&mut Self> {
-        self.transport_config
-            .max_idle_timeout(Some(IdleTimeout::try_from(value)?));
-        Ok(self)
-    }
-
-    pub fn with_max_keep_alive_period(&mut self, value: Duration) -> &mut Self {
-        self.transport_config.keep_alive_interval(Some(value));
-        self
-    }
-
-    pub fn with_max_open_bidirectional_streams(&mut self, value: u64) -> Result<&mut Self> {
-        self.transport_config
-            .max_concurrent_bidi_streams(VarInt::try_from(value)?);
-        Ok(self)
-    }
-
     pub fn with_bind_addr(mut self, addr: SocketAddr) -> Self {
         self.bind_addr = addr;
         self
+    }
+
+    pub async fn build(self, transport_config: TransportConfig) -> Result<QuicClient> {
+        let client_config = self.build_client_config(transport_config.0)?;
+        let mut endpoint = quinn::Endpoint::client(self.bind_addr)?;
+        endpoint.set_default_client_config(client_config);
+
+        let connection = endpoint
+            .connect(self.server_addr, &self.server_name)?
+            .await
+            .map_err(io::Error::other)?;
+
+        Ok(QuicClient {
+            config: self,
+            endpoint,
+            connection: ArcSwap::new(
+                Connection {
+                    inner: connection.clone(),
+                    #[cfg(feature = "datagram")]
+                    datagram_session: Session::with_client(connection),
+                }
+                .into(),
+            ),
+            reconnect_lock: Mutex::new(()),
+        })
+    }
+
+    fn build_client_config(
+        &self,
+        transport_config: quinn::TransportConfig,
+    ) -> Result<ClientConfig> {
+        let client_crypto = self.build_tls_config()?;
+        let mut client_config =
+            quinn::ClientConfig::new(Arc::new(QuicClientConfig::try_from(client_crypto)?));
+
+        client_config.transport_config(Arc::new(transport_config));
+
+        Ok(client_config)
     }
 
     fn build_tls_config(&self) -> Result<rustls::ClientConfig> {
@@ -166,34 +147,6 @@ impl Builder {
         }
 
         Ok(config)
-    }
-
-    pub async fn build(self) -> Result<QuicClient> {
-        let client_crypto = self.build_tls_config()?;
-        let client_config =
-            quinn::ClientConfig::new(Arc::new(QuicClientConfig::try_from(client_crypto)?));
-
-        let mut endpoint = quinn::Endpoint::client(self.bind_addr)?;
-        endpoint.set_default_client_config(client_config);
-
-        let connection = endpoint
-            .connect(self.server_addr, &self.server_name)?
-            .await
-            .map_err(io::Error::other)?;
-
-        Ok(QuicClient {
-            config: self,
-            endpoint,
-            connection: ArcSwap::new(
-                Connection {
-                    inner: connection.clone(),
-                    #[cfg(feature = "datagram")]
-                    datagram_session: Session::with_client(connection),
-                }
-                .into(),
-            ),
-            reconnect_lock: Mutex::new(()),
-        })
     }
 }
 

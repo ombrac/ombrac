@@ -2,11 +2,10 @@ use std::io;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
 
 use ombrac_macros::{debug, error};
 use quinn::crypto::rustls::QuicServerConfig;
-use quinn::{Endpoint, ServerConfig, TransportConfig, VarInt};
+use quinn::{Endpoint, ServerConfig};
 use rustls::pki_types::{CertificateDer, PrivatePkcs8KeyDer};
 use tokio::sync::watch;
 
@@ -17,7 +16,7 @@ use crate::quic::datagram::{Datagram, Session};
 use crate::quic::stream::Stream;
 use crate::{Acceptor, Reliable};
 
-use super::Congestion;
+use super::TransportConfig;
 use super::error::{Error, Result};
 
 #[derive(Debug)]
@@ -26,7 +25,6 @@ pub struct Builder {
     enable_zero_rtt: bool,
     enable_self_signed: bool,
     tls_paths: Option<(PathBuf, PathBuf)>,
-    transport_config: TransportConfig,
 }
 
 impl Builder {
@@ -36,7 +34,6 @@ impl Builder {
             tls_paths: None,
             enable_zero_rtt: false,
             enable_self_signed: false,
-            transport_config: TransportConfig::default(),
         }
     }
 
@@ -55,63 +52,8 @@ impl Builder {
         self
     }
 
-    pub fn with_congestion(
-        &mut self,
-        congestion: Congestion,
-        initial_window: Option<u64>,
-    ) -> &mut Self {
-        use quinn::congestion;
-
-        let congestion: Arc<dyn congestion::ControllerFactory + Send + Sync + 'static> =
-            match congestion {
-                Congestion::Bbr => {
-                    let mut config = congestion::BbrConfig::default();
-                    if let Some(value) = initial_window {
-                        config.initial_window(value);
-                    }
-                    Arc::new(config)
-                }
-                Congestion::Cubic => {
-                    let mut config = congestion::CubicConfig::default();
-                    if let Some(value) = initial_window {
-                        config.initial_window(value);
-                    }
-                    Arc::new(config)
-                }
-                Congestion::NewReno => {
-                    let mut config = congestion::NewRenoConfig::default();
-                    if let Some(value) = initial_window {
-                        config.initial_window(value);
-                    }
-                    Arc::new(config)
-                }
-            };
-
-        self.transport_config
-            .congestion_controller_factory(congestion);
-        self
-    }
-
-    pub fn with_max_idle_timeout(&mut self, value: Duration) -> Result<&mut Self> {
-        use quinn::IdleTimeout;
-        self.transport_config
-            .max_idle_timeout(Some(IdleTimeout::try_from(value)?));
-        Ok(self)
-    }
-
-    pub fn with_max_keep_alive_period(&mut self, value: Duration) -> &mut Self {
-        self.transport_config.keep_alive_interval(Some(value));
-        self
-    }
-
-    pub fn with_max_open_bidirectional_streams(&mut self, value: u64) -> Result<&mut Self> {
-        self.transport_config
-            .max_concurrent_bidi_streams(VarInt::try_from(value)?);
-        Ok(self)
-    }
-
-    pub async fn build(self) -> Result<QuicServer> {
-        let server_config = self.build_server_config()?;
+    pub async fn build(self, transport_config: TransportConfig) -> Result<QuicServer> {
+        let server_config = self.build_server_config(transport_config.0)?;
         let endpoint = Endpoint::server(server_config, self.listen)?;
 
         let (stream_sender, stream_receiver) = async_channel::unbounded();
@@ -135,7 +77,20 @@ impl Builder {
         })
     }
 
-    fn build_server_config(&self) -> Result<ServerConfig> {
+    fn build_server_config(
+        &self,
+        transport_config: quinn::TransportConfig,
+    ) -> Result<ServerConfig> {
+        let server_crypto = self.build_tls_config()?;
+        let mut server_config =
+            ServerConfig::with_crypto(Arc::new(QuicServerConfig::try_from(server_crypto)?));
+
+        server_config.transport_config(Arc::new(transport_config));
+
+        Ok(server_config)
+    }
+
+    fn build_tls_config(&self) -> Result<rustls::ServerConfig> {
         let (certs, key) = if self.enable_self_signed {
             let cert = rcgen::generate_simple_self_signed(vec!["localhost".into()])?;
             let key = PrivatePkcs8KeyDer::from(cert.key_pair.serialize_der()).into();
@@ -151,22 +106,19 @@ impl Builder {
             (certs, key)
         };
 
-        let mut server_crypto = rustls::ServerConfig::builder()
+        let mut config = rustls::ServerConfig::builder()
             .with_no_client_auth()
             .with_single_cert(certs, key)?;
 
-        server_crypto.alpn_protocols = vec![b"h3".to_vec()];
+        config.alpn_protocols = vec![b"h3".to_vec()];
 
         // Zero RTT
         if self.enable_zero_rtt {
-            server_crypto.send_half_rtt_data = true;
-            server_crypto.max_early_data_size = u32::MAX;
+            config.send_half_rtt_data = true;
+            config.max_early_data_size = u32::MAX;
         }
 
-        let server_config =
-            ServerConfig::with_crypto(Arc::new(QuicServerConfig::try_from(server_crypto)?));
-
-        Ok(server_config)
+        Ok(config)
     }
 }
 
@@ -239,8 +191,8 @@ async fn handle_connection(
 ) {
     match conn.await {
         Ok(connection) => {
-            let remote_addr = connection.remote_address();
-            debug!("QUIC Connection from {}", remote_addr);
+            let _remote_addr = connection.remote_address();
+            debug!("QUIC Connection from {}", _remote_addr);
 
             #[cfg(feature = "datagram")]
             {
@@ -264,8 +216,8 @@ async fn handle_connection(
                 }
             }
         }
-        Err(e) => {
-            error!("Failed to accept connection: {}", e)
+        Err(_e) => {
+            error!("Failed to accept connection: {_e}")
         }
     }
 }
