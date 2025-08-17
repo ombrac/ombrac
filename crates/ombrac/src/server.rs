@@ -21,10 +21,10 @@ impl<T: Acceptor> Server<T> {
         Self { transport }
     }
 
+    #[inline]
     pub async fn accept_connect(&self) -> io::Result<Stream<impl Reliable>> {
-        let mut stream = self.transport.accept_bidirectional().await?;
-        let connect = Connect::from_async_read(&mut stream).await?;
-        Ok(Stream(stream, connect))
+        let stream = self.transport.accept_bidirectional().await?;
+        Ok(Stream(stream))
     }
 }
 
@@ -37,9 +37,11 @@ impl Server<()> {
         V: Validator,
         R: Reliable + Send + Sync + 'static,
     {
-        let target = stream.1.address.to_socket_addr().await?;
+        let connect = Connect::from_async_read(&mut stream).await?;
+
+        let target = connect.address.to_socket_addr().await?;
         validator
-            .is_valid(stream.1.secret, Some(target), None)
+            .is_valid(connect.secret, Some(target), None)
             .await?;
 
         let mut tcp_stream = TcpStream::connect(target).await?;
@@ -80,6 +82,7 @@ pub mod datagram {
 
     impl<T: Acceptor> Server<T> {
         #[cfg(feature = "datagram")]
+        #[inline]
         pub async fn accept_associate(&self) -> io::Result<Datagram<impl Unreliable>> {
             let datagram = self.transport.accept_datagram().await?;
             Ok(Datagram(datagram))

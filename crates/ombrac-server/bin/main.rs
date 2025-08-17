@@ -1,6 +1,7 @@
 use std::io;
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
 use clap::Parser;
@@ -8,9 +9,9 @@ use clap::Parser;
 use ombrac::server::datagram::UdpHandlerConfig;
 use ombrac::server::{SecretValid, Server};
 use ombrac_macros::{error, info};
+use ombrac_transport::Acceptor;
 #[cfg(feature = "transport-quic")]
-use ombrac_transport::quic::{Congestion, server::Builder};
-use tokio::task::JoinHandle;
+use ombrac_transport::quic::{Congestion, TransportConfig, server::Builder};
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -110,7 +111,7 @@ struct Args {
         long,
         help_heading = "Transport QUIC",
         value_name = "NUM",
-        default_value = "100",
+        default_value = "1000",
         verbatim_doc_comment
     )]
     max_streams: Option<u64>,
@@ -191,107 +192,113 @@ async fn main() -> io::Result<()> {
         subscriber.with_writer(non_blocking).init()
     }
 
+    let validator = secret_validator_from_args(&args);
+
+    #[cfg(feature = "datagram")]
+    let udp_config = Arc::new(UdpHandlerConfig {
+        idle_timeout: Duration::from_millis(args.udp_idle_timeout),
+        buffer_size: args.udp_buffer_size,
+    });
+
     #[cfg(feature = "transport-quic")]
     {
-        let quic_server = quic_server_from_args(&args).await?;
-
-        tokio::join!(quic_server).0?;
+        info!("Server listening on {}", args.listen);
+        let transport = Arc::new(Server::new(quic_server_from_args(&args).await?));
+        run_server(
+            transport,
+            validator,
+            #[cfg(feature = "datagram")]
+            udp_config,
+        )
+        .await?;
     }
 
     Ok(())
 }
 
-#[cfg(feature = "transport-quic")]
-async fn quic_server_from_args(args: &Args) -> io::Result<JoinHandle<()>> {
-    let bind_addr = args.listen;
-    let mut builder = Builder::new(bind_addr);
+fn secret_validator_from_args(args: &Args) -> SecretValid {
+    let secret = *blake3::hash(args.secret.as_bytes()).as_bytes();
+    SecretValid(secret)
+}
 
+#[cfg(feature = "transport-quic")]
+async fn quic_server_from_args(args: &Args) -> io::Result<impl Acceptor> {
+    let mut builder = Builder::new(args.listen);
     if let Some(cert) = &args.tls_cert
         && let Some(key) = &args.tls_key
     {
         builder.with_tls((cert.to_path_buf(), key.to_path_buf()));
     }
-
-    if let Some(value) = args.idle_timeout {
-        builder.with_max_idle_timeout(Duration::from_millis(value))?;
-    }
-
-    if let Some(value) = args.keep_alive {
-        builder.with_max_keep_alive_period(Duration::from_millis(value));
-    }
-
-    if let Some(value) = args.max_streams {
-        builder.with_max_open_bidirectional_streams(value)?;
-    }
-
     builder.with_enable_self_signed(args.insecure);
     builder.with_enable_zero_rtt(args.zero_rtt);
-    builder.with_congestion(args.congestion, args.cwnd_init);
 
-    let secret = *blake3::hash(args.secret.as_bytes()).as_bytes();
+    let mut transport_config = TransportConfig::default();
+    if let Some(value) = args.idle_timeout {
+        transport_config.with_max_idle_timeout(Duration::from_millis(value))?;
+    }
+    if let Some(value) = args.keep_alive {
+        transport_config.with_max_keep_alive_period(Duration::from_millis(value))?;
+    }
+    if let Some(value) = args.max_streams {
+        transport_config.with_max_open_bidirectional_streams(value)?;
+    }
+    transport_config.with_congestion(args.congestion, args.cwnd_init)?;
+
+    Ok(builder.build(transport_config).await?)
+}
+
+async fn run_server(
+    transport: Arc<Server<impl Acceptor>>,
+    validator: SecretValid,
+    #[cfg(feature = "datagram")] udp_config: Arc<UdpHandlerConfig>,
+) -> io::Result<()> {
+    let connect_handle = {
+        let transport = Arc::clone(&transport);
+        tokio::spawn(async move {
+            loop {
+                match transport.accept_connect().await {
+                    Ok(stream) => tokio::spawn(async move {
+                        if let Err(_error) = Server::handle_connect(&validator, stream).await {
+                            error!("{_error}");
+                        }
+                    }),
+
+                    Err(error) => return Err::<(), io::Error>(error),
+                };
+            }
+        })
+    };
 
     #[cfg(feature = "datagram")]
-    let udp_config = std::sync::Arc::new(UdpHandlerConfig {
-        idle_timeout: Duration::from_millis(args.udp_idle_timeout),
-        buffer_size: args.udp_buffer_size,
-    });
-
-    let validator = SecretValid(secret);
-    let transport = Server::new(builder.build().await?);
-
-    let task = tokio::spawn(async move {
-        let handle_connect = |result| async move {
-            match result {
-                Ok(stream) => {
-                    if let Err(e) = Server::handle_connect(&validator, stream).await {
-                        error!("{e}");
-                    }
-                }
-                Err(e) => {
-                    error!("Failed to accept connection: {e}")
-                }
-            }
-        };
-
-        #[cfg(feature = "datagram")]
-        let handle_associate = |result, config: std::sync::Arc<UdpHandlerConfig>| async move {
-            match result {
-                Ok(datagram) => {
-                    if let Err(e) = Server::handle_associate(&validator, datagram, config).await {
-                        error!("{e}");
-                    }
-                }
-                Err(e) => {
-                    error!("Failed to accept association: {e}")
-                }
-            }
-        };
-
-        info!("Server listening on {bind_addr}");
-
-        loop {
-            #[cfg(feature = "datagram")]
-            {
+    let datagram_handle = {
+        let transport = Arc::clone(&transport);
+        tokio::spawn(async move {
+            loop {
                 let config = udp_config.clone();
-                tokio::select! {
-                    biased;
-                    result = transport.accept_connect() =>
-                        tokio::spawn(handle_connect(result)),
-                    result = transport.accept_associate() =>
-                        tokio::spawn(handle_associate(result, config)),
+                match transport.accept_associate().await {
+                    Ok(datagram) => tokio::spawn(async move {
+                        if let Err(_error) =
+                            Server::handle_associate(&validator, datagram, config).await
+                        {
+                            error!("{_error}");
+                        }
+                    }),
+
+                    Err(error) => return Err::<(), io::Error>(error),
                 };
             }
+        })
+    };
 
-            #[cfg(not(feature = "datagram"))]
-            {
-                tokio::select! {
-                    biased;
-                    result = transport.accept_connect() =>
-                        tokio::spawn(handle_connect(result)),
-                };
-            }
-        }
-    });
+    #[cfg(feature = "datagram")]
+    {
+        let (connect, datagram) = tokio::join!(connect_handle, datagram_handle);
+        connect??;
+        datagram??
+    }
 
-    Ok(task)
+    #[cfg(not(feature = "datagram"))]
+    connect_handle.await??;
+
+    Ok(())
 }

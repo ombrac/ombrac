@@ -2,11 +2,10 @@ use std::io;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
 
-use ombrac_macros::{error, info};
+use ombrac_macros::{debug, error};
 use quinn::crypto::rustls::QuicServerConfig;
-use quinn::{Endpoint, ServerConfig, TransportConfig, VarInt};
+use quinn::{Endpoint, ServerConfig};
 use rustls::pki_types::{CertificateDer, PrivatePkcs8KeyDer};
 use tokio::sync::watch;
 
@@ -17,7 +16,7 @@ use crate::quic::datagram::{Datagram, Session};
 use crate::quic::stream::Stream;
 use crate::{Acceptor, Reliable};
 
-use super::Congestion;
+use super::TransportConfig;
 use super::error::{Error, Result};
 
 #[derive(Debug)]
@@ -26,7 +25,6 @@ pub struct Builder {
     enable_zero_rtt: bool,
     enable_self_signed: bool,
     tls_paths: Option<(PathBuf, PathBuf)>,
-    transport_config: TransportConfig,
 }
 
 impl Builder {
@@ -36,7 +34,6 @@ impl Builder {
             tls_paths: None,
             enable_zero_rtt: false,
             enable_self_signed: false,
-            transport_config: TransportConfig::default(),
         }
     }
 
@@ -55,68 +52,13 @@ impl Builder {
         self
     }
 
-    pub fn with_congestion(
-        &mut self,
-        congestion: Congestion,
-        initial_window: Option<u64>,
-    ) -> &mut Self {
-        use quinn::congestion;
-
-        let congestion: Arc<dyn congestion::ControllerFactory + Send + Sync + 'static> =
-            match congestion {
-                Congestion::Bbr => {
-                    let mut config = congestion::BbrConfig::default();
-                    if let Some(value) = initial_window {
-                        config.initial_window(value);
-                    }
-                    Arc::new(config)
-                }
-                Congestion::Cubic => {
-                    let mut config = congestion::CubicConfig::default();
-                    if let Some(value) = initial_window {
-                        config.initial_window(value);
-                    }
-                    Arc::new(config)
-                }
-                Congestion::NewReno => {
-                    let mut config = congestion::NewRenoConfig::default();
-                    if let Some(value) = initial_window {
-                        config.initial_window(value);
-                    }
-                    Arc::new(config)
-                }
-            };
-
-        self.transport_config
-            .congestion_controller_factory(congestion);
-        self
-    }
-
-    pub fn with_max_idle_timeout(&mut self, value: Duration) -> Result<&mut Self> {
-        use quinn::IdleTimeout;
-        self.transport_config
-            .max_idle_timeout(Some(IdleTimeout::try_from(value)?));
-        Ok(self)
-    }
-
-    pub fn with_max_keep_alive_period(&mut self, value: Duration) -> &mut Self {
-        self.transport_config.keep_alive_interval(Some(value));
-        self
-    }
-
-    pub fn with_max_open_bidirectional_streams(&mut self, value: u64) -> Result<&mut Self> {
-        self.transport_config
-            .max_concurrent_bidi_streams(VarInt::try_from(value)?);
-        Ok(self)
-    }
-
-    pub async fn build(self) -> Result<QuicServer> {
-        let server_config = self.build_server_config()?;
+    pub async fn build(self, transport_config: TransportConfig) -> Result<QuicServer> {
+        let server_config = self.build_server_config(transport_config.0)?;
         let endpoint = Endpoint::server(server_config, self.listen)?;
 
-        let (stream_sender, stream_receiver) = async_channel::bounded(1024);
+        let (stream_sender, stream_receiver) = async_channel::unbounded();
         #[cfg(feature = "datagram")]
-        let (datagram_sender, datagram_receiver) = async_channel::bounded(1024);
+        let (datagram_sender, datagram_receiver) = async_channel::unbounded();
         let (shutdown_sender, shutdown_receiver) = watch::channel(());
 
         tokio::spawn(run(
@@ -135,7 +77,20 @@ impl Builder {
         })
     }
 
-    fn build_server_config(&self) -> Result<ServerConfig> {
+    fn build_server_config(
+        &self,
+        transport_config: quinn::TransportConfig,
+    ) -> Result<ServerConfig> {
+        let server_crypto = self.build_tls_config()?;
+        let mut server_config =
+            ServerConfig::with_crypto(Arc::new(QuicServerConfig::try_from(server_crypto)?));
+
+        server_config.transport_config(Arc::new(transport_config));
+
+        Ok(server_config)
+    }
+
+    fn build_tls_config(&self) -> Result<rustls::ServerConfig> {
         let (certs, key) = if self.enable_self_signed {
             let cert = rcgen::generate_simple_self_signed(vec!["localhost".into()])?;
             let key = PrivatePkcs8KeyDer::from(cert.key_pair.serialize_der()).into();
@@ -151,22 +106,19 @@ impl Builder {
             (certs, key)
         };
 
-        let mut server_crypto = rustls::ServerConfig::builder()
+        let mut config = rustls::ServerConfig::builder()
             .with_no_client_auth()
             .with_single_cert(certs, key)?;
 
-        server_crypto.alpn_protocols = vec![b"h3".to_vec()];
+        config.alpn_protocols = vec![b"h3".to_vec()];
 
         // Zero RTT
         if self.enable_zero_rtt {
-            server_crypto.send_half_rtt_data = true;
-            server_crypto.max_early_data_size = u32::MAX;
+            config.send_half_rtt_data = true;
+            config.max_early_data_size = u32::MAX;
         }
 
-        let server_config =
-            ServerConfig::with_crypto(Arc::new(QuicServerConfig::try_from(server_crypto)?));
-
-        Ok(server_config)
+        Ok(config)
     }
 }
 
@@ -184,11 +136,13 @@ impl QuicServer {
 }
 
 impl Acceptor for QuicServer {
+    #[inline]
     async fn accept_bidirectional(&self) -> io::Result<impl Reliable> {
         self.stream_receiver.recv().await.map_err(io::Error::other)
     }
 
     #[cfg(feature = "datagram")]
+    #[inline]
     async fn accept_datagram(&self) -> io::Result<impl Unreliable> {
         self.datagram_receiver
             .recv()
@@ -205,7 +159,6 @@ async fn run(
 ) {
     loop {
         tokio::select! {
-            biased;
             _ = shutdown_receiver.changed() => {
                 endpoint.close(0u32.into(), b"");
                 endpoint.wait_idle().await;
@@ -231,51 +184,6 @@ async fn run(
     }
 }
 
-macro_rules! select_loop {
-    ($connection:expr, $stream_sender:expr, $remote_addr:expr) => {
-        loop {
-            match $connection.accept_bi().await {
-                Ok((send, recv)) => {
-                    let stream = Stream(send, recv);
-                    if $stream_sender.send(stream).await.is_err() {
-                        break;
-                    }
-                }
-                Err(_e) => break,
-            }
-        }
-    };
-
-    ($connection:expr, $stream_sender:expr, $datagram_sender:expr, $session:expr, $remote_addr:expr) => {
-        loop {
-            tokio::select! {
-                stream_result = async {
-                    match $connection.accept_bi().await {
-                        Ok((send, recv)) => Ok(Stream(send, recv)),
-                        Err(e) => Err(e),
-                    }
-                } => match stream_result {
-                    Ok(stream) => {
-                        if $stream_sender.send(stream).await.is_err() {
-                            break;
-                        }
-                    }
-                    Err(_e) => break
-                },
-
-                datagram = $session.accept_datagram() => match datagram {
-                    Some(value) => {
-                        if $datagram_sender.send(value).await.is_err() {
-                            break;
-                        }
-                    }
-                    None => break
-                },
-            }
-        }
-    };
-}
-
 async fn handle_connection(
     conn: quinn::Incoming,
     stream_sender: async_channel::Sender<Stream>,
@@ -283,28 +191,33 @@ async fn handle_connection(
 ) {
     match conn.await {
         Ok(connection) => {
-            let remote_addr = connection.remote_address();
-            info!("New connection from: {}", remote_addr);
+            let _remote_addr = connection.remote_address();
+            debug!("QUIC Connection from {}", _remote_addr);
 
             #[cfg(feature = "datagram")]
             {
                 let session = Session::with_server(connection.clone());
-                select_loop!(
-                    connection,
-                    stream_sender,
-                    datagram_sender,
-                    session,
-                    remote_addr
-                );
+                tokio::spawn(async move {
+                    while let Some(datagram) = session.accept_datagram().await {
+                        if datagram_sender.send(datagram).await.is_err() {
+                            break;
+                        }
+                    }
+                });
             }
 
-            #[cfg(not(feature = "datagram"))]
-            {
-                select_loop!(connection, stream_sender, remote_addr);
+            while let Ok((send_stream, recv_stream)) = connection.accept_bi().await {
+                if stream_sender
+                    .send(Stream(send_stream, recv_stream))
+                    .await
+                    .is_err()
+                {
+                    break;
+                }
             }
         }
-        Err(e) => {
-            error!("Failed to accept connection: {}", e)
+        Err(_e) => {
+            error!("Failed to accept connection: {_e}")
         }
     }
 }

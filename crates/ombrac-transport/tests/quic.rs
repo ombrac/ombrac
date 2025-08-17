@@ -1,3 +1,4 @@
+use ombrac_transport::quic::TransportConfig;
 use ombrac_transport::quic::client::Builder as QuicClientBuilder;
 use ombrac_transport::quic::server::Builder as QuicServerBuilder;
 
@@ -17,8 +18,14 @@ async fn test_quic_transport() {
     let mut client_builder = QuicClientBuilder::new(listen_addr, server_name);
     client_builder.with_tls_skip(true);
 
-    let server = server_builder.build().await.unwrap();
-    let client = client_builder.build().await.unwrap();
+    let server = server_builder
+        .build(TransportConfig::default())
+        .await
+        .unwrap();
+    let client = client_builder
+        .build(TransportConfig::default())
+        .await
+        .unwrap();
 
     support::run_transport_tests(client, server).await;
 }

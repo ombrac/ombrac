@@ -197,12 +197,11 @@ impl TryFrom<&str> for Address {
             return Ok(Address::IPv6(addr));
         }
 
-        if let Some((domain, port_str)) = value.rsplit_once(':') {
-            if let Ok(port) = port_str.parse::<u16>() {
-                if !domain.is_empty() {
-                    return Ok(Address::Domain(Domain::try_from(domain)?, port));
-                }
-            }
+        if let Some((domain, port_str)) = value.rsplit_once(':')
+            && let Ok(port) = port_str.parse::<u16>()
+            && !domain.is_empty()
+        {
+            return Ok(Address::Domain(Domain::try_from(domain)?, port));
         }
 
         Err(io::Error::new(

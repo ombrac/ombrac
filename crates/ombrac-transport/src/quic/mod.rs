@@ -8,8 +8,11 @@ pub mod server;
 
 use std::path::Path;
 use std::str::FromStr;
+use std::sync::Arc;
+use std::time::Duration;
 use std::{fs, io};
 
+use quinn::{IdleTimeout, VarInt};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 
 type Result<T> = std::result::Result<T, error::Error>;
@@ -30,6 +33,62 @@ impl FromStr for Congestion {
             "newreno" => Ok(Congestion::NewReno),
             _ => Err(Self::Err::InvalidCongestion),
         }
+    }
+}
+
+#[derive(Default)]
+pub struct TransportConfig(pub(crate) quinn::TransportConfig);
+
+impl TransportConfig {
+    pub fn with_congestion(
+        &mut self,
+        congestion: Congestion,
+        initial_window: Option<u64>,
+    ) -> Result<&mut Self> {
+        use quinn::congestion;
+
+        let congestion: Arc<dyn congestion::ControllerFactory + Send + Sync + 'static> =
+            match congestion {
+                Congestion::Bbr => {
+                    let mut config = congestion::BbrConfig::default();
+                    if let Some(value) = initial_window {
+                        config.initial_window(value);
+                    }
+                    Arc::new(config)
+                }
+                Congestion::Cubic => {
+                    let mut config = congestion::CubicConfig::default();
+                    if let Some(value) = initial_window {
+                        config.initial_window(value);
+                    }
+                    Arc::new(config)
+                }
+                Congestion::NewReno => {
+                    let mut config = congestion::NewRenoConfig::default();
+                    if let Some(value) = initial_window {
+                        config.initial_window(value);
+                    }
+                    Arc::new(config)
+                }
+            };
+
+        self.0.congestion_controller_factory(congestion);
+        Ok(self)
+    }
+
+    pub fn with_max_idle_timeout(&mut self, value: Duration) -> Result<&mut Self> {
+        self.0.max_idle_timeout(Some(IdleTimeout::try_from(value)?));
+        Ok(self)
+    }
+
+    pub fn with_max_keep_alive_period(&mut self, value: Duration) -> Result<&mut Self> {
+        self.0.keep_alive_interval(Some(value));
+        Ok(self)
+    }
+
+    pub fn with_max_open_bidirectional_streams(&mut self, value: u64) -> Result<&mut Self> {
+        self.0.max_concurrent_bidi_streams(VarInt::try_from(value)?);
+        Ok(self)
     }
 }
 

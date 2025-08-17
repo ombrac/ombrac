@@ -1,4 +1,3 @@
-use std::error::Error;
 use std::io;
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -10,7 +9,7 @@ use ombrac::client::Client;
 use ombrac_macros::info;
 use ombrac_transport::Initiator;
 #[cfg(feature = "transport-quic")]
-use ombrac_transport::quic::{Congestion, client::Builder};
+use ombrac_transport::quic::{Congestion, TransportConfig, client::Builder};
 use tokio::task::JoinHandle;
 
 #[derive(Parser)]
@@ -205,7 +204,7 @@ struct Args {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn Error>> {
+async fn main() -> io::Result<()> {
     let args = Args::parse();
 
     #[cfg(feature = "tracing")]
@@ -228,13 +227,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     #[cfg(feature = "transport-quic")]
     {
         let secret = blake3::hash(args.secret.as_bytes());
-        let ombrac_client = Client::new(
-            quic_from_args(&args)
-                .await?
-                .build()
-                .await
-                .expect("QUIC Client failed to build"),
-        );
+        let ombrac_client = Client::new(quic_client_from_args(&args).await?);
 
         let client = Arc::new(ombrac_client);
         let secret = *secret.as_bytes();
@@ -264,17 +257,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
 }
 
 #[cfg(feature = "transport-quic")]
-async fn quic_from_args(args: &Args) -> Result<Builder, Box<dyn Error>> {
+async fn quic_client_from_args(args: &Args) -> io::Result<impl Initiator> {
     use std::time::Duration;
     use tokio::net::lookup_host;
 
     let name = match &args.server_name {
         Some(value) => value.to_string(),
         None => {
-            let pos = args
-                .server
-                .rfind(':')
-                .ok_or(format!("Invalid server address {}", args.server))?;
+            let pos = args.server.rfind(':').ok_or(io::Error::other(format!(
+                "Invalid server address {}",
+                args.server
+            )))?;
 
             args.server[..pos].to_string()
         }
@@ -296,43 +289,38 @@ async fn quic_from_args(args: &Args) -> Result<Builder, Box<dyn Error>> {
         });
     }
 
-    let addr = addrs.into_iter().next().ok_or(format!(
+    let addr = addrs.into_iter().next().ok_or(io::Error::other(format!(
         "Failed to resolve server address '{}'",
         args.server
-    ))?;
+    )))?;
 
     let mut builder = Builder::new(addr, name);
-
     if let Some(value) = args.bind {
         builder.with_bind(value);
     }
-
     if let Some(value) = &args.server_name {
         builder.with_server_name(value.to_string());
     }
-
     if let Some(value) = &args.tls_cert {
         builder.with_tls(value.clone());
     }
-
-    if let Some(value) = args.idle_timeout {
-        builder.with_max_idle_timeout(Duration::from_millis(value))?;
-    }
-
-    if let Some(value) = args.keep_alive {
-        builder.with_max_keep_alive_period(Duration::from_millis(value));
-    }
-
-    if let Some(value) = args.max_streams {
-        builder.with_max_open_bidirectional_streams(value)?;
-    }
-
     builder.with_tls_skip(args.insecure);
     builder.with_enable_zero_rtt(args.zero_rtt);
     builder.with_enable_connection_multiplexing(!args.no_multiplex);
-    builder.with_congestion(args.congestion, args.cwnd_init);
 
-    Ok(builder)
+    let mut transport_config = TransportConfig::default();
+    if let Some(value) = args.idle_timeout {
+        transport_config.with_max_idle_timeout(Duration::from_millis(value))?;
+    }
+    if let Some(value) = args.keep_alive {
+        transport_config.with_max_keep_alive_period(Duration::from_millis(value))?;
+    }
+    if let Some(value) = args.max_streams {
+        transport_config.with_max_open_bidirectional_streams(value)?;
+    }
+    transport_config.with_congestion(args.congestion, args.cwnd_init)?;
+
+    Ok(builder.build(transport_config).await?)
 }
 
 #[cfg(feature = "endpoint-http")]
