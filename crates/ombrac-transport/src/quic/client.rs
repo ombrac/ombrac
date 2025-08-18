@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use arc_swap::{ArcSwap, Guard};
-use ombrac_macros::{debug, error, warn};
+use ombrac_macros::{debug, error, info, warn};
 use quinn::ClientConfig;
 use quinn::crypto::rustls::QuicClientConfig;
 use tokio::sync::Mutex;
@@ -92,6 +92,11 @@ impl Builder {
             .await
             .map_err(io::Error::other)?;
 
+        info!(
+            "Connection established with {} at {}",
+            &self.server_name, &self.server_addr
+        );
+
         Ok(QuicClient {
             config: self,
             endpoint,
@@ -177,12 +182,12 @@ impl Initiator for QuicClient {
                 | Err(quinn::ConnectionError::LocallyClosed)
                 | Err(quinn::ConnectionError::Reset)
                 | Err(quinn::ConnectionError::TimedOut) => {
-                    warn!("QUIC connection lost, attempting to reconnect");
+                    warn!("Connection lost, attempting to reconnect");
                     let (send, recv) = self.reconnect_and_open_bi(conn_arc).await?;
                     Ok(Stream(send, recv))
                 }
                 Err(e) => {
-                    error!("Unexpected QUIC connection error: {:?}", e);
+                    error!("Unexpected connection error: {:?}", e);
                     return Err(io::Error::other(e));
                 }
             }
@@ -196,7 +201,7 @@ impl Initiator for QuicClient {
             .datagram_session
             .open_datagram()
             .await
-            .ok_or(io::Error::other("connection closed"))
+            .ok_or(io::Error::other("Connection closed"))
     }
 }
 
@@ -258,7 +263,7 @@ impl QuicClient {
         };
 
         debug!(
-            "QUIC Connection{} established with {} at {}",
+            "Connection{} established with {} at {}",
             match _is_zero_rtt {
                 true => "(0-RTT)",
                 _ => "",
