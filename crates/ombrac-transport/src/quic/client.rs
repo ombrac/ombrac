@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use arc_swap::{ArcSwap, Guard};
-use ombrac_macros::{debug, warn};
+use ombrac_macros::{debug, error, warn};
 use quinn::ClientConfig;
 use quinn::crypto::rustls::QuicClientConfig;
 use tokio::sync::Mutex;
@@ -172,13 +172,19 @@ impl Initiator for QuicClient {
         } else {
             match conn_arc.inner.open_bi().await {
                 Ok((send, recv)) => Ok(Stream(send, recv)),
-                Err(_e @ quinn::ConnectionError::ConnectionClosed(_))
-                | Err(_e @ quinn::ConnectionError::LocallyClosed)
-                | Err(_e @ quinn::ConnectionError::ApplicationClosed(_)) => {
+                Err(quinn::ConnectionError::ApplicationClosed(_))
+                | Err(quinn::ConnectionError::ConnectionClosed(_))
+                | Err(quinn::ConnectionError::LocallyClosed)
+                | Err(quinn::ConnectionError::Reset)
+                | Err(quinn::ConnectionError::TimedOut) => {
+                    warn!("QUIC connection lost, attempting to reconnect");
                     let (send, recv) = self.reconnect_and_open_bi(conn_arc).await?;
                     Ok(Stream(send, recv))
                 }
-                Err(e) => Err(io::Error::other(e)),
+                Err(e) => {
+                    error!("Unexpected QUIC connection error: {:?}", e);
+                    return Err(io::Error::other(e));
+                }
             }
         }
     }
