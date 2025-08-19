@@ -336,7 +336,7 @@ async fn run_http_server<I: Initiator>(
     let listener = TcpListener::bind(address).await?;
 
     let handle = tokio::spawn(async move {
-        info!("HTTP Server Listening on {}", address);
+        info!("HTTP/HTTPS Server Listening on {}", address);
 
         HttpServer::run(listener, secret, ombrac, shutdown_signal)
             .await
