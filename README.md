@@ -65,9 +65,7 @@ ombrac-client -s "example.com:443" -k "secret"
 ```
 Will sets up a SOCKS5 server on 127.0.0.1:1080, forwarding traffic to example.com:443.
 
-When using a self-signed certificate, the client requires both the `--server-name` parameter and the `--tls-cert` path to be explicitly configured. 
-
-Alternatively, you can use the `--insecure` option to skip TLS verification. **This is not recommended for production environments as it bypasses certificate validation, potentially exposing your communication to security risks.**
+Alternatively, you can use the `--tls-mode insecure` option to skip TLS verification. **This is not recommended for production environments as it bypasses certificate validation, potentially exposing your communication to security risks.**
 
 
 #### Run the container
@@ -78,7 +76,7 @@ docker run --name ombrac-server \
   -dit ghcr.io/ombrac/ombrac/ombrac-server:latest \
   -l 0.0.0.0:2098 \
   -k secret \
-  --insecure
+  --tls-mode insecure
 ```
 
 ```shell
@@ -90,7 +88,7 @@ docker run --name ombrac-client \
   -k secret \
   --socks 0.0.0.0:1080 \
   --log-level INFO \
-  --insecure
+  --tls-mode insecure
 ```
 
 ## Full Options
@@ -101,31 +99,72 @@ docker run --name ombrac-client \
 Usage: ombrac-server [OPTIONS] --secret <STR> --listen <ADDR>
 
 Options:
-  -h, --help     Print help
-  -V, --version  Print version
+  -h, --help
+          Print help (see a summary with '-h')
 
-Service Secret:
-  -k, --secret <STR>  Protocol Secret
+  -V, --version
+          Print version
 
-Transport QUIC:
-  -l, --listen <ADDR>           The address to bind for QUIC transport
-      --tls-cert <FILE>         Path to the TLS certificate file
-      --tls-key <FILE>          Path to the TLS private key file
-      --insecure                When enabled, the server will generate a self-signed TLS certificate
-                                and use it for the QUIC connection. This mode is useful for testing
-                                but should not be used in production
-      --zero-rtt                Enable 0-RTT for faster connection establishment (may reduce security)
-      --congestion <ALGORITHM>  Congestion control algorithm to use (e.g. bbr, cubic, newreno) [default: bbr]
-      --cwnd-init <NUM>         Initial congestion window size in bytes
-      --idle-timeout <TIME>     Maximum idle time (in milliseconds) before closing the connection
-                                30 second default recommended by RFC 9308 [default: 30000]
-      --keep-alive <TIME>       Keep-alive interval (in milliseconds) [default: 8000]
-      --max-streams <NUM>       Maximum number of bidirectional streams that can be open simultaneously [default: 100]
+Required:
+  -k, --secret <STR>
+          Protocol Secret
+
+  -l, --listen <ADDR>
+          The address to bind for transport
+
+Transport (QUIC):
+      --tls-mode <TLS_MODE>
+          Set the TLS mode for the connection
+          Possible values:
+          - tls:      Standard TLS. The client verifies the server's certificate
+          - m-tls:    Mutual TLS with client and server certificate verification
+          - insecure: Generates a self-signed certificate on the fly with `SANs` set to `127.0.0.1` (for testing only)
+          [default: tls]
+
+      --ca-cert <FILE>
+          Path to the Certificate Authority (CA) certificate file
+          Used in 'TLS' and 'mTLS' modes
+
+      --tls-cert <FILE>
+          Path to the TLS certificate file
+
+      --tls-key <FILE>
+          Path to the TLS private key file
+
+      --zero-rtt
+          Enable 0-RTT for faster connection establishment (may reduce security)
+
+      --congestion <ALGORITHM>
+          Congestion control algorithm to use (e.g. bbr, cubic, newreno)
+          [default: bbr]
+
+      --cwnd-init <NUM>
+          Initial congestion window size in bytes
+
+      --idle-timeout <TIME>
+          Maximum idle time (in milliseconds) before closing the connection
+          30 second default recommended by RFC 9308
+          [default: 30000]
+
+      --keep-alive <TIME>
+          Keep-alive interval (in milliseconds)
+          [default: 8000]
+
+      --max-streams <NUM>
+          Maximum number of bidirectional streams that can be open simultaneously
+          [default: 1000]
 
 Logging:
-      --log-level <LEVEL>  Logging level (e.g., INFO, WARN, ERROR) [default: WARN]
-      --log-dir <PATH>     Path to the log directory
-      --log-prefix <STR>   Prefix for log file names (only used when log-dir is specified) [default: log]
+      --log-level <LEVEL>
+          Logging level (e.g., INFO, WARN, ERROR)
+          [default: WARN]
+
+      --log-dir <PATH>
+          Path to the log directory
+
+      --log-prefix <STR>
+          Prefix for log file names (only used when log-dir is specified)
+          [default: log]
 ```
 
 ### Client
@@ -133,40 +172,96 @@ Logging:
 Usage: ombrac-client [OPTIONS] --secret <STR> --server <ADDR>
 
 Options:
-  -h, --help     Print help
-  -V, --version  Print version
+  -h, --help
+          Print help (see a summary with '-h')
+  -V, --version
+          Print version
 
-Service Secret:
-  -k, --secret <STR>  Protocol Secret
+Required:
+  -k, --secret <STR>
+          Protocol Secret
+  -s, --server <ADDR>
+          Address of the server to connect to
 
-Endpoint HTTP:
-      --http <ADDR>  The address to bind for the HTTP/HTTPS server
+Endpoint:
+      --http <ADDR>
+          The address to bind for the HTTP/HTTPS server
+      --socks <ADDR>
+          The address to bind for the SOCKS server
+          [default: 127.0.0.1:1080]
 
-Endpoint SOCKS:
-      --socks <ADDR>  The address to bind for the SOCKS server [default: 127.0.0.1:1080]
+Transport (QUIC):
+      --bind <ADDR>
+          The address to bind for QUIC transport
 
-Transport QUIC:
-      --bind <ADDR>             The address to bind for QUIC transport
-  -s, --server <ADDR>           Address of the server to connect to
-      --server-name <STR>       Name of the server to connect (derived from `server` if not provided)
-      --tls-cert <FILE>         Path to the TLS certificate file
-      --insecure                Skip TLS certificate verification (insecure, for testing only)
-      --zero-rtt                Enable 0-RTT for faster connection establishment (may reduce security)
-      --no-multiplex            Disable connection multiplexing (each stream uses a separate QUIC connection)
-                                This may be useful in special network environments where multiplexing causes issues
-      --congestion <ALGORITHM>  Congestion control algorithm to use (e.g. bbr, cubic, newreno) [default: bbr]
-      --cwnd-init <NUM>         Initial congestion window size in bytes
-      --idle-timeout <TIME>     Maximum idle time (in milliseconds) before closing the connection
-                                30 second default recommended by RFC 9308 [default: 30000]
-      --keep-alive <TIME>       Keep-alive interval (in milliseconds) [default: 8000]
-      --max-streams <NUM>       Maximum number of bidirectional streams that can be open simultaneously [default: 100]
-  -4, --prefer-ipv4             Try to resolve domain name to IPv4 addresses first
-  -6                            Try to resolve domain name to IPv6 addresses first
+      --server-name <STR>
+          Name of the server to connect (derived from `server` if not provided)
+
+      --tls-mode <TLS_MODE>
+          Set the TLS mode for the connection
+          Possible values:
+          - tls:      Standard TLS with server certificate verification
+          - m-tls:    Mutual TLS with client and server certificate verification
+          - insecure: Skip server certificate verification (for testing only)
+          [default: tls]
+
+      --ca-cert <FILE>
+          Path to the Certificate Authority (CA) certificate file
+          Used in 'TLS' and 'mTLS' modes
+          in 'TLS' mode, if not provided, the system's default root certificates are used
+
+      --client-cert <FILE>
+          Path to the client's TLS certificate for mTLS
+          Required when tls-mode is 'mTLS'
+
+      --client-key <FILE>
+          Path to the client's TLS private key for mTLS
+          Required when tls-mode is 'mTLS'
+
+      --zero-rtt
+          Enable 0-RTT for faster connection establishment (may reduce security)
+
+      --no-multiplex
+          Disable connection multiplexing (each stream uses a separate QUIC connection)
+          This may be useful in special network environments where multiplexing causes issues
+
+      --congestion <ALGORITHM>
+          Congestion control algorithm to use (e.g. bbr, cubic, newreno)
+          [default: bbr]
+
+      --cwnd-init <NUM>
+          Initial congestion window size in bytes
+
+      --idle-timeout <TIME>
+          Maximum idle time (in milliseconds) before closing the connection
+          30 second default recommended by RFC 9308
+          [default: 30000]
+
+      --keep-alive <TIME>
+          Keep-alive interval (in milliseconds)
+          [default: 8000]
+
+      --max-streams <NUM>
+          Maximum number of bidirectional streams that can be open simultaneously
+          [default: 100]
+
+  -4, --prefer-ipv4
+          Try to resolve domain name to IPv4 addresses first
+
+  -6, --prefer-ipv6
+          Try to resolve domain name to IPv6 addresses first
 
 Logging:
-      --log-level <LEVEL>  Logging level (e.g., INFO, WARN, ERROR) [default: WARN]
-      --log-dir <PATH>     Path to the log directory
-      --log-prefix <STR>   Prefix for log file names (only used when log-dir is specified) [default: log]
+      --log-level <LEVEL>
+          Logging level (e.g., INFO, WARN, ERROR)
+          [default: WARN]
+
+      --log-dir <PATH>
+          Path to the log directory
+
+      --log-prefix <STR>
+          Prefix for log file names (only used when log-dir is specified)
+          [default: log]
 ```
 
 ## License

@@ -26,6 +26,7 @@ pub struct Builder {
     server_addr: SocketAddr,
     tls_cert: Option<PathBuf>,
     tls_skip: bool,
+    tls_client_auth: Option<(PathBuf, PathBuf)>,
     enable_zero_rtt: bool,
     enable_connection_multiplexing: bool,
 }
@@ -41,6 +42,7 @@ impl Builder {
             server_addr,
             server_name,
             tls_cert: None,
+            tls_client_auth: None,
             tls_skip: false,
             enable_zero_rtt: false,
             enable_connection_multiplexing: true,
@@ -57,8 +59,13 @@ impl Builder {
         self
     }
 
-    pub fn with_tls(&mut self, value: PathBuf) -> &mut Self {
+    pub fn with_ca_cert(&mut self, value: PathBuf) -> &mut Self {
         self.tls_cert = Some(value);
+        self
+    }
+
+    pub fn with_client_auth(&mut self, cert: PathBuf, key: PathBuf) -> &mut Self {
+        self.tls_client_auth = Some((cert, key));
         self
     }
 
@@ -134,9 +141,15 @@ impl Builder {
             roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
         }
 
-        let mut config = rustls::ClientConfig::builder()
-            .with_root_certificates(roots)
-            .with_no_client_auth();
+        let config_builder = rustls::ClientConfig::builder().with_root_certificates(roots);
+
+        let mut config = if let Some((cert_path, key_path)) = &self.tls_client_auth {
+            let client_certs = super::load_certificates(cert_path)?;
+            let client_key = super::load_private_key(key_path)?;
+            config_builder.with_client_auth_cert(client_certs, client_key)?
+        } else {
+            config_builder.with_no_client_auth()
+        };
 
         config.alpn_protocols = vec![b"h3".to_vec()];
 
@@ -188,7 +201,7 @@ impl Initiator for QuicClient {
                 }
                 Err(e) => {
                     error!("Unexpected connection error: {:?}", e);
-                    return Err(io::Error::other(e));
+                    Err(io::Error::other(e))
                 }
             }
         }
