@@ -112,7 +112,7 @@ Required:
   -l, --listen <ADDR>
           The address to bind for transport
 
-Transport QUIC:
+Transport (QUIC):
       --tls-mode <TLS_MODE>
           Set the TLS mode for the connection
           Possible values:
@@ -202,7 +202,7 @@ Transport (QUIC):
           Possible values:
           - tls:      Standard TLS with server certificate verification
           - m-tls:    Mutual TLS with client and server certificate verification
-          - insecure: Skip server certificate verification (for testing only
+          - insecure: Skip server certificate verification (for testing only)
           [default: tls]
 
       --ca-cert <FILE>
@@ -235,17 +235,14 @@ Transport (QUIC):
       --idle-timeout <TIME>
           Maximum idle time (in milliseconds) before closing the connection
           30 second default recommended by RFC 9308
-          
           [default: 30000]
 
       --keep-alive <TIME>
           Keep-alive interval (in milliseconds)
-          
           [default: 8000]
 
       --max-streams <NUM>
           Maximum number of bidirectional streams that can be open simultaneously
-          
           [default: 100]
 
   -4, --prefer-ipv4
@@ -257,7 +254,6 @@ Transport (QUIC):
 Logging:
       --log-level <LEVEL>
           Logging level (e.g., INFO, WARN, ERROR)
-          
           [default: WARN]
 
       --log-dir <PATH>
@@ -265,7 +261,6 @@ Logging:
 
       --log-prefix <STR>
           Prefix for log file names (only used when log-dir is specified)
-          
           [default: log]
 ```
 

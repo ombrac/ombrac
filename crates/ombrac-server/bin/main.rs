@@ -47,14 +47,14 @@ struct Args {
     )]
     listen: SocketAddr,
 
-    // Transport QUIC
-    #[cfg(feature = "transport-quic")]
+    // Transport (QUIC)
     /// Set the TLS mode for the connection
+    #[cfg(feature = "transport-quic")]
     #[clap(
         long,
         value_enum,
         default_value_t = TlsMode::Tls,
-        help_heading = "Transport QUIC",
+        help_heading = "Transport (QUIC)",
     )]
     tls_mode: TlsMode,
 
@@ -63,7 +63,7 @@ struct Args {
     #[cfg(feature = "transport-quic")]
     #[clap(
         long,
-        help_heading = "Transport QUIC",
+        help_heading = "Transport (QUIC)",
         value_name = "FILE",
         verbatim_doc_comment
     )]
@@ -73,7 +73,7 @@ struct Args {
     #[cfg(feature = "transport-quic")]
     #[clap(
         long,
-        help_heading = "Transport QUIC",
+        help_heading = "Transport (QUIC)",
         value_name = "FILE",
         verbatim_doc_comment
     )]
@@ -83,14 +83,14 @@ struct Args {
     #[cfg(feature = "transport-quic")]
     #[clap(
         long,
-        help_heading = "Transport QUIC",
+        help_heading = "Transport (QUIC)",
         value_name = "FILE",
         verbatim_doc_comment
     )]
     tls_key: Option<PathBuf>,
 
     /// Enable 0-RTT for faster connection establishment (may reduce security)
-    #[clap(long, help_heading = "Transport QUIC", action, verbatim_doc_comment)]
+    #[clap(long, help_heading = "Transport (QUIC)", action, verbatim_doc_comment)]
     #[cfg(feature = "transport-quic")]
     zero_rtt: bool,
 
@@ -98,7 +98,7 @@ struct Args {
     #[cfg(feature = "transport-quic")]
     #[clap(
         long,
-        help_heading = "Transport QUIC",
+        help_heading = "Transport (QUIC)",
         value_name = "ALGORITHM",
         default_value = "bbr",
         verbatim_doc_comment
@@ -109,7 +109,7 @@ struct Args {
     #[cfg(feature = "transport-quic")]
     #[clap(
         long,
-        help_heading = "Transport QUIC",
+        help_heading = "Transport (QUIC)",
         value_name = "NUM",
         verbatim_doc_comment
     )]
@@ -120,7 +120,7 @@ struct Args {
     #[cfg(feature = "transport-quic")]
     #[clap(
         long,
-        help_heading = "Transport QUIC",
+        help_heading = "Transport (QUIC)",
         value_name = "TIME",
         default_value = "30000",
         verbatim_doc_comment
@@ -131,7 +131,7 @@ struct Args {
     #[cfg(feature = "transport-quic")]
     #[clap(
         long,
-        help_heading = "Transport QUIC",
+        help_heading = "Transport (QUIC)",
         value_name = "TIME",
         default_value = "8000",
         verbatim_doc_comment
@@ -142,7 +142,7 @@ struct Args {
     #[cfg(feature = "transport-quic")]
     #[clap(
         long,
-        help_heading = "Transport QUIC",
+        help_heading = "Transport (QUIC)",
         value_name = "NUM",
         default_value = "1000",
         verbatim_doc_comment
