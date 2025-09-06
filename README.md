@@ -123,7 +123,7 @@ Transport (QUIC):
 
       --ca-cert <FILE>
           Path to the Certificate Authority (CA) certificate file
-          Used in 'Tls' and 'MTls' modes
+          Used in 'TLS' and 'mTLS' modes
 
       --tls-cert <FILE>
           Path to the TLS certificate file

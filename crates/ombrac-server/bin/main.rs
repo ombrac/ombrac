@@ -59,7 +59,7 @@ struct Args {
     tls_mode: TlsMode,
 
     /// Path to the Certificate Authority (CA) certificate file
-    /// Used in 'Tls' and 'MTls' modes
+    /// Used in 'TLS' and 'mTLS' modes
     #[cfg(feature = "transport-quic")]
     #[clap(
         long,
