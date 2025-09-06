@@ -25,6 +25,7 @@ pub struct Builder {
     enable_zero_rtt: bool,
     enable_self_signed: bool,
     tls_paths: Option<(PathBuf, PathBuf)>,
+    tls_ca_path: Option<PathBuf>,
 }
 
 impl Builder {
@@ -32,9 +33,15 @@ impl Builder {
         Self {
             listen,
             tls_paths: None,
+            tls_ca_path: None,
             enable_zero_rtt: false,
             enable_self_signed: false,
         }
+    }
+
+    pub fn tls_ca(&mut self, paths: PathBuf) -> &mut Self {
+        self.tls_ca_path = Some(paths);
+        self
     }
 
     pub fn with_tls(&mut self, paths: (PathBuf, PathBuf)) -> &mut Self {
@@ -92,7 +99,7 @@ impl Builder {
 
     fn build_tls_config(&self) -> Result<rustls::ServerConfig> {
         let (certs, key) = if self.enable_self_signed {
-            let cert = rcgen::generate_simple_self_signed(vec!["localhost".into()])?;
+            let cert = rcgen::generate_simple_self_signed(vec!["127.0.0.1".into()])?;
             let key = PrivatePkcs8KeyDer::from(cert.key_pair.serialize_der()).into();
             let certs = vec![CertificateDer::from(cert.cert)];
             (certs, key)
@@ -106,9 +113,25 @@ impl Builder {
             (certs, key)
         };
 
-        let mut config = rustls::ServerConfig::builder()
-            .with_no_client_auth()
-            .with_single_cert(certs, key)?;
+        let config_builder = rustls::ServerConfig::builder();
+
+        let mut config = if let Some(ca_path) = &self.tls_ca_path {
+            let mut ca_store = rustls::RootCertStore::empty();
+            let ca_certs = super::load_certificates(ca_path)?;
+            ca_store.add_parsable_certificates(ca_certs);
+
+            let verifier = rustls::server::WebPkiClientVerifier::builder(ca_store.into())
+                .build()
+                .map_err(io::Error::other)?;
+
+            config_builder
+                .with_client_cert_verifier(verifier)
+                .with_single_cert(certs, key)?
+        } else {
+            config_builder
+                .with_no_client_auth()
+                .with_single_cert(certs, key)?
+        };
 
         config.alpn_protocols = vec![b"h3".to_vec()];
 

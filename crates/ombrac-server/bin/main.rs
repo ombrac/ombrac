@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 #[cfg(feature = "datagram")]
 use ombrac::server::datagram::UdpHandlerConfig;
 use ombrac::server::{SecretValid, Server};
@@ -13,6 +13,17 @@ use ombrac_transport::Acceptor;
 #[cfg(feature = "transport-quic")]
 use ombrac_transport::quic::{Congestion, TransportConfig, server::Builder};
 
+#[cfg(feature = "transport-quic")]
+#[derive(ValueEnum, Clone, Debug, Copy)]
+enum TlsMode {
+    /// Standard TLS. The client verifies the server's certificate
+    Tls,
+    /// Mutual TLS with client and server certificate verification
+    MTls,
+    /// Generates a self-signed certificate on the fly with `SANs` set to `127.0.0.1` (for testing only)
+    Insecure,
+}
+
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Args {
@@ -20,24 +31,46 @@ struct Args {
     #[clap(
         long,
         short = 'k',
-        help_heading = "Service Secret",
+        help_heading = "Required",
         value_name = "STR",
         verbatim_doc_comment
     )]
     secret: String,
 
-    // Transport QUIC
-    /// The address to bind for QUIC transport
+    /// The address to bind for transport
     #[clap(
         long,
         short = 'l',
-        help_heading = "Transport QUIC",
+        help_heading = "Required",
         value_name = "ADDR",
         verbatim_doc_comment
     )]
     listen: SocketAddr,
 
+    // Transport QUIC
+    #[cfg(feature = "transport-quic")]
+    /// Set the TLS mode for the connection
+    #[clap(
+        long,
+        value_enum,
+        default_value_t = TlsMode::Tls,
+        help_heading = "Transport QUIC",
+    )]
+    tls_mode: TlsMode,
+
+    /// Path to the Certificate Authority (CA) certificate file
+    /// Used in 'Tls' and 'MTls' modes
+    #[cfg(feature = "transport-quic")]
+    #[clap(
+        long,
+        help_heading = "Transport QUIC",
+        value_name = "FILE",
+        verbatim_doc_comment
+    )]
+    ca_cert: Option<PathBuf>,
+
     /// Path to the TLS certificate file
+    #[cfg(feature = "transport-quic")]
     #[clap(
         long,
         help_heading = "Transport QUIC",
@@ -47,6 +80,7 @@ struct Args {
     tls_cert: Option<PathBuf>,
 
     /// Path to the TLS private key file
+    #[cfg(feature = "transport-quic")]
     #[clap(
         long,
         help_heading = "Transport QUIC",
@@ -55,18 +89,13 @@ struct Args {
     )]
     tls_key: Option<PathBuf>,
 
-    /// When enabled, the server will generate a self-signed TLS certificate
-    /// and use it for the QUIC connection. This mode is useful for testing
-    /// but should not be used in production
-    #[clap(long, help_heading = "Transport QUIC", action, verbatim_doc_comment)]
-    insecure: bool,
-
     /// Enable 0-RTT for faster connection establishment (may reduce security)
     #[clap(long, help_heading = "Transport QUIC", action, verbatim_doc_comment)]
+    #[cfg(feature = "transport-quic")]
     zero_rtt: bool,
 
-    #[cfg(feature = "transport-quic")]
     /// Congestion control algorithm to use (e.g. bbr, cubic, newreno)
+    #[cfg(feature = "transport-quic")]
     #[clap(
         long,
         help_heading = "Transport QUIC",
@@ -77,6 +106,7 @@ struct Args {
     congestion: Congestion,
 
     /// Initial congestion window size in bytes
+    #[cfg(feature = "transport-quic")]
     #[clap(
         long,
         help_heading = "Transport QUIC",
@@ -87,6 +117,7 @@ struct Args {
 
     /// Maximum idle time (in milliseconds) before closing the connection
     /// 30 second default recommended by RFC 9308
+    #[cfg(feature = "transport-quic")]
     #[clap(
         long,
         help_heading = "Transport QUIC",
@@ -97,6 +128,7 @@ struct Args {
     idle_timeout: Option<u64>,
 
     /// Keep-alive interval (in milliseconds)
+    #[cfg(feature = "transport-quic")]
     #[clap(
         long,
         help_heading = "Transport QUIC",
@@ -107,6 +139,7 @@ struct Args {
     keep_alive: Option<u64>,
 
     /// Maximum number of bidirectional streams that can be open simultaneously
+    #[cfg(feature = "transport-quic")]
     #[clap(
         long,
         help_heading = "Transport QUIC",
@@ -224,12 +257,42 @@ fn secret_validator_from_args(args: &Args) -> SecretValid {
 #[cfg(feature = "transport-quic")]
 async fn quic_server_from_args(args: &Args) -> io::Result<impl Acceptor> {
     let mut builder = Builder::new(args.listen);
-    if let Some(cert) = &args.tls_cert
-        && let Some(key) = &args.tls_key
-    {
-        builder.with_tls((cert.to_path_buf(), key.to_path_buf()));
-    }
-    builder.with_enable_self_signed(args.insecure);
+
+    match args.tls_mode {
+        TlsMode::Tls => {
+            if let (Some(cert), Some(key)) = (&args.tls_cert, &args.tls_key) {
+                builder.with_tls((cert.to_path_buf(), key.to_path_buf()));
+            } else {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "--tls-cert and --tls-key are required for TLS mode",
+                ));
+            }
+        }
+        TlsMode::MTls => {
+            if let (Some(cert), Some(key)) = (&args.tls_cert, &args.tls_key) {
+                builder.with_tls((cert.to_path_buf(), key.to_path_buf()));
+            } else {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "--tls-cert and --tls-key are required for mTLS mode",
+                ));
+            }
+
+            if let Some(ca_cert) = &args.ca_cert {
+                builder.tls_ca(ca_cert.to_path_buf());
+            } else {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "--ca-cert is required for mTLS mode",
+                ));
+            }
+        }
+        TlsMode::Insecure => {
+            builder.with_enable_self_signed(true);
+        }
+    };
+
     builder.with_enable_zero_rtt(args.zero_rtt);
 
     let mut transport_config = TransportConfig::default();

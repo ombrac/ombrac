@@ -3,7 +3,7 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use ombrac::Secret;
 use ombrac::client::Client;
 use ombrac_macros::info;
@@ -12,6 +12,16 @@ use ombrac_transport::Initiator;
 use ombrac_transport::quic::{Congestion, TransportConfig, client::Builder};
 use tokio::task::JoinHandle;
 
+#[derive(ValueEnum, Clone, Debug, Copy)]
+enum TlsMode {
+    /// Standard TLS with server certificate verification
+    Tls,
+    /// Mutual TLS with client and server certificate verification
+    MTls,
+    /// Skip server certificate verification (for testing only)
+    Insecure,
+}
+
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
 struct Args {
@@ -19,18 +29,28 @@ struct Args {
     #[clap(
         long,
         short = 'k',
-        help_heading = "Service Secret",
+        help_heading = "Required",
         value_name = "STR",
         verbatim_doc_comment
     )]
     secret: String,
+
+    /// Address of the server to connect to
+    #[clap(
+        long,
+        short = 's',
+        help_heading = "Required",
+        value_name = "ADDR",
+        verbatim_doc_comment
+    )]
+    server: String,
 
     // Endpoint HTTP/HTTPS
     /// The address to bind for the HTTP/HTTPS server
     #[clap(
         long,
         value_name = "ADDR",
-        help_heading = "Endpoint HTTP",
+        help_heading = "Endpoint",
         verbatim_doc_comment
     )]
     http: Option<SocketAddr>,
@@ -41,7 +61,7 @@ struct Args {
         long,
         default_value = "127.0.0.1:1080",
         value_name = "ADDR",
-        help_heading = "Endpoint SOCKS",
+        help_heading = "Endpoint",
         verbatim_doc_comment
     )]
     socks: SocketAddr,
@@ -50,69 +70,92 @@ struct Args {
     /// The address to bind for QUIC transport
     #[clap(
         long,
-        help_heading = "Transport QUIC",
+        help_heading = "Transport (QUIC)",
         value_name = "ADDR",
         verbatim_doc_comment
     )]
     bind: Option<SocketAddr>,
 
-    /// Address of the server to connect to
-    #[clap(
-        long,
-        short = 's',
-        help_heading = "Transport QUIC",
-        value_name = "ADDR",
-        verbatim_doc_comment
-    )]
-    server: String,
-
     /// Name of the server to connect (derived from `server` if not provided)
     #[clap(
         long,
-        help_heading = "Transport QUIC",
+        help_heading = "Transport (QUIC)",
         value_name = "STR",
         verbatim_doc_comment
     )]
     server_name: Option<String>,
 
-    /// Path to the TLS certificate file
+    /// Set the TLS mode for the connection
+    #[cfg(feature = "transport-quic")]
     #[clap(
         long,
-        help_heading = "Transport QUIC",
+        value_enum,
+        default_value_t = TlsMode::Tls,
+        help_heading = "Transport (QUIC)",
+    )]
+    tls_mode: TlsMode,
+
+    /// Path to the Certificate Authority (CA) certificate file
+    /// Used in 'TLS' and 'mTLS' modes
+    /// in 'TLS' mode, if not provided, the system's default root certificates are used
+    #[cfg(feature = "transport-quic")]
+    #[clap(
+        long,
+        help_heading = "Transport (QUIC)",
         value_name = "FILE",
         verbatim_doc_comment
     )]
-    tls_cert: Option<PathBuf>,
+    ca_cert: Option<PathBuf>,
 
-    /// Skip TLS certificate verification (insecure, for testing only)
-    #[clap(long, help_heading = "Transport QUIC", action, verbatim_doc_comment)]
-    insecure: bool,
+    /// Path to the client's TLS certificate for mTLS
+    /// Required when tls-mode is 'mTLS'
+    #[cfg(feature = "transport-quic")]
+    #[clap(
+        long,
+        help_heading = "Transport (QUIC)",
+        value_name = "FILE",
+        verbatim_doc_comment
+    )]
+    client_cert: Option<PathBuf>,
+
+    /// Path to the client's TLS private key for mTLS
+    /// Required when tls-mode is 'mTLS'
+    #[cfg(feature = "transport-quic")]
+    #[clap(
+        long,
+        help_heading = "Transport (QUIC)",
+        value_name = "FILE",
+        verbatim_doc_comment
+    )]
+    client_key: Option<PathBuf>,
 
     /// Enable 0-RTT for faster connection establishment (may reduce security)
-    #[clap(long, help_heading = "Transport QUIC", action, verbatim_doc_comment)]
+    #[cfg(feature = "transport-quic")]
+    #[clap(long, help_heading = "Transport (QUIC)", action, verbatim_doc_comment)]
     zero_rtt: bool,
 
     /// Disable connection multiplexing (each stream uses a separate QUIC connection)
     /// This may be useful in special network environments where multiplexing causes issues
-    #[clap(long, help_heading = "Transport QUIC", action, verbatim_doc_comment)]
+    #[cfg(feature = "transport-quic")]
+    #[clap(long, help_heading = "Transport (QUIC)", action, verbatim_doc_comment)]
     no_multiplex: bool,
 
-    #[cfg(feature = "transport-quic")]
     /// Congestion control algorithm to use (e.g. bbr, cubic, newreno)
+    #[cfg(feature = "transport-quic")]
     #[clap(
         long,
-        help_heading = "Transport QUIC",
+        help_heading = "Transport (QUIC)",
         value_name = "ALGORITHM",
         default_value = "bbr",
         verbatim_doc_comment
     )]
     congestion: Congestion,
 
-    #[cfg(feature = "transport-quic")]
     /// Initial congestion window size in bytes
+    #[cfg(feature = "transport-quic")]
     #[clap(
         long,
-        help_heading = "Transport QUIC",
+        help_heading = "Transport (QUIC)",
         value_name = "NUM",
         verbatim_doc_comment
     )]
@@ -120,9 +163,10 @@ struct Args {
 
     /// Maximum idle time (in milliseconds) before closing the connection
     /// 30 second default recommended by RFC 9308
+    #[cfg(feature = "transport-quic")]
     #[clap(
         long,
-        help_heading = "Transport QUIC",
+        help_heading = "Transport (QUIC)",
         value_name = "TIME",
         default_value = "30000",
         verbatim_doc_comment
@@ -130,9 +174,10 @@ struct Args {
     idle_timeout: Option<u64>,
 
     /// Keep-alive interval (in milliseconds)
+    #[cfg(feature = "transport-quic")]
     #[clap(
         long,
-        help_heading = "Transport QUIC",
+        help_heading = "Transport (QUIC)",
         value_name = "TIME",
         default_value = "8000",
         verbatim_doc_comment
@@ -140,9 +185,10 @@ struct Args {
     keep_alive: Option<u64>,
 
     /// Maximum number of bidirectional streams that can be open simultaneously
+    #[cfg(feature = "transport-quic")]
     #[clap(
         long,
-        help_heading = "Transport QUIC",
+        help_heading = "Transport (QUIC)",
         value_name = "NUM",
         default_value = "100",
         verbatim_doc_comment
@@ -150,10 +196,11 @@ struct Args {
     max_streams: Option<u64>,
 
     /// Try to resolve domain name to IPv4 addresses first
+    #[cfg(feature = "transport-quic")]
     #[clap(
         long,
         short = '4',
-        help_heading = "Transport QUIC",
+        help_heading = "Transport (QUIC)",
         action,
         verbatim_doc_comment,
         conflicts_with = "prefer_ipv6"
@@ -161,9 +208,11 @@ struct Args {
     prefer_ipv4: bool,
 
     /// Try to resolve domain name to IPv6 addresses first
+    #[cfg(feature = "transport-quic")]
     #[clap(
+        long,
         short = '6',
-        help_heading = "Transport QUIC",
+        help_heading = "Transport (QUIC)",
         action,
         verbatim_doc_comment,
         conflicts_with = "prefer_ipv4"
@@ -301,10 +350,37 @@ async fn quic_client_from_args(args: &Args) -> io::Result<impl Initiator> {
     if let Some(value) = &args.server_name {
         builder.with_server_name(value.to_string());
     }
-    if let Some(value) = &args.tls_cert {
-        builder.with_tls(value.clone());
-    }
-    builder.with_tls_skip(args.insecure);
+
+    match args.tls_mode {
+        TlsMode::Tls => {
+            if let Some(ca) = &args.ca_cert {
+                builder.with_ca_cert(ca.to_path_buf());
+            }
+        }
+        TlsMode::MTls => {
+            if let Some(ca) = &args.ca_cert {
+                builder.with_ca_cert(ca.to_path_buf());
+            } else {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "--ca-cert is required for mTLS mode",
+                ));
+            }
+
+            if let (Some(cert), Some(key)) = (&args.client_cert, &args.client_key) {
+                builder.with_client_auth(cert.to_path_buf(), key.to_path_buf());
+            } else {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "--client-cert and --client-key are required for mTLS mode",
+                ));
+            }
+        }
+        TlsMode::Insecure => {
+            builder.with_tls_skip(true);
+        }
+    };
+
     builder.with_enable_zero_rtt(args.zero_rtt);
     builder.with_enable_connection_multiplexing(!args.no_multiplex);
 
