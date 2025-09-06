@@ -201,7 +201,7 @@ impl Initiator for QuicClient {
                 }
                 Err(e) => {
                     error!("Unexpected connection error: {:?}", e);
-                    return Err(io::Error::other(e));
+                    Err(io::Error::other(e))
                 }
             }
         }
