@@ -89,6 +89,90 @@ docker run --name ombrac-client \
   --tls-mode insecure
 ```
 
+## CLI
+### Server
+```bash
+Usage: ombrac-server [OPTIONS] --secret <STR> --listen <ADDR>
+
+Options:
+  -h, --help     Print help
+  -V, --version  Print version
+
+Required:
+  -k, --secret <STR>   Protocol Secret
+  -l, --listen <ADDR>  The address to bind for transport
+
+Transport:
+      --tls-mode <TLS_MODE>         Set the TLS mode for the connection
+                                    tls: Standard TLS. The client verifies the server's certificate
+                                    m-tls: Mutual TLS with client and server certificate verification
+                                    insecure: Generates a self-signed certificate on the fly with `SANs` set to `localhost` (for testing only) [default: tls] [possible values: tls, m-tls, insecure]
+      --ca-cert <FILE>              Path to the Certificate Authority (CA) certificate file
+                                    Used in 'mTLS' modes
+      --tls-cert <FILE>             Path to the TLS certificate file
+      --tls-key <FILE>              Path to the TLS private key file
+      --zero-rtt                    Enable 0-RTT for faster connection establishment (may reduce security)
+      --alpn-protocols <PROTOCOLS>  Application-Layer protocol negotiation (ALPN) protocols
+                                    e.g. "h3,h3-29" [default: h3]
+      --congestion <ALGORITHM>      Congestion control algorithm to use (e.g. bbr, cubic, newreno) [default: bbr]
+      --cwnd-init <NUM>             Initial congestion window size in bytes
+      --idle-timeout <TIME>         Maximum idle time (in milliseconds) before closing the connection
+                                    30 second default recommended by RFC 9308 [default: 30000]
+      --keep-alive <TIME>           Keep-alive interval (in milliseconds) [default: 8000]
+      --max-streams <NUM>           Maximum number of bidirectional streams that can be open simultaneously [default: 1000]
+
+Logging:
+      --log-level <LEVEL>  Logging level (e.g., INFO, WARN, ERROR) [default: WARN]
+      --log-dir <PATH>     Path to the log directory
+      --log-prefix <STR>   Prefix for log file names (only used when log-dir is specified) [default: log]
+```
+
+### Client
+```bash
+Usage: ombrac-client [OPTIONS] --secret <STR> --server <ADDR>
+
+Options:
+  -h, --help     Print help
+  -V, --version  Print version
+
+Required:
+  -k, --secret <STR>   Protocol Secret
+  -s, --server <ADDR>  Address of the server to connect to
+
+Endpoint:
+      --http <ADDR>   The address to bind for the HTTP/HTTPS server
+      --socks <ADDR>  The address to bind for the SOCKS server [default: 127.0.0.1:1080]
+
+Transport:
+      --bind <ADDR>                 The address to bind for transport
+      --server-name <STR>           Name of the server to connect (derived from `server` if not provided)
+      --tls-mode <TLS_MODE>         Set the TLS mode for the connection
+                                    tls: Standard TLS with server certificate verification
+                                    m-tls: Mutual TLS with client and server certificate verification
+                                    insecure: Skip server certificate verification (for testing only) [default: tls] [possible values: tls, m-tls, insecure]
+      --ca-cert <FILE>              Path to the Certificate Authority (CA) certificate file
+                                    in 'TLS' mode, if not provided, the system's default root certificates are used
+      --client-cert <FILE>          Path to the client's TLS certificate for mTLS
+      --client-key <FILE>           Path to the client's TLS private key for mTLS
+      --zero-rtt                    Enable 0-RTT for faster connection establishment (may reduce security)
+      --alpn-protocols <PROTOCOLS>  Application-Layer protocol negotiation (ALPN) protocols
+                                    e.g. "h3,h3-29" [default: h3]
+      --congestion <ALGORITHM>      Congestion control algorithm to use (e.g. bbr, cubic, newreno) [default: bbr]
+      --cwnd-init <NUM>             Initial congestion window size in bytes
+      --idle-timeout <TIME>         Maximum idle time (in milliseconds) before closing the connection
+                                    30 second default recommended by RFC 9308 [default: 30000]
+      --keep-alive <TIME>           Keep-alive interval (in milliseconds) [default: 8000]
+      --max-streams <NUM>           Maximum number of bidirectional streams that can be open simultaneously [default: 100]
+  -4, --prefer-ipv4                 Try to resolve domain name to IPv4 addresses first
+  -6, --prefer-ipv6                 Try to resolve domain name to IPv6 addresses first
+
+Logging:
+      --log-level <LEVEL>  Logging level (e.g., INFO, WARN, ERROR) [default: WARN]
+      --log-dir <PATH>     Path to the log directory
+      --log-prefix <STR>   Prefix for log file names (only used when log-dir is specified) [default: log]
+
+```
+
 ## License
 This project is licensed under the [Apache-2.0 License](./LICENSE).
 
