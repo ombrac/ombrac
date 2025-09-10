@@ -20,6 +20,9 @@ pub enum Error {
     #[error("QUIC connect error: {0}")]
     QuinnConnect(#[from] quinn::ConnectError),
 
+    #[error("QUIC ConnectionError error: {0}")]
+    QuinnConnection(#[from] quinn::ConnectionError),
+
     #[error("Rustls error: {0}")]
     QuinnVarInt(#[from] quinn::VarIntBoundsExceeded),
 
@@ -28,6 +31,9 @@ pub enum Error {
 
     #[error("Invalid congestion algorithm")]
     InvalidCongestion,
+
+    #[error("ConnectionClosed")]
+    ConnectionClosed,
 }
 
 impl From<Error> for io::Error {

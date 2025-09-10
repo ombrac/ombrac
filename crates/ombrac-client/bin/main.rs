@@ -1,29 +1,44 @@
 use std::io;
-use std::net::SocketAddr;
+use std::net::{SocketAddr, UdpSocket};
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
+use clap::builder::Styles;
+use clap::builder::styling::{AnsiColor, Style};
 use clap::{Parser, ValueEnum};
 use ombrac::Secret;
 use ombrac::client::Client;
-use ombrac_macros::info;
+use ombrac_macros::{error, info};
 use ombrac_transport::Initiator;
 #[cfg(feature = "transport-quic")]
-use ombrac_transport::quic::{Congestion, TransportConfig, client::Builder};
+use ombrac_transport::quic::{
+    Congestion, TransportConfig,
+    client::{Client as QuicClient, Config},
+};
 use tokio::task::JoinHandle;
 
+fn styles() -> Styles {
+    Styles::styled()
+        .header(Style::new().bold().fg_color(Some(AnsiColor::Green.into())))
+        .usage(Style::new().bold().fg_color(Some(AnsiColor::Green.into())))
+        .literal(Style::new().bold().fg_color(Some(AnsiColor::Cyan.into())))
+        .placeholder(Style::new().fg_color(Some(AnsiColor::Cyan.into())))
+        .valid(Style::new().bold().fg_color(Some(AnsiColor::Cyan.into())))
+        .invalid(Style::new().bold().fg_color(Some(AnsiColor::Yellow.into())))
+        .error(Style::new().bold().fg_color(Some(AnsiColor::Red.into())))
+}
+
+#[cfg(feature = "transport-quic")]
 #[derive(ValueEnum, Clone, Debug, Copy)]
 enum TlsMode {
-    /// Standard TLS with server certificate verification
     Tls,
-    /// Mutual TLS with client and server certificate verification
     MTls,
-    /// Skip server certificate verification (for testing only)
     Insecure,
 }
 
-#[derive(Parser)]
-#[command(version, about, long_about = None)]
+#[derive(Debug, Parser)]
+#[command(version, about, long_about = None, styles = styles() )]
 struct Args {
     /// Protocol Secret
     #[clap(
@@ -67,10 +82,10 @@ struct Args {
     socks: SocketAddr,
 
     // Transport QUIC
-    /// The address to bind for QUIC transport
+    /// The address to bind for transport
     #[clap(
         long,
-        help_heading = "Transport (QUIC)",
+        help_heading = "Transport",
         value_name = "ADDR",
         verbatim_doc_comment
     )]
@@ -79,51 +94,52 @@ struct Args {
     /// Name of the server to connect (derived from `server` if not provided)
     #[clap(
         long,
-        help_heading = "Transport (QUIC)",
+        help_heading = "Transport",
         value_name = "STR",
         verbatim_doc_comment
     )]
     server_name: Option<String>,
 
     /// Set the TLS mode for the connection
+    /// tls: Standard TLS with server certificate verification
+    /// m-tls: Mutual TLS with client and server certificate verification
+    /// insecure: Skip server certificate verification (for testing only)
     #[cfg(feature = "transport-quic")]
     #[clap(
         long,
         value_enum,
         default_value_t = TlsMode::Tls,
-        help_heading = "Transport (QUIC)",
+        help_heading = "Transport",
+        verbatim_doc_comment
     )]
     tls_mode: TlsMode,
 
     /// Path to the Certificate Authority (CA) certificate file
-    /// Used in 'TLS' and 'mTLS' modes
     /// in 'TLS' mode, if not provided, the system's default root certificates are used
     #[cfg(feature = "transport-quic")]
     #[clap(
         long,
-        help_heading = "Transport (QUIC)",
+        help_heading = "Transport",
         value_name = "FILE",
         verbatim_doc_comment
     )]
     ca_cert: Option<PathBuf>,
 
     /// Path to the client's TLS certificate for mTLS
-    /// Required when tls-mode is 'mTLS'
     #[cfg(feature = "transport-quic")]
     #[clap(
         long,
-        help_heading = "Transport (QUIC)",
+        help_heading = "Transport",
         value_name = "FILE",
         verbatim_doc_comment
     )]
     client_cert: Option<PathBuf>,
 
     /// Path to the client's TLS private key for mTLS
-    /// Required when tls-mode is 'mTLS'
     #[cfg(feature = "transport-quic")]
     #[clap(
         long,
-        help_heading = "Transport (QUIC)",
+        help_heading = "Transport",
         value_name = "FILE",
         verbatim_doc_comment
     )]
@@ -131,20 +147,27 @@ struct Args {
 
     /// Enable 0-RTT for faster connection establishment (may reduce security)
     #[cfg(feature = "transport-quic")]
-    #[clap(long, help_heading = "Transport (QUIC)", action, verbatim_doc_comment)]
+    #[clap(long, help_heading = "Transport", action, verbatim_doc_comment)]
     zero_rtt: bool,
 
-    /// Disable connection multiplexing (each stream uses a separate QUIC connection)
-    /// This may be useful in special network environments where multiplexing causes issues
+    /// Application-Layer protocol negotiation (ALPN) protocols
+    /// e.g. "h3,h3-29"
+    #[clap(
+        long,
+        help_heading = "Transport",
+        value_name = "PROTOCOLS",
+        default_value = "h3",
+        value_delimiter = ',',
+        verbatim_doc_comment
+    )]
     #[cfg(feature = "transport-quic")]
-    #[clap(long, help_heading = "Transport (QUIC)", action, verbatim_doc_comment)]
-    no_multiplex: bool,
+    alpn_protocols: Vec<Vec<u8>>,
 
     /// Congestion control algorithm to use (e.g. bbr, cubic, newreno)
     #[cfg(feature = "transport-quic")]
     #[clap(
         long,
-        help_heading = "Transport (QUIC)",
+        help_heading = "Transport",
         value_name = "ALGORITHM",
         default_value = "bbr",
         verbatim_doc_comment
@@ -155,7 +178,7 @@ struct Args {
     #[cfg(feature = "transport-quic")]
     #[clap(
         long,
-        help_heading = "Transport (QUIC)",
+        help_heading = "Transport",
         value_name = "NUM",
         verbatim_doc_comment
     )]
@@ -166,41 +189,41 @@ struct Args {
     #[cfg(feature = "transport-quic")]
     #[clap(
         long,
-        help_heading = "Transport (QUIC)",
+        help_heading = "Transport",
         value_name = "TIME",
         default_value = "30000",
         verbatim_doc_comment
     )]
-    idle_timeout: Option<u64>,
+    idle_timeout: u64,
 
     /// Keep-alive interval (in milliseconds)
     #[cfg(feature = "transport-quic")]
     #[clap(
         long,
-        help_heading = "Transport (QUIC)",
+        help_heading = "Transport",
         value_name = "TIME",
         default_value = "8000",
         verbatim_doc_comment
     )]
-    keep_alive: Option<u64>,
+    keep_alive: u64,
 
     /// Maximum number of bidirectional streams that can be open simultaneously
     #[cfg(feature = "transport-quic")]
     #[clap(
         long,
-        help_heading = "Transport (QUIC)",
+        help_heading = "Transport",
         value_name = "NUM",
         default_value = "100",
         verbatim_doc_comment
     )]
-    max_streams: Option<u64>,
+    max_streams: u64,
 
     /// Try to resolve domain name to IPv4 addresses first
     #[cfg(feature = "transport-quic")]
     #[clap(
         long,
         short = '4',
-        help_heading = "Transport (QUIC)",
+        help_heading = "Transport",
         action,
         verbatim_doc_comment,
         conflicts_with = "prefer_ipv6"
@@ -212,7 +235,7 @@ struct Args {
     #[clap(
         long,
         short = '6',
-        help_heading = "Transport (QUIC)",
+        help_heading = "Transport",
         action,
         verbatim_doc_comment,
         conflicts_with = "prefer_ipv4"
@@ -275,128 +298,51 @@ async fn main() -> io::Result<()> {
 
     #[cfg(feature = "transport-quic")]
     {
-        let secret = blake3::hash(args.secret.as_bytes());
-        let ombrac_client = Client::new(quic_client_from_args(&args).await?);
+        let secret = *blake3::hash(args.secret.as_bytes()).as_bytes();
+        let transport = quic_client_from_args(&args).await?;
+        let client = Arc::new(Client::new(transport));
 
-        let client = Arc::new(ombrac_client);
-        let secret = *secret.as_bytes();
+        let mut handles = Vec::new();
+        let (shutdown_tx, _) = tokio::sync::broadcast::channel(1);
 
         #[cfg(feature = "endpoint-http")]
-        if let Some(address) = args.http {
-            let client = client.clone();
-            run_http_server(client, secret, address, async {
-                tokio::signal::ctrl_c()
-                    .await
-                    .expect("Failed to listen for event");
-            })
-            .await?;
+        {
+            if let Some(address) = args.http {
+                let client = client.clone();
+                let mut http_shutdown_rx = shutdown_tx.subscribe();
+
+                let http_handle = run_http_server(client, secret, address, async move {
+                    let _ = http_shutdown_rx.recv().await;
+                })
+                .await?;
+                handles.push(http_handle);
+            }
         }
 
         #[cfg(feature = "endpoint-socks")]
-        run_socks_server(client, secret, args.socks, async {
-            tokio::signal::ctrl_c()
-                .await
-                .expect("Failed to listen for event");
-        })
-        .await?
-        .await?;
+        {
+            let mut socks_shutdown_rx = shutdown_tx.subscribe();
+            let socks_handle = run_socks_server(client, secret, args.socks, async move {
+                let _ = socks_shutdown_rx.recv().await;
+            })
+            .await?;
+            handles.push(socks_handle);
+        }
+
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {
+                let _ = shutdown_tx.send(());
+            },
+        }
+
+        for handle in handles {
+            if let Err(e) = handle.await {
+                error!("Error waiting for task to shut down: {:?}", e);
+            }
+        }
     }
 
     Ok(())
-}
-
-#[cfg(feature = "transport-quic")]
-async fn quic_client_from_args(args: &Args) -> io::Result<impl Initiator> {
-    use std::time::Duration;
-    use tokio::net::lookup_host;
-
-    let name = match &args.server_name {
-        Some(value) => value.to_string(),
-        None => {
-            let pos = args.server.rfind(':').ok_or(io::Error::other(format!(
-                "Invalid server address {}",
-                args.server
-            )))?;
-
-            args.server[..pos].to_string()
-        }
-    };
-
-    let mut addrs: Vec<_> = lookup_host(&args.server).await?.collect();
-
-    if args.prefer_ipv6 {
-        addrs.sort_by(|a, b| match (a.is_ipv6(), b.is_ipv6()) {
-            (true, false) => std::cmp::Ordering::Less,
-            (false, true) => std::cmp::Ordering::Greater,
-            _ => std::cmp::Ordering::Equal,
-        });
-    } else if args.prefer_ipv4 {
-        addrs.sort_by(|a, b| match (a.is_ipv4(), b.is_ipv4()) {
-            (true, false) => std::cmp::Ordering::Less,
-            (false, true) => std::cmp::Ordering::Greater,
-            _ => std::cmp::Ordering::Equal,
-        });
-    }
-
-    let addr = addrs.into_iter().next().ok_or(io::Error::other(format!(
-        "Failed to resolve server address '{}'",
-        args.server
-    )))?;
-
-    let mut builder = Builder::new(addr, name);
-    if let Some(value) = args.bind {
-        builder.with_bind(value);
-    }
-    if let Some(value) = &args.server_name {
-        builder.with_server_name(value.to_string());
-    }
-
-    match args.tls_mode {
-        TlsMode::Tls => {
-            if let Some(ca) = &args.ca_cert {
-                builder.with_ca_cert(ca.to_path_buf());
-            }
-        }
-        TlsMode::MTls => {
-            if let Some(ca) = &args.ca_cert {
-                builder.with_ca_cert(ca.to_path_buf());
-            } else {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    "--ca-cert is required for mTLS mode",
-                ));
-            }
-
-            if let (Some(cert), Some(key)) = (&args.client_cert, &args.client_key) {
-                builder.with_client_auth(cert.to_path_buf(), key.to_path_buf());
-            } else {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    "--client-cert and --client-key are required for mTLS mode",
-                ));
-            }
-        }
-        TlsMode::Insecure => {
-            builder.with_tls_skip(true);
-        }
-    };
-
-    builder.with_enable_zero_rtt(args.zero_rtt);
-    builder.with_enable_connection_multiplexing(!args.no_multiplex);
-
-    let mut transport_config = TransportConfig::default();
-    if let Some(value) = args.idle_timeout {
-        transport_config.with_max_idle_timeout(Duration::from_millis(value))?;
-    }
-    if let Some(value) = args.keep_alive {
-        transport_config.with_max_keep_alive_period(Duration::from_millis(value))?;
-    }
-    if let Some(value) = args.max_streams {
-        transport_config.with_max_open_bidirectional_streams(value)?;
-    }
-    transport_config.with_congestion(args.congestion, args.cwnd_init)?;
-
-    Ok(builder.build(transport_config).await?)
 }
 
 #[cfg(feature = "endpoint-http")]
@@ -447,4 +393,97 @@ async fn run_socks_server<I: Initiator>(
     });
 
     Ok(handle)
+}
+
+#[cfg(feature = "transport-quic")]
+async fn quic_client_from_args(args: &Args) -> io::Result<QuicClient> {
+    let server_name = match &args.server_name {
+        Some(value) => value.clone(),
+        None => {
+            let pos = args.server.rfind(':').ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!("Invalid server address {}", args.server),
+                )
+            })?;
+            args.server[..pos].to_string()
+        }
+    };
+
+    let mut addrs: Vec<_> = tokio::net::lookup_host(&args.server).await?.collect();
+
+    if args.prefer_ipv6 {
+        addrs.sort_by(|a, b| match (a.is_ipv6(), b.is_ipv6()) {
+            (true, false) => std::cmp::Ordering::Less,
+            (false, true) => std::cmp::Ordering::Greater,
+            _ => std::cmp::Ordering::Equal,
+        });
+    } else if args.prefer_ipv4 {
+        addrs.sort_by(|a, b| match (a.is_ipv4(), b.is_ipv4()) {
+            (true, false) => std::cmp::Ordering::Less,
+            (false, true) => std::cmp::Ordering::Greater,
+            _ => std::cmp::Ordering::Equal,
+        });
+    }
+
+    let server_addr = addrs.into_iter().next().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("Failed to resolve server address '{}'", args.server),
+        )
+    })?;
+
+    let bind_addr = match args.bind {
+        Some(addr) => addr,
+        None => match server_addr {
+            SocketAddr::V4(_) => SocketAddr::new(std::net::Ipv4Addr::UNSPECIFIED.into(), 0),
+            SocketAddr::V6(_) => SocketAddr::new(std::net::Ipv6Addr::UNSPECIFIED.into(), 0),
+        },
+    };
+
+    let mut config = Config::new(server_addr, server_name);
+
+    config.enable_zero_rtt = args.zero_rtt;
+    config.alpn_protocols = args.alpn_protocols.clone();
+    match args.tls_mode {
+        TlsMode::Tls => {
+            if let Some(ca) = &args.ca_cert {
+                config.root_ca_path = Some(ca.clone());
+            }
+        }
+        TlsMode::MTls => {
+            config.root_ca_path = Some(args.ca_cert.clone().ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "--ca-cert is required for mTLS mode",
+                )
+            })?);
+            let client_cert = args.client_cert.clone().ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "--client-cert is required for mTLS mode",
+                )
+            })?;
+            let client_key = args.client_key.clone().ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "--client-key is required for mTLS mode",
+                )
+            })?;
+            config.client_cert_key_paths = Some((client_cert, client_key));
+        }
+        TlsMode::Insecure => {
+            config.skip_server_verification = true;
+        }
+    }
+
+    let mut transport_config = TransportConfig::default();
+    transport_config.max_idle_timeout(Duration::from_millis(args.idle_timeout))?;
+    transport_config.keep_alive_period(Duration::from_millis(args.keep_alive))?;
+    transport_config.max_open_bidirectional_streams(args.max_streams)?;
+    transport_config.congestion(args.congestion, args.cwnd_init)?;
+    config.transport_config(transport_config);
+
+    let socket = UdpSocket::bind(bind_addr)?;
+    Ok(QuicClient::new(config, socket).await?)
 }
