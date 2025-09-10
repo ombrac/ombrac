@@ -36,11 +36,11 @@ impl FromStr for Congestion {
     }
 }
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct TransportConfig(pub(crate) quinn::TransportConfig);
 
 impl TransportConfig {
-    pub fn with_congestion(
+    pub fn congestion(
         &mut self,
         congestion: Congestion,
         initial_window: Option<u64>,
@@ -76,17 +76,17 @@ impl TransportConfig {
         Ok(self)
     }
 
-    pub fn with_max_idle_timeout(&mut self, value: Duration) -> Result<&mut Self> {
+    pub fn max_idle_timeout(&mut self, value: Duration) -> Result<&mut Self> {
         self.0.max_idle_timeout(Some(IdleTimeout::try_from(value)?));
         Ok(self)
     }
 
-    pub fn with_max_keep_alive_period(&mut self, value: Duration) -> Result<&mut Self> {
+    pub fn keep_alive_period(&mut self, value: Duration) -> Result<&mut Self> {
         self.0.keep_alive_interval(Some(value));
         Ok(self)
     }
 
-    pub fn with_max_open_bidirectional_streams(&mut self, value: u64) -> Result<&mut Self> {
+    pub fn max_open_bidirectional_streams(&mut self, value: u64) -> Result<&mut Self> {
         self.0.max_concurrent_bidi_streams(VarInt::try_from(value)?);
         Ok(self)
     }

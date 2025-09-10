@@ -1,9 +1,11 @@
 use std::io;
-use std::net::SocketAddr;
+use std::net::{SocketAddr, UdpSocket};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
+use clap::builder::Styles;
+use clap::builder::styling::{AnsiColor, Style};
 use clap::{Parser, ValueEnum};
 #[cfg(feature = "datagram")]
 use ombrac::server::datagram::UdpHandlerConfig;
@@ -11,21 +13,32 @@ use ombrac::server::{SecretValid, Server};
 use ombrac_macros::{error, info};
 use ombrac_transport::Acceptor;
 #[cfg(feature = "transport-quic")]
-use ombrac_transport::quic::{Congestion, TransportConfig, server::Builder};
+use ombrac_transport::quic::{
+    Congestion, TransportConfig,
+    server::{Config, Server as QuicServer},
+};
+
+fn styles() -> Styles {
+    Styles::styled()
+        .header(Style::new().bold().fg_color(Some(AnsiColor::Green.into())))
+        .usage(Style::new().bold().fg_color(Some(AnsiColor::Green.into())))
+        .literal(Style::new().bold().fg_color(Some(AnsiColor::Cyan.into())))
+        .placeholder(Style::new().fg_color(Some(AnsiColor::Cyan.into())))
+        .valid(Style::new().bold().fg_color(Some(AnsiColor::Cyan.into())))
+        .invalid(Style::new().bold().fg_color(Some(AnsiColor::Yellow.into())))
+        .error(Style::new().bold().fg_color(Some(AnsiColor::Red.into())))
+}
 
 #[cfg(feature = "transport-quic")]
 #[derive(ValueEnum, Clone, Debug, Copy)]
 enum TlsMode {
-    /// Standard TLS. The client verifies the server's certificate
     Tls,
-    /// Mutual TLS with client and server certificate verification
     MTls,
-    /// Generates a self-signed certificate on the fly with `SANs` set to `127.0.0.1` (for testing only)
     Insecure,
 }
 
-#[derive(Parser, Debug)]
-#[command(version, about, long_about = None)]
+#[derive(Debug, Parser)]
+#[command(version, about, long_about = None, styles = styles() )]
 struct Args {
     /// Protocol Secret
     #[clap(
@@ -49,21 +62,25 @@ struct Args {
 
     // Transport (QUIC)
     /// Set the TLS mode for the connection
+    /// tls: Standard TLS. The client verifies the server's certificate
+    /// m-tls: Mutual TLS with client and server certificate verification
+    /// insecure: Generates a self-signed certificate on the fly with `SANs` set to `localhost` (for testing only)
     #[cfg(feature = "transport-quic")]
     #[clap(
         long,
         value_enum,
         default_value_t = TlsMode::Tls,
-        help_heading = "Transport (QUIC)",
+        help_heading = "Transport",
+        verbatim_doc_comment
     )]
     tls_mode: TlsMode,
 
     /// Path to the Certificate Authority (CA) certificate file
-    /// Used in 'TLS' and 'mTLS' modes
+    /// Used in 'mTLS' modes
     #[cfg(feature = "transport-quic")]
     #[clap(
         long,
-        help_heading = "Transport (QUIC)",
+        help_heading = "Transport",
         value_name = "FILE",
         verbatim_doc_comment
     )]
@@ -73,7 +90,7 @@ struct Args {
     #[cfg(feature = "transport-quic")]
     #[clap(
         long,
-        help_heading = "Transport (QUIC)",
+        help_heading = "Transport",
         value_name = "FILE",
         verbatim_doc_comment
     )]
@@ -83,22 +100,35 @@ struct Args {
     #[cfg(feature = "transport-quic")]
     #[clap(
         long,
-        help_heading = "Transport (QUIC)",
+        help_heading = "Transport",
         value_name = "FILE",
         verbatim_doc_comment
     )]
     tls_key: Option<PathBuf>,
 
     /// Enable 0-RTT for faster connection establishment (may reduce security)
-    #[clap(long, help_heading = "Transport (QUIC)", action, verbatim_doc_comment)]
+    #[clap(long, help_heading = "Transport", action, verbatim_doc_comment)]
     #[cfg(feature = "transport-quic")]
     zero_rtt: bool,
+
+    /// Application-Layer protocol negotiation (ALPN) protocols
+    /// e.g. "h3,h3-29"
+    #[clap(
+        long,
+        help_heading = "Transport",
+        value_name = "PROTOCOLS",
+        default_value = "h3",
+        value_delimiter = ',',
+        verbatim_doc_comment
+    )]
+    #[cfg(feature = "transport-quic")]
+    alpn_protocols: Vec<Vec<u8>>,
 
     /// Congestion control algorithm to use (e.g. bbr, cubic, newreno)
     #[cfg(feature = "transport-quic")]
     #[clap(
         long,
-        help_heading = "Transport (QUIC)",
+        help_heading = "Transport",
         value_name = "ALGORITHM",
         default_value = "bbr",
         verbatim_doc_comment
@@ -109,7 +139,7 @@ struct Args {
     #[cfg(feature = "transport-quic")]
     #[clap(
         long,
-        help_heading = "Transport (QUIC)",
+        help_heading = "Transport",
         value_name = "NUM",
         verbatim_doc_comment
     )]
@@ -120,34 +150,34 @@ struct Args {
     #[cfg(feature = "transport-quic")]
     #[clap(
         long,
-        help_heading = "Transport (QUIC)",
+        help_heading = "Transport",
         value_name = "TIME",
         default_value = "30000",
         verbatim_doc_comment
     )]
-    idle_timeout: Option<u64>,
+    idle_timeout: u64,
 
     /// Keep-alive interval (in milliseconds)
     #[cfg(feature = "transport-quic")]
     #[clap(
         long,
-        help_heading = "Transport (QUIC)",
+        help_heading = "Transport",
         value_name = "TIME",
         default_value = "8000",
         verbatim_doc_comment
     )]
-    keep_alive: Option<u64>,
+    keep_alive: u64,
 
     /// Maximum number of bidirectional streams that can be open simultaneously
     #[cfg(feature = "transport-quic")]
     #[clap(
         long,
-        help_heading = "Transport (QUIC)",
+        help_heading = "Transport",
         value_name = "NUM",
         default_value = "1000",
         verbatim_doc_comment
     )]
-    max_streams: Option<u64>,
+    max_streams: u64,
 
     /// Maximum idle time for a UDP association (in milliseconds)
     #[cfg(feature = "datagram")]
@@ -235,10 +265,10 @@ async fn main() -> io::Result<()> {
 
     #[cfg(feature = "transport-quic")]
     {
-        info!("Server listening on {}", args.listen);
-        let transport = Arc::new(Server::new(quic_server_from_args(&args).await?));
-        run_server(
-            transport,
+        info!("Server Listening on {}", args.listen);
+        let server = Server::new(quic_server_from_args(&args).await?);
+        run_loop(
+            server.into(),
             validator,
             #[cfg(feature = "datagram")]
             udp_config,
@@ -254,72 +284,16 @@ fn secret_validator_from_args(args: &Args) -> SecretValid {
     SecretValid(secret)
 }
 
-#[cfg(feature = "transport-quic")]
-async fn quic_server_from_args(args: &Args) -> io::Result<impl Acceptor> {
-    let mut builder = Builder::new(args.listen);
-
-    match args.tls_mode {
-        TlsMode::Tls => {
-            if let (Some(cert), Some(key)) = (&args.tls_cert, &args.tls_key) {
-                builder.with_tls((cert.to_path_buf(), key.to_path_buf()));
-            } else {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    "--tls-cert and --tls-key are required for TLS mode",
-                ));
-            }
-        }
-        TlsMode::MTls => {
-            if let (Some(cert), Some(key)) = (&args.tls_cert, &args.tls_key) {
-                builder.with_tls((cert.to_path_buf(), key.to_path_buf()));
-            } else {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    "--tls-cert and --tls-key are required for mTLS mode",
-                ));
-            }
-
-            if let Some(ca_cert) = &args.ca_cert {
-                builder.tls_ca(ca_cert.to_path_buf());
-            } else {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    "--ca-cert is required for mTLS mode",
-                ));
-            }
-        }
-        TlsMode::Insecure => {
-            builder.with_enable_self_signed(true);
-        }
-    };
-
-    builder.with_enable_zero_rtt(args.zero_rtt);
-
-    let mut transport_config = TransportConfig::default();
-    if let Some(value) = args.idle_timeout {
-        transport_config.with_max_idle_timeout(Duration::from_millis(value))?;
-    }
-    if let Some(value) = args.keep_alive {
-        transport_config.with_max_keep_alive_period(Duration::from_millis(value))?;
-    }
-    if let Some(value) = args.max_streams {
-        transport_config.with_max_open_bidirectional_streams(value)?;
-    }
-    transport_config.with_congestion(args.congestion, args.cwnd_init)?;
-
-    Ok(builder.build(transport_config).await?)
-}
-
-async fn run_server(
-    transport: Arc<Server<impl Acceptor>>,
+async fn run_loop(
+    server: Arc<Server<impl Acceptor>>,
     validator: SecretValid,
     #[cfg(feature = "datagram")] udp_config: Arc<UdpHandlerConfig>,
 ) -> io::Result<()> {
     let connect_handle = {
-        let transport = Arc::clone(&transport);
+        let server = Arc::clone(&server);
         tokio::spawn(async move {
             loop {
-                match transport.accept_connect().await {
+                match server.accept_connect().await {
                     Ok(stream) => tokio::spawn(async move {
                         if let Err(_error) = Server::handle_connect(&validator, stream).await {
                             error!("{_error}");
@@ -334,11 +308,11 @@ async fn run_server(
 
     #[cfg(feature = "datagram")]
     let datagram_handle = {
-        let transport = Arc::clone(&transport);
+        let server = Arc::clone(&server);
         tokio::spawn(async move {
             loop {
-                let config = udp_config.clone();
-                match transport.accept_associate().await {
+                let config = Arc::clone(&udp_config);
+                match server.accept_associate().await {
                     Ok(datagram) => tokio::spawn(async move {
                         if let Err(_error) =
                             Server::handle_associate(&validator, datagram, config).await
@@ -357,11 +331,63 @@ async fn run_server(
     {
         let (connect, datagram) = tokio::join!(connect_handle, datagram_handle);
         connect??;
-        datagram??
+        datagram??;
     }
 
     #[cfg(not(feature = "datagram"))]
     connect_handle.await??;
 
     Ok(())
+}
+
+#[cfg(feature = "transport-quic")]
+async fn quic_server_from_args(args: &Args) -> io::Result<QuicServer> {
+    let mut config = Config::new();
+
+    config.enable_zero_rtt = args.zero_rtt;
+    config.alpn_protocols = args.alpn_protocols.clone();
+    match args.tls_mode {
+        TlsMode::Tls => {
+            if let (Some(cert), Some(key)) = (&args.tls_cert, &args.tls_key) {
+                config.tls_cert_key_paths = Some((cert.to_path_buf(), key.to_path_buf()));
+            } else {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "--tls-cert and --tls-key are required for TLS mode",
+                ));
+            }
+        }
+        TlsMode::MTls => {
+            if let (Some(cert), Some(key)) = (&args.tls_cert, &args.tls_key) {
+                config.tls_cert_key_paths = Some((cert.to_path_buf(), key.to_path_buf()));
+            } else {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "--tls-cert and --tls-key are required for mTLS mode",
+                ));
+            }
+
+            if let Some(ca_cert) = &args.ca_cert {
+                config.root_ca_path = Some(ca_cert.to_path_buf());
+            } else {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "--ca-cert is required for mTLS mode",
+                ));
+            }
+        }
+        TlsMode::Insecure => {
+            config.enable_self_signed = true;
+        }
+    };
+
+    let mut transport_config = TransportConfig::default();
+    transport_config.max_idle_timeout(Duration::from_millis(args.idle_timeout))?;
+    transport_config.keep_alive_period(Duration::from_millis(args.keep_alive))?;
+    transport_config.max_open_bidirectional_streams(args.max_streams)?;
+    transport_config.congestion(args.congestion, args.cwnd_init)?;
+    config.transport_config(transport_config);
+
+    let socket = UdpSocket::bind(args.listen)?;
+    Ok(QuicServer::new(config, socket).await?)
 }
