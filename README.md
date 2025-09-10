@@ -11,20 +11,20 @@
 [![Build Status][ci-badge]][ci-url]
 [![Build Status][release-badge]][release-url]
 
-## Structure 
-The codebase is organized into focused crates
-
-| Crate                  | Description                                                                 |
-|------------------------|-----------------------------------------------------------------------------|
-| `crates/ombrac`        | Core protocol implementation                                                |
-| `crates/ombrac-client` | Client binary with HTTP/SOCKS proxy entry points                            |
-| `crates/ombrac-server` | Server binary (wrapper around the core protocol)                            |
-| `crates/ombrac-transport` | QUIC transport layer implementation                                      |
-
-
-## Install
+## Installation
 ### Releases
 Download the latest release from the [releases page](https://github.com/ombrac/ombrac/releases).
+
+
+### Homebrew
+```shell
+brew tap ombrac/tap && brew install ombrac
+```
+
+### Crates
+```shell
+cargo install ombrac-client ombrac-server
+```
 
 ### Build
 ```shell
@@ -33,18 +33,9 @@ cargo build --bin ombrac-client --bin ombrac-server
 
 **NOTE**: On linux systems, [`aws-lc-rs`](https://github.com/aws/aws-lc-rs) will be used for cryptographic operations. A C compiler and CMake may be required on these systems for installation.
 
-### Crates
-```shell
-cargo install ombrac-client ombrac-server
-```
-
-### Homebrew
-```shell
-brew tap ombrac/tap && brew install ombrac
-```
 
 ### Docker
-#### Pull from GitHub Container Registry
+Pull from GitHub Container Registry
 ```shell
 docker pull ghcr.io/ombrac/ombrac/ombrac-server:latest
 docker pull ghcr.io/ombrac/ombrac/ombrac-client:latest
@@ -91,7 +82,7 @@ docker run --name ombrac-client \
 
 ## CLI
 ### Server
-```bash
+```
 Usage: ombrac-server [OPTIONS] --secret <STR> --listen <ADDR>
 
 Options:
@@ -128,7 +119,7 @@ Logging:
 ```
 
 ### Client
-```bash
+```
 Usage: ombrac-client [OPTIONS] --secret <STR> --server <ADDR>
 
 Options:
