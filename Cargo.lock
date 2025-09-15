@@ -185,7 +185,7 @@ checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
 name = "benches"
-version = "0.5.14"
+version = "0.5.15"
 dependencies = [
  "criterion",
  "ombrac",
@@ -861,7 +861,7 @@ checksum = "e04d7f318608d35d4b61ddd75cbdaee86b023ebe2bd5a66ee0915f0bf93095a9"
 dependencies = [
  "hermit-abi",
  "libc",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -1101,7 +1101,7 @@ dependencies = [
 
 [[package]]
 name = "ombrac"
-version = "0.5.14"
+version = "0.5.15"
 dependencies = [
  "bytes",
  "futures",
@@ -1111,7 +1111,7 @@ dependencies = [
 
 [[package]]
 name = "ombrac-client"
-version = "0.5.14"
+version = "0.5.15"
 dependencies = [
  "blake3",
  "bytes",
@@ -1132,11 +1132,11 @@ dependencies = [
 
 [[package]]
 name = "ombrac-macros"
-version = "0.5.14"
+version = "0.5.15"
 
 [[package]]
 name = "ombrac-server"
-version = "0.5.14"
+version = "0.5.15"
 dependencies = [
  "blake3",
  "bytes",
@@ -1152,7 +1152,7 @@ dependencies = [
 
 [[package]]
 name = "ombrac-transport"
-version = "0.5.14"
+version = "0.5.15"
 dependencies = [
  "arc-swap",
  "async-channel",
@@ -1532,7 +1532,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -1696,9 +1696,9 @@ dependencies = [
 
 [[package]]
 name = "socks-lib"
-version = "0.1.5"
+version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "30c318ad5471d2a61039595ee4bcc97811b4c22f3d6c0981560a5abebe365d6a"
+checksum = "17a5b4a57bbb6f79049bd87373e315ad89c3dd1a3f375e138c7c195f9efb7464"
 dependencies = [
  "bytes",
  "thiserror 2.0.16",
@@ -1741,7 +1741,7 @@ dependencies = [
 
 [[package]]
 name = "tests-integration"
-version = "0.5.14"
+version = "0.5.15"
 dependencies = [
  "curl",
  "ntest",
@@ -1752,7 +1752,7 @@ dependencies = [
 
 [[package]]
 name = "tests-support"
-version = "0.5.14"
+version = "0.5.15"
 dependencies = [
  "rcgen",
  "tokio",
