@@ -1696,9 +1696,9 @@ dependencies = [
 
 [[package]]
 name = "socks-lib"
-version = "0.1.5"
+version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "30c318ad5471d2a61039595ee4bcc97811b4c22f3d6c0981560a5abebe365d6a"
+checksum = "17a5b4a57bbb6f79049bd87373e315ad89c3dd1a3f375e138c7c195f9efb7464"
 dependencies = [
  "bytes",
  "thiserror 2.0.16",
