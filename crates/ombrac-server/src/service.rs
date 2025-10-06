@@ -1,5 +1,3 @@
-// service.rs
-
 use std::future::Future;
 use std::io;
 use std::marker::PhantomData;
@@ -114,14 +112,12 @@ where
     pub async fn shutdown(self) {
         let _ = self.shutdown_tx.send(());
         match self.handle.await {
-            Ok(Ok(_)) => {
-                // Task finished gracefully
+            Ok(Ok(_)) => {}
+            Ok(Err(_e)) => {
+                error!("The main server task exited with an error: {_e}");
             }
-            Ok(Err(e)) => {
-                error!("The main server task exited with an error: {}", e);
-            }
-            Err(e) => {
-                error!("The main server task failed to shut down cleanly: {}", e);
+            Err(_e) => {
+                error!("The main server task failed to shut down cleanly: {_e}");
             }
         }
         warn!("Service shutdown complete");

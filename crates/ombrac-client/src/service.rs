@@ -172,12 +172,12 @@ where
     }
 
     fn spawn_endpoint(
-        name: &'static str,
+        _name: &'static str,
         task: impl Future<Output = Result<()>> + Send + 'static,
     ) -> JoinHandle<()> {
         tokio::spawn(async move {
-            if let Err(e) = task.await {
-                error!("The {name} endpoint shut down due to an error: {e}");
+            if let Err(_e) = task.await {
+                error!("The {_name} endpoint shut down due to an error: {_e}");
             }
         })
     }
