@@ -1,10 +1,6 @@
 use quinn::{RecvStream, SendStream};
 
-use crate::Reliable;
-
 pub struct Stream(pub(crate) SendStream, pub(crate) RecvStream);
-
-impl Reliable for Stream {}
 
 mod impl_async_read {
     use std::io;

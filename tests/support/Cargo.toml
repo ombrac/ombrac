@@ -11,6 +11,8 @@ keywords.workspace = true
 readme = "../../README.md"
 
 [dependencies]
+ombrac-transport = { workspace = true, features = ["datagram"] }
+bytes = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 rcgen = { workspace = true, features = ["pem", "crypto", "aws_lc_rs"] }
 

@@ -1,30 +1,43 @@
 use std::future::Future;
-use std::io;
+use std::io::Result;
+use std::net::SocketAddr;
 
+use auto_impl::auto_impl;
 use tokio::io::{AsyncRead, AsyncWrite};
 
-#[cfg(feature = "datagram")]
-use bytes::Bytes;
-
+pub mod io;
 #[cfg(feature = "quic")]
 pub mod quic;
 
+#[auto_impl(&, Arc, Box)]
 pub trait Initiator: Send + Sync + 'static {
-    fn open_bidirectional(&self) -> impl Future<Output = io::Result<impl Reliable>> + Send;
-    #[cfg(feature = "datagram")]
-    fn open_datagram(&self) -> impl Future<Output = io::Result<impl Unreliable>> + Send;
+    type Connection: Connection;
+
+    fn local_addr(&self) -> Result<SocketAddr>;
+    fn connect(&self) -> impl Future<Output = Result<Self::Connection>> + Send;
 }
 
+#[auto_impl(&, Arc, Box)]
 pub trait Acceptor: Send + Sync + 'static {
-    fn accept_bidirectional(&self) -> impl Future<Output = io::Result<impl Reliable>> + Send;
-    #[cfg(feature = "datagram")]
-    fn accept_datagram(&self) -> impl Future<Output = io::Result<impl Unreliable>> + Send;
+    type Connection: Connection;
+
+    fn local_addr(&self) -> Result<SocketAddr>;
+    fn accept(&self) -> impl Future<Output = Result<Self::Connection>> + Send;
 }
 
-pub trait Reliable: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static {}
+#[auto_impl(&, Arc, Box)]
+pub trait Connection: Send + Sync + 'static {
+    type Stream: AsyncRead + AsyncWrite + Unpin + Send + Sync;
+    fn id(&self) -> usize;
+    fn remote_address(&self) -> Result<SocketAddr>;
 
-#[cfg(feature = "datagram")]
-pub trait Unreliable: Send + Sync + 'static {
-    fn send(&self, data: Bytes) -> impl Future<Output = io::Result<()>> + Send;
-    fn recv(&self) -> impl Future<Output = io::Result<Bytes>> + Send;
+    fn open_bidirectional(&self) -> impl Future<Output = Result<Self::Stream>> + Send;
+    fn accept_bidirectional(&self) -> impl Future<Output = Result<Self::Stream>> + Send;
+
+    #[cfg(feature = "datagram")]
+    fn max_datagram_size(&self) -> Option<usize>;
+    #[cfg(feature = "datagram")]
+    fn send_datagram(&self, data: bytes::Bytes) -> impl Future<Output = Result<()>> + Send;
+    #[cfg(feature = "datagram")]
+    fn read_datagram(&self) -> impl Future<Output = Result<bytes::Bytes>> + Send;
 }

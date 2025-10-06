@@ -1,5 +1,4 @@
-pub mod client;
 pub mod config;
-pub mod endpoint;
 pub mod ffi;
+pub mod server;
 pub mod service;

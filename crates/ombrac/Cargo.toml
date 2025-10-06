@@ -11,17 +11,14 @@ readme = "../../README.md"
 
 [features]
 default = []
-datagram = ["ombrac-transport/datagram"]
 
 [dependencies]
-ombrac-transport = { workspace = true }
-
 bytes = { workspace = true }
-tokio = { workspace = true, features = ["io-util", "macros", "net"] }
-
-[dev-dependencies]
-tokio = { workspace = true, features = ["full"] }
-futures = { workspace = true, features = ["alloc"] }
+tokio = { workspace = true, features = ["sync", "net"] }
+tokio-util = { workspace = true, features = ["codec"] }
+serde = { workspace = true, features = ["derive"] }
+bincode = { workspace = true, features = ["alloc", "serde"] }
+moka = { workspace = true, features = ["future"] }
 
 [lints]
 workspace = true

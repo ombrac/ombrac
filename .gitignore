@@ -12,3 +12,5 @@ target/
 .idea/
 .vscode/
 .DS_Store
+
+config.json
