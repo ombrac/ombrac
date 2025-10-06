@@ -30,6 +30,7 @@ jobs:
           - arch-name: aarch64-pc-windows-msvc
             os: windows-latest
             target: aarch64-pc-windows-msvc
+            file-ext: .exe
 
           - arch-name: x86_64-apple-darwin
             os: macos-latest
@@ -46,6 +47,7 @@ jobs:
           - arch-name: x86_64-pc-windows-msvc
             os: windows-latest
             target: x86_64-pc-windows-msvc
+            file-ext: .exe
 
     runs-on: ${{ matrix.os }}
 
@@ -100,6 +102,14 @@ jobs:
         run: |
           cargo build --release --verbose --bin ombrac-client --features binary --target ${{ matrix.target }}
           cargo build --release --verbose --bin ombrac-server --features binary --target ${{ matrix.target }}
+
+      - name: Upload Binaries
+        uses: actions/upload-artifact@main
+        with:
+          name: binaries-${{ matrix.arch-name }}
+          path: |
+            target/${{ matrix.target }}/release/ombrac-client${{ matrix.file-ext }}
+            target/${{ matrix.target }}/release/ombrac-server${{ matrix.file-ext }}
 
       - name: Test
         if: |
