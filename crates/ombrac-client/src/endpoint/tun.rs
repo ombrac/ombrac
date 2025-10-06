@@ -11,10 +11,7 @@ use futures::{SinkExt, StreamExt};
 use ipnet::Ipv4Net;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
-use tun_rs::{
-    AsyncDevice,
-    async_framed::{BytesCodec, DeviceFramed},
-};
+use tun_rs::async_framed::{BytesCodec, DeviceFramed};
 
 use ombrac::protocol::Address;
 use ombrac_macros::{debug, error, info};
@@ -25,9 +22,10 @@ use ombrac_netstack::{
 };
 use ombrac_transport::{Connection, Initiator};
 
-pub use crate::client::Client;
+pub use tun_rs::AsyncDevice;
 
 pub use self::fakedns::FakeDns;
+pub use crate::client::Client;
 
 mod fakedns {
     use std::hash::{Hash, Hasher};
@@ -193,13 +191,12 @@ where
         }
     }
 
-    pub async fn run(
+    pub async fn accept_loop(
         &self,
-        fd: i32,
+        device: AsyncDevice,
         shutdown_signal: impl Future<Output = ()>,
     ) -> std::io::Result<()> {
-        let dev = unsafe { AsyncDevice::from_fd(fd)? };
-        let framed = DeviceFramed::new(dev, BytesCodec::new());
+        let framed = DeviceFramed::new(device, BytesCodec::new());
         let (tun_sink, tun_stream) = framed.split::<bytes::Bytes>();
 
         let (stack, tcp_listener, udp_socket) = NetStack::new(NetStackConfig::default());

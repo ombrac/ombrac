@@ -80,15 +80,17 @@ jobs:
             gcc-x86-64-linux-gnu \
             gcc-aarch64-linux-gnu
 
-      - name: Build
-        run: |
-          cargo build --release --verbose --target ${{ matrix.target }}
-          cargo build --release --verbose --all-features --target ${{ matrix.target }}
+      - name: Build Release (default features)
+        run: cargo build --release --verbose --target ${{ matrix.target }}
 
-      - name: Build binaries
-        run: |
-          cargo build --release --bin ombrac-client --features binary --target ${{ matrix.target }}
-          cargo build --release --bin ombrac-server --features binary --target ${{ matrix.target }}
+      - name: Build Release (all features)
+        run: cargo build --release --verbose --all-features --target ${{ matrix.target }}
+
+      - name: Build Binary Release (client)
+        run: cargo build --release --bin ombrac-client --features binary --target ${{ matrix.target }}
+
+      - name: Build Binary Release (server)
+        run: cargo build --release --bin ombrac-server --features binary --target ${{ matrix.target }}
 
       - name: Move binaries
         shell: bash

@@ -234,12 +234,22 @@ where
         ombrac: Arc<Client<T, C>>,
         mut shutdown_rx: broadcast::Receiver<()>,
     ) -> Result<()> {
-        use crate::endpoint::tun::{Tun, TunConfig};
+        use crate::endpoint::tun::{AsyncDevice, Tun, TunConfig};
 
         let config = require_config!(config.endpoint.tun.as_ref(), "endpoint.tun")?;
 
-        let fd = match config.tun_fd {
-            Some(fd) => fd,
+        let device = match config.tun_fd {
+            Some(fd) => {
+                #[cfg(not(windows))]
+                unsafe {
+                    AsyncDevice::from_fd(fd)?
+                }
+
+                #[cfg(windows)]
+                return Err(Error::Config(
+                    "'tun_fd' option is not supported on Windows.".to_string(),
+                ));
+            }
             None => {
                 #[cfg(not(any(target_os = "android", target_os = "ios")))]
                 {
@@ -275,11 +285,7 @@ where
                         device.addresses()
                     );
 
-                    device.into_fd().map_err(|e| {
-                        Error::Endpoint(format!(
-                            "Failed to get file descriptor from TUN device: {e}"
-                        ))
-                    })?
+                    device
                 }
 
                 #[cfg(any(target_os = "android", target_os = "ios"))]
@@ -303,7 +309,7 @@ where
             let _ = shutdown_rx.recv().await;
         };
 
-        tun.run(fd, shutdown_signal)
+        tun.accept_loop(device, shutdown_signal)
             .await
             .map_err(|e| Error::Endpoint(format!("TUN device runtime error: {}", e)))
     }
