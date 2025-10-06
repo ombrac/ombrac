@@ -241,13 +241,15 @@ where
         let device = match config.tun_fd {
             Some(fd) => {
                 #[cfg(not(windows))]
-                unsafe { AsyncDevice::from_fd(fd)? }
+                unsafe {
+                    AsyncDevice::from_fd(fd)?
+                }
 
                 #[cfg(windows)]
                 return Err(Error::Config(
                     "'tun_fd' option is not supported on Windows.".to_string(),
                 ));
-            },
+            }
             None => {
                 #[cfg(not(any(target_os = "android", target_os = "ios")))]
                 {
