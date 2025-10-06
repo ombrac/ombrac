@@ -239,7 +239,7 @@ checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
 name = "benches"
-version = "0.5.15"
+version = "0.6.0"
 dependencies = [
  "criterion",
  "ombrac",
@@ -1768,7 +1768,7 @@ dependencies = [
 
 [[package]]
 name = "ombrac"
-version = "0.5.15"
+version = "0.6.0"
 dependencies = [
  "bincode",
  "bytes",
@@ -1780,7 +1780,7 @@ dependencies = [
 
 [[package]]
 name = "ombrac-client"
-version = "0.5.15"
+version = "0.6.0"
 dependencies = [
  "arc-swap",
  "bincode",
@@ -1816,11 +1816,11 @@ dependencies = [
 
 [[package]]
 name = "ombrac-macros"
-version = "0.5.15"
+version = "0.6.0"
 
 [[package]]
 name = "ombrac-netstack"
-version = "0.5.15"
+version = "0.6.0"
 dependencies = [
  "bytes",
  "crossbeam-queue",
@@ -1835,7 +1835,7 @@ dependencies = [
 
 [[package]]
 name = "ombrac-server"
-version = "0.5.15"
+version = "0.6.0"
 dependencies = [
  "bincode",
  "blake3",
@@ -1859,7 +1859,7 @@ dependencies = [
 
 [[package]]
 name = "ombrac-transport"
-version = "0.5.15"
+version = "0.6.0"
 dependencies = [
  "arc-swap",
  "async-channel",
@@ -2698,7 +2698,7 @@ dependencies = [
 
 [[package]]
 name = "tests-integration"
-version = "0.5.15"
+version = "0.6.0"
 dependencies = [
  "bytes",
  "curl",
@@ -2714,7 +2714,7 @@ dependencies = [
 
 [[package]]
 name = "tests-support"
-version = "0.5.15"
+version = "0.6.0"
 dependencies = [
  "bytes",
  "ombrac-transport",
