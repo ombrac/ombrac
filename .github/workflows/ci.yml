@@ -30,6 +30,7 @@ jobs:
           - arch-name: aarch64-pc-windows-msvc
             os: windows-latest
             target: aarch64-pc-windows-msvc
+            file-ext: .exe
 
           - arch-name: x86_64-apple-darwin
             os: macos-latest
@@ -46,6 +47,7 @@ jobs:
           - arch-name: x86_64-pc-windows-msvc
             os: windows-latest
             target: x86_64-pc-windows-msvc
+            file-ext: .exe
 
     runs-on: ${{ matrix.os }}
 
@@ -93,19 +95,21 @@ jobs:
 
       - name: Build Binaries
         run: |
-          cargo build --verbose --bin ombrac-client --target ${{ matrix.target }}
-          cargo build --verbose --bin ombrac-client --features datagram --target ${{ matrix.target }}
-
-          cargo build --verbose --bin ombrac-server --target ${{ matrix.target }}
-          cargo build --verbose --bin ombrac-server --features datagram --target ${{ matrix.target }}
+          cargo build --verbose --bin ombrac-client --features binary --target ${{ matrix.target }}
+          cargo build --verbose --bin ombrac-server --features binary --target ${{ matrix.target }}
 
       - name: Build Binaries Release
         run: |
-          cargo build --release --verbose --bin ombrac-client --target ${{ matrix.target }}
-          cargo build --release --verbose --bin ombrac-client --features datagram --target ${{ matrix.target }}
+          cargo build --release --verbose --bin ombrac-client --features binary --target ${{ matrix.target }}
+          cargo build --release --verbose --bin ombrac-server --features binary --target ${{ matrix.target }}
 
-          cargo build --release --verbose --bin ombrac-server --target ${{ matrix.target }}
-          cargo build --release --verbose --bin ombrac-server --features datagram --target ${{ matrix.target }}
+      - name: Upload Binaries
+        uses: actions/upload-artifact@main
+        with:
+          name: binaries-${{ matrix.arch-name }}
+          path: |
+            target/${{ matrix.target }}/release/ombrac-client${{ matrix.file-ext }}
+            target/${{ matrix.target }}/release/ombrac-server${{ matrix.file-ext }}
 
       - name: Test
         if: |
@@ -140,8 +144,8 @@ jobs:
         env:
           IPHONEOS_DEPLOYMENT_TARGET: 17.5
         run: |
-          cargo build --verbose --target aarch64-apple-ios
-          cargo build --verbose --target x86_64-apple-ios
+          cargo build --verbose --features binary --target aarch64-apple-ios
+          cargo build --verbose --features binary --target x86_64-apple-ios
 
 
   build-android:
@@ -170,7 +174,7 @@ jobs:
       - name: Build
         run: |
           cargo ndk -t arm64-v8a -t x86_64 build --verbose
-          cargo ndk -t arm64-v8a -t x86_64 build --verbose --all-features
+          cargo ndk -t arm64-v8a -t x86_64 build --verbose --features binary
 
 
   build-docker:
@@ -245,6 +249,10 @@ jobs:
 
       - name: Publish ombrac-macros
         working-directory: crates/ombrac-macros
+        run: cargo publish --dry-run
+
+      - name: Publish ombrac-netstack
+        working-directory: crates/ombrac-netstack
         run: cargo publish --dry-run
 
       - name: Publish ombrac-transport

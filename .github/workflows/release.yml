@@ -84,12 +84,11 @@ jobs:
         run: |
           cargo build --release --verbose --target ${{ matrix.target }}
           cargo build --release --verbose --all-features --target ${{ matrix.target }}
-          cargo build --release --verbose --no-default-features --target ${{ matrix.target }}
 
       - name: Build binaries
         run: |
-          cargo build --release --bin ombrac-client --target ${{ matrix.target }}
-          cargo build --release --bin ombrac-server --target ${{ matrix.target }}
+          cargo build --release --bin ombrac-client --features binary --target ${{ matrix.target }}
+          cargo build --release --bin ombrac-server --features binary --target ${{ matrix.target }}
 
       - name: Move binaries
         shell: bash
@@ -205,6 +204,10 @@ jobs:
 
       - name: Publish ombrac-macros
         working-directory: crates/ombrac-macros
+        run: cargo publish
+
+      - name: Publish ombrac-netstack
+        working-directory: crates/ombrac-netstack
         run: cargo publish
 
       - name: Publish ombrac-transport

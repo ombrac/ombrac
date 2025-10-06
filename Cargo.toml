@@ -5,6 +5,7 @@ members = [
     "crates/ombrac-client",
     "crates/ombrac-server",
     "crates/ombrac-macros",
+    "crates/ombrac-netstack",
     "crates/ombrac-transport",
 
     "benches",
@@ -28,24 +29,43 @@ ombrac-client = { version = "0.5.15", path = "crates/ombrac-client", default-fea
 ombrac-server = { version = "0.5.15", path = "crates/ombrac-server", default-features = false }
 ombrac-macros = { version = "0.5.15", path = "crates/ombrac-macros", default-features = false }
 ombrac-transport = { version = "0.5.15", path = "crates/ombrac-transport", default-features = false }
+ombrac-netstack = { version = "0.5.15", path = "crates/ombrac-netstack", default-features = false }
 
-futures = { version = "0.3", default-features = false }
-tokio = { version = "1", default-features = false }
 bytes = { version = "1", default-features = false }
-dashmap = { version = "6", default-features = false }
+tokio = { version = "1", default-features = false }
+tokio-util = { version = "0.7", default-features = false }
+futures = { version = "0.3", default-features = false }
+socket2 = { version = "0.6", default-features = false }
 thiserror = { version = "2", default-features = false }
 async-channel = { version = "2", default-features = false }
+dashmap = { version = "6", default-features = false }
 arc-swap = { version = "1.7", default-features = false }
+ringbuf = { version = "0.4", default-features = false }
+crossbeam-queue = { version = "0.3", default-features = false }
+moka = { version = "0.12", default-features = false }
+serde_bytes = { version = "0.11", default-features = false }
+bincode = { version = "2", default-features = false }
+cbindgen = { version = "0.29", default-features = false }
+auto_impl = { version = "1.3", default-features = false }
 
-# socks
+# endpoint
 socks-lib = { version = "0.1", default-features = false }
 http = { version = "1", default-features = false }
 hyper = { version = "1", default-features = false }
 hyper-util = { version = "0.1", default-features = false }
 http-body-util = { version = "0.1", default-features = false }
+smoltcp = { version = "0.12", default-features = false }
+etherparse = { version = "0.19", default-features = false }
+rand = { version = "0.9", default-features = false }
+tun-rs = { version = "2.7", default-features = false }
+twox-hash = { version = "2", default-features = false }
+ipnet = { version = "2.11", default-features = false }
+hickory-proto = { version = "0.25", default-features = false }
 
 # binary
 clap = { version = "4", default-features = false }
+serde = { version = "1", default-features = false }
+figment = { version = "0.10", default-features = false }
 blake3 = { version = "1", default-features = false }
 
 # quic

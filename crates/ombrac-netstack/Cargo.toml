@@ -1,0 +1,40 @@
+[package]
+name = "ombrac-netstack"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description.workspace = true
+keywords.workspace = true
+
+[features]
+default = []
+
+tracing = [
+    "dep:tracing"
+]
+
+[dependencies]
+bytes = { workspace = true }
+futures = { workspace = true }
+tokio = { workspace = true, features = ["rt", "sync", "io-util", "macros", "time"] }
+tracing = { workspace = true, optional = true }
+rand = { workspace = true, features = ["thread_rng"] }
+smoltcp = { workspace = true, features = [
+    "std",
+    "async",
+    "medium-ip",
+    "proto-ipv4",
+    "proto-ipv6",
+    "socket-tcp",
+    "socket-udp",
+    "socket-icmp",
+    "socket-tcp-cubic",
+] }
+etherparse = { workspace = true, features = ["std"] }
+ringbuf = { workspace = true, features = ["std"] }
+crossbeam-queue = { workspace = true, features = ["std"] }
+
+[lints]
+workspace = true

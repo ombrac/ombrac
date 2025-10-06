@@ -1,9 +1,7 @@
-#[cfg(feature = "datagram")]
-mod datagram;
-mod error;
 mod stream;
 
 pub mod client;
+pub mod error;
 pub mod server;
 
 use std::path::Path;
@@ -14,10 +12,13 @@ use std::{fs, io};
 
 use quinn::{IdleTimeout, VarInt};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
+use serde::{Deserialize, Serialize};
 
 type Result<T> = std::result::Result<T, error::Error>;
 
-#[derive(Debug, Clone, Copy)]
+pub use quinn::Connection;
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum Congestion {
     Bbr,
     Cubic,
@@ -112,4 +113,91 @@ fn load_private_key(path: &Path) -> io::Result<PrivateKeyDer<'static>> {
         })?
     };
     Ok(key)
+}
+
+#[derive(Debug)]
+pub enum ConnectionError {
+    QuinnConnection(quinn::ConnectionError),
+    QuinnSendDatagram(quinn::SendDatagramError),
+}
+
+impl From<quinn::ConnectionError> for ConnectionError {
+    fn from(e: quinn::ConnectionError) -> Self {
+        ConnectionError::QuinnConnection(e)
+    }
+}
+
+impl From<quinn::SendDatagramError> for ConnectionError {
+    fn from(e: quinn::SendDatagramError) -> Self {
+        ConnectionError::QuinnSendDatagram(e)
+    }
+}
+
+impl From<ConnectionError> for io::Error {
+    fn from(e: ConnectionError) -> Self {
+        match e {
+            ConnectionError::QuinnConnection(error) => {
+                use quinn::ConnectionError::*;
+                let kind = match error {
+                    LocallyClosed | ConnectionClosed(_) | ApplicationClosed(_) | Reset => {
+                        io::ErrorKind::ConnectionReset
+                    }
+                    TimedOut => io::ErrorKind::TimedOut,
+                    _ => io::ErrorKind::Other,
+                };
+                io::Error::new(kind, error)
+            }
+            ConnectionError::QuinnSendDatagram(error) => {
+                use quinn::SendDatagramError::*;
+                let kind = match error {
+                    ConnectionLost(_) => io::ErrorKind::ConnectionReset,
+                    _ => io::ErrorKind::Other,
+                };
+                io::Error::new(kind, error)
+            }
+        }
+    }
+}
+
+impl crate::Connection for quinn::Connection {
+    type Stream = stream::Stream;
+
+    async fn accept_bidirectional(&self) -> io::Result<Self::Stream> {
+        let (send, recv) = quinn::Connection::accept_bi(self)
+            .await
+            .map_err(ConnectionError::from)?;
+        Ok(stream::Stream(send, recv))
+    }
+
+    async fn open_bidirectional(&self) -> io::Result<Self::Stream> {
+        let (send, recv) = quinn::Connection::open_bi(self)
+            .await
+            .map_err(ConnectionError::from)?;
+        Ok(stream::Stream(send, recv))
+    }
+
+    #[cfg(feature = "datagram")]
+    async fn read_datagram(&self) -> io::Result<bytes::Bytes> {
+        quinn::Connection::read_datagram(self)
+            .await
+            .map_err(|e| ConnectionError::from(e).into())
+    }
+
+    #[cfg(feature = "datagram")]
+    async fn send_datagram(&self, data: bytes::Bytes) -> io::Result<()> {
+        quinn::Connection::send_datagram(self, data).map_err(|e| ConnectionError::from(e).into())
+    }
+
+    fn remote_address(&self) -> io::Result<std::net::SocketAddr> {
+        Ok(quinn::Connection::remote_address(self))
+    }
+
+    #[cfg(feature = "datagram")]
+    fn max_datagram_size(&self) -> Option<usize> {
+        quinn::Connection::max_datagram_size(self)
+    }
+
+    fn id(&self) -> usize {
+        quinn::Connection::stable_id(self)
+    }
 }

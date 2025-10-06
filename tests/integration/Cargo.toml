@@ -12,12 +12,18 @@ readme = "../../README.md"
 
 [features]
 datagram = [
+    "ombrac-client/datagram",
     "ombrac-transport/datagram"
 ]
 
-[dependencies]
+[dev-dependencies]
+ombrac = { workspace = true }
+ombrac-client = { workspace = true }
+ombrac-server = { workspace = true }
 ombrac-transport = { workspace = true }
 
+rand = { workspace = true, features = ["thread_rng"] }
+bytes = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 curl = { workspace = true }
 ntest = { workspace = true }
