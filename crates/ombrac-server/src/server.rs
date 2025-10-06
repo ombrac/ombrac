@@ -260,22 +260,22 @@ impl<C: Connection> ConnectionHandler<C> {
 
         // Copy data in both directions until one side closes.
         match ombrac_transport::io::copy_bidirectional(&mut stream, &mut dest_stream).await {
-            Ok(stats) => {
+            Ok(_stats) => {
                 #[cfg(feature = "tracing")]
                 tracing::info!(
                     src_addr = _peer_addr.to_string(),
-                    send = stats.a_to_b_bytes,
-                    recv = stats.b_to_a_bytes,
+                    send = _stats.a_to_b_bytes,
+                    recv = _stats.b_to_a_bytes,
                     status = "ok",
                     "Connect"
                 );
             }
-            Err((err, stats)) => {
+            Err((err, _stats)) => {
                 #[cfg(feature = "tracing")]
                 tracing::error!(
                     src_addr = _peer_addr.to_string(),
-                    send = stats.a_to_b_bytes,
-                    recv = stats.b_to_a_bytes,
+                    send = _stats.a_to_b_bytes,
+                    recv = _stats.b_to_a_bytes,
                     status = "err",
                     error = %err,
                     "Connect"

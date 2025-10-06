@@ -66,8 +66,8 @@ pub unsafe extern "C" fn ombrac_server_service_startup(config_json: *const c_cha
         .extract()
     {
         Ok(cfg) => cfg,
-        Err(e) => {
-            error!("Failed to parse config JSON: {}", e);
+        Err(_e) => {
+            error!("Failed to parse config JSON: {_e}");
             return -1;
         }
     };
@@ -93,8 +93,8 @@ pub unsafe extern "C" fn ombrac_server_service_startup(config_json: *const c_cha
 
     let runtime = match Builder::new_multi_thread().enable_all().build() {
         Ok(rt) => rt,
-        Err(e) => {
-            error!("Failed to create Tokio runtime: {}", e);
+        Err(_e) => {
+            error!("Failed to create Tokio runtime: {_e}");
             return -1;
         }
     };
