@@ -34,6 +34,12 @@ unsafe fn c_str_to_str<'a>(s: *const c_char) -> &'a str {
     unsafe { CStr::from_ptr(s).to_str().unwrap_or("") }
 }
 
+#[cfg(feature = "tracing")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ombrac_server_logging_init(callback: LogCallback) {
+    logging::init(LoggingMode::Callback(callback));
+}
+
 /// Initializes and starts the service with a given JSON configuration.
 ///
 /// This function sets up the asynchronous runtime, parses the configuration,
@@ -57,12 +63,6 @@ unsafe fn c_str_to_str<'a>(s: *const c_char) -> &'a str {
 /// The caller must ensure that `config_json` is a valid pointer to a
 /// null-terminated C string. This function is not thread-safe and should not be
 /// called concurrently with `ombrac_server_service_shutdown`.
-#[cfg(feature = "tracing")]
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn ombrac_server_logging_init(callback: LogCallback) {
-    logging::init(LoggingMode::Callback(callback));
-}
-
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn ombrac_server_service_startup(config_json: *const c_char) -> i32 {
     let config_str = unsafe { c_str_to_str(config_json) };

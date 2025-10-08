@@ -127,8 +127,8 @@ where
             event.record(&mut visitor);
 
             // Convert the message and target to C-compatible strings.
-            if let Ok(message_cstr) = std::ffi::CString::new(visitor.message) {
-                if let Ok(target_cstr) = std::ffi::CString::new(target) {
+            if let Ok(message_cstr) = std::ffi::CString::new(visitor.message)
+                && let Ok(target_cstr) = std::ffi::CString::new(target) {
                     // Invoke the callback.
                     callback(
                         level_to_int(level),
@@ -136,7 +136,6 @@ where
                         target_cstr.as_ptr(),
                     );
                 }
-            }
         }
     }
 }

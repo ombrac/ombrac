@@ -17,6 +17,8 @@
  */
 typedef void (*LogCallback)(int32_t level, const char *message, const char *target);
 
+void ombrac_client_logging_init(LogCallback callback);
+
 /**
  * Initializes and starts the service with a given JSON configuration.
  *
@@ -42,8 +44,6 @@ typedef void (*LogCallback)(int32_t level, const char *message, const char *targ
  * null-terminated C string. This function is not thread-safe and should not be
  * called concurrently with `ombrac_client_service_shutdown`.
  */
-void ombrac_client_logging_init(LogCallback callback);
-
 int32_t ombrac_client_service_startup(const char *config_json);
 
 /**
