@@ -81,3 +81,11 @@ int32_t ombrac_client_service_startup(const char *config_json);
  * `ombrac_client_service_startup`.
  */
 int32_t ombrac_client_service_shutdown(void);
+
+/**
+ * Returns the version of the ombrac-client library.
+ *
+ * The returned string is a null-terminated UTF-8 string. The memory for this
+ * string is managed by the library and should not be freed by the caller.
+ */
+const char *ombrac_client_get_version(void);

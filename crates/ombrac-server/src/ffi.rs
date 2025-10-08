@@ -8,6 +8,7 @@ use tokio::runtime::{Builder, Runtime};
 use ombrac_macros::{error, info};
 
 use crate::config::{ConfigFile, ServiceConfig};
+#[cfg(feature = "tracing")]
 use crate::logging::{LogCallback, LoggingMode};
 #[cfg(feature = "transport-quic")]
 use crate::service::QuicServiceBuilder;
@@ -189,4 +190,14 @@ pub extern "C" fn ombrac_server_service_shutdown() -> i32 {
     }
 
     0
+}
+
+/// Returns the version of the ombrac-server library.
+///
+/// The returned string is a null-terminated UTF-8 string. The memory for this
+/// string is managed by the library and should not be freed by the caller.
+#[unsafe(no_mangle)]
+pub extern "C" fn ombrac_server_get_version() -> *const c_char {
+    const VERSION_WITH_NULL: &'static str = concat!(env!("CARGO_PKG_VERSION"), "\0");
+    VERSION_WITH_NULL.as_ptr() as *const c_char
 }
