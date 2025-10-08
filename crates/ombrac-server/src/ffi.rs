@@ -9,7 +9,7 @@ use ombrac_macros::{error, info};
 
 use crate::config::{ConfigFile, ServiceConfig};
 #[cfg(feature = "tracing")]
-use crate::logging::{LogCallback, LoggingMode};
+use crate::logging::LogCallback;
 #[cfg(feature = "transport-quic")]
 use crate::service::QuicServiceBuilder;
 use crate::service::Service;
@@ -54,7 +54,7 @@ unsafe fn c_str_to_str<'a>(s: *const c_char) -> &'a str {
 #[cfg(feature = "tracing")]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn ombrac_server_logging_init(callback: LogCallback) {
-    crate::logging::init(LoggingMode::Callback(callback));
+    crate::logging::set_log_callback(Some(callback));
 }
 
 /// Initializes and starts the service with a given JSON configuration.
@@ -114,6 +114,9 @@ pub unsafe extern "C" fn ombrac_server_service_startup(config_json: *const c_cha
             return -1;
         }
     };
+
+    #[cfg(feature = "tracing")]
+    crate::logging::init_for_ffi(&service_config.logging);
 
     let runtime = match Builder::new_multi_thread().enable_all().build() {
         Ok(rt) => rt,
@@ -198,6 +201,6 @@ pub extern "C" fn ombrac_server_service_shutdown() -> i32 {
 /// string is managed by the library and should not be freed by the caller.
 #[unsafe(no_mangle)]
 pub extern "C" fn ombrac_server_get_version() -> *const c_char {
-    const VERSION_WITH_NULL: &'static str = concat!(env!("CARGO_PKG_VERSION"), "\0");
+    const VERSION_WITH_NULL: &str = concat!(env!("CARGO_PKG_VERSION"), "\0");
     VERSION_WITH_NULL.as_ptr() as *const c_char
 }

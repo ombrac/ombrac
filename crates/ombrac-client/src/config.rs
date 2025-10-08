@@ -176,16 +176,6 @@ pub struct LoggingConfig {
     #[clap(long, help_heading = "Logging", value_name = "LEVEL")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub log_level: Option<String>,
-
-    /// Path to the log directory
-    #[clap(long, value_name = "PATH", help_heading = "Logging")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub log_dir: Option<PathBuf>,
-
-    /// Prefix for log file names (only used when log dir is specified)
-    #[clap(long, value_name = "STR", help_heading = "Logging")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub log_prefix: Option<PathBuf>,
 }
 
 #[cfg(feature = "endpoint-tun")]
@@ -280,8 +270,6 @@ impl Default for LoggingConfig {
     fn default() -> Self {
         Self {
             log_level: Some("INFO".to_string()),
-            log_dir: None,
-            log_prefix: None,
         }
     }
 }

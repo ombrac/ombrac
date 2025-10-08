@@ -95,9 +95,6 @@ where
     where
         Builder: ServiceBuilder<Initiator = T, Connection = C>,
     {
-        #[cfg(feature = "tracing")]
-        crate::logging::init(crate::logging::LoggingMode::Default(config.logging.clone()));
-
         let mut handles = Vec::new();
         let client = Builder::build(&config).await?;
         let (shutdown_tx, _) = broadcast::channel(1);

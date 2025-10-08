@@ -7,15 +7,8 @@
 
 /**
  * A type alias for the C-style callback function pointer.
- *
- * The `level` parameter is an integer representation of the log level:
- * - `0`: TRACE
- * - `1`: DEBUG
- * - `2`: INFO
- * - `3`: WARN
- * - `4`: ERROR
  */
-typedef void (*LogCallback)(int32_t level, const char *message, const char *target);
+typedef void (*LogCallback)(const char *message);
 
 /**
  * Initializes the logging system to use a C-style callback for log messages.
@@ -32,10 +25,9 @@ typedef void (*LogCallback)(int32_t level, const char *message, const char *targ
  * # Safety
  *
  * The provided `callback` function pointer must be valid and remain valid for
- * the lifetime of the program. This function is not thread-safe and should be
- * called only once during initialization.
+ * the lifetime of the program.
  */
-void ombrac_client_logging_init(LogCallback callback);
+void ombrac_client_set_log_callback(LogCallback callback);
 
 /**
  * Initializes and starts the service with a given JSON configuration.

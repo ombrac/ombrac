@@ -9,6 +9,10 @@ fn main() {
         }
     };
 
+    // Initialize logging for the binary.
+    #[cfg(feature = "tracing")]
+    ombrac_client::logging::init_for_binary(&config.logging);
+
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
