@@ -17,6 +17,24 @@
  */
 typedef void (*LogCallback)(int32_t level, const char *message, const char *target);
 
+/**
+ * Initializes the logging system to use a C-style callback for log messages.
+ *
+ * This function must be called before `ombrac_server_service_startup` if you wish to
+ * receive logs in a C-compatible way. It sets up a global logger that will
+ * forward all log records to the provided callback function.
+ *
+ * # Arguments
+ *
+ * * `callback` - A function pointer of type `LogCallback`. See the definition of
+ *   `LogCallback` for the expected signature and log level mappings.
+ *
+ * # Safety
+ *
+ * The provided `callback` function pointer must be valid and remain valid for
+ * the lifetime of the program. This function is not thread-safe and should be
+ * called only once during initialization.
+ */
 void ombrac_server_logging_init(LogCallback callback);
 
 /**

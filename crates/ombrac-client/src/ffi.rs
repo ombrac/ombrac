@@ -8,7 +8,7 @@ use tokio::runtime::{Builder, Runtime};
 use ombrac_macros::{error, info};
 
 use crate::config::{ConfigFile, ServiceConfig};
-use crate::logging::{self, LogCallback, LoggingMode};
+use crate::logging::{LogCallback, LoggingMode};
 #[cfg(feature = "transport-quic")]
 use crate::service::QuicServiceBuilder;
 use crate::service::Service;
@@ -34,10 +34,26 @@ unsafe fn c_str_to_str<'a>(s: *const c_char) -> &'a str {
     unsafe { CStr::from_ptr(s).to_str().unwrap_or("") }
 }
 
+/// Initializes the logging system to use a C-style callback for log messages.
+///
+/// This function must be called before `ombrac_client_service_startup` if you wish to
+/// receive logs in a C-compatible way. It sets up a global logger that will
+/// forward all log records to the provided callback function.
+///
+/// # Arguments
+///
+/// * `callback` - A function pointer of type `LogCallback`. See the definition of
+///   `LogCallback` for the expected signature and log level mappings.
+///
+/// # Safety
+///
+/// The provided `callback` function pointer must be valid and remain valid for
+/// the lifetime of the program. This function is not thread-safe and should be
+/// called only once during initialization.
 #[cfg(feature = "tracing")]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn ombrac_client_logging_init(callback: LogCallback) {
-    logging::init(LoggingMode::Callback(callback));
+    crate::logging::init(LoggingMode::Callback(callback));
 }
 
 /// Initializes and starts the service with a given JSON configuration.

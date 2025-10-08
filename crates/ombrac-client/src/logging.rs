@@ -128,14 +128,15 @@ where
 
             // Convert the message and target to C-compatible strings.
             if let Ok(message_cstr) = std::ffi::CString::new(visitor.message)
-                && let Ok(target_cstr) = std::ffi::CString::new(target) {
-                    // Invoke the callback.
-                    callback(
-                        level_to_int(level),
-                        message_cstr.as_ptr(),
-                        target_cstr.as_ptr(),
-                    );
-                }
+                && let Ok(target_cstr) = std::ffi::CString::new(target)
+            {
+                // Invoke the callback.
+                callback(
+                    level_to_int(level),
+                    message_cstr.as_ptr(),
+                    target_cstr.as_ptr(),
+                );
+            }
         }
     }
 }

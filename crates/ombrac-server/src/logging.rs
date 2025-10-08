@@ -121,14 +121,14 @@ where
             };
             event.record(&mut visitor);
 
-            if let Ok(message_cstr) = std::ffi::CString::new(visitor.message) {
-                if let Ok(target_cstr) = std::ffi::CString::new(target) {
-                    callback(
-                        level_to_int(level),
-                        message_cstr.as_ptr(),
-                        target_cstr.as_ptr(),
-                    );
-                }
+            if let Ok(message_cstr) = std::ffi::CString::new(visitor.message)
+                && let Ok(target_cstr) = std::ffi::CString::new(target)
+            {
+                callback(
+                    level_to_int(level),
+                    message_cstr.as_ptr(),
+                    target_cstr.as_ptr(),
+                );
             }
         }
     }
