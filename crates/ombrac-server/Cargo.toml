@@ -15,6 +15,7 @@ path = "bin/main.rs"
 required-features = ["binary"]
 
 [lib]
+name = "ombrac_server"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [features]
@@ -63,7 +64,7 @@ tokio-util = { workspace = true, features = ["codec"] }
 moka = { workspace = true, features = ["future"], optional = true }
 tracing = { workspace = true, optional = true }
 tracing-appender = { workspace = true, optional = true }
-tracing-subscriber = { workspace = true, features = ["ansi"], optional = true }
+tracing-subscriber = { workspace = true, features = ["ansi", "env-filter", "registry"], optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["full"] }

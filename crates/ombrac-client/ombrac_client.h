@@ -6,6 +6,18 @@
 #include <stdlib.h>
 
 /**
+ * A type alias for the C-style callback function pointer.
+ *
+ * The `level` parameter is an integer representation of the log level:
+ * - `0`: TRACE
+ * - `1`: DEBUG
+ * - `2`: INFO
+ * - `3`: WARN
+ * - `4`: ERROR
+ */
+typedef void (*LogCallback)(int32_t level, const char *message, const char *target);
+
+/**
  * Initializes and starts the service with a given JSON configuration.
  *
  * This function sets up the asynchronous runtime, parses the configuration,
@@ -30,6 +42,8 @@
  * null-terminated C string. This function is not thread-safe and should not be
  * called concurrently with `ombrac_client_service_shutdown`.
  */
+void ombrac_client_logging_init(LogCallback callback);
+
 int32_t ombrac_client_service_startup(const char *config_json);
 
 /**

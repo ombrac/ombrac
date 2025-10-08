@@ -8,6 +8,7 @@ use tokio::runtime::{Builder, Runtime};
 use ombrac_macros::{error, info};
 
 use crate::config::{ConfigFile, ServiceConfig};
+use crate::logging::{self, LogCallback, LoggingMode};
 #[cfg(feature = "transport-quic")]
 use crate::service::QuicServiceBuilder;
 use crate::service::Service;
@@ -56,6 +57,12 @@ unsafe fn c_str_to_str<'a>(s: *const c_char) -> &'a str {
 /// The caller must ensure that `config_json` is a valid pointer to a
 /// null-terminated C string. This function is not thread-safe and should not be
 /// called concurrently with `ombrac_client_service_shutdown`.
+#[cfg(feature = "tracing")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ombrac_client_logging_init(callback: LogCallback) {
+    logging::init(LoggingMode::Callback(callback));
+}
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn ombrac_client_service_startup(config_json: *const c_char) -> i32 {
     let config_str = unsafe { c_str_to_str(config_json) };
