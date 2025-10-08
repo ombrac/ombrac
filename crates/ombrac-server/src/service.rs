@@ -93,7 +93,7 @@ where
         Builder: ServiceBuilder<Acceptor = T, Connection = C>,
     {
         #[cfg(feature = "tracing")]
-        setup_logging(&config.logging);
+        crate::logging::init(crate::logging::LoggingMode::Default(config.logging.clone()));
 
         let server = Builder::build(&config).await?;
         let (shutdown_tx, shutdown_rx) = broadcast::channel(1);
@@ -122,39 +122,6 @@ where
         }
         warn!("Service shutdown complete");
     }
-}
-
-#[cfg(feature = "tracing")]
-fn setup_logging(config: &crate::config::LoggingConfig) {
-    let log_level = config
-        .log_level
-        .as_deref()
-        .map(|level_str| {
-            level_str.parse().unwrap_or_else(|_| {
-                warn!("Invalid log level '{}', defaulting to WARN", level_str);
-                tracing::Level::WARN
-            })
-        })
-        .unwrap_or(tracing::Level::WARN);
-
-    let subscriber = tracing_subscriber::fmt()
-        .with_thread_ids(true)
-        .with_max_level(log_level);
-
-    let (non_blocking, guard) = if let Some(path) = &config.log_dir {
-        let prefix = config
-            .log_prefix
-            .as_deref()
-            .unwrap_or_else(|| std::path::Path::new("log"));
-        let file_appender = tracing_appender::rolling::daily(path, prefix);
-        tracing_appender::non_blocking(file_appender)
-    } else {
-        tracing_appender::non_blocking(std::io::stdout())
-    };
-
-    // The guard must be held for the lifetime of the program.
-    std::mem::forget(guard);
-    subscriber.with_writer(non_blocking).init();
 }
 
 #[cfg(feature = "transport-quic")]
