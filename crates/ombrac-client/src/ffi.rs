@@ -140,6 +140,12 @@ pub unsafe extern "C" fn ombrac_client_service_startup(config_json: *const c_cha
         }
     };
 
+    #[cfg(not(feature = "transport-quic"))]
+    {
+        error!("The application was compiled without a transport feature");
+        return -1;
+    }
+
     let mut handle_guard = SERVICE_HANDLE.lock().unwrap();
     if handle_guard.is_some() {
         error!("Service is already running. Please shut down the existing service first.");
