@@ -7,15 +7,8 @@
 
 /**
  * A type alias for the C-style callback function pointer.
- *
- * The `level` parameter is an integer representation of the log level:
- * - `0`: TRACE
- * - `1`: DEBUG
- * - `2`: INFO
- * - `3`: WARN
- * - `4`: ERROR
  */
-typedef void (*LogCallback)(int32_t level, const char *message, const char *target);
+typedef void (*LogCallback)(const char *message);
 
 /**
  * Initializes the logging system to use a C-style callback for log messages.

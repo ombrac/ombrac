@@ -11,17 +11,8 @@
 [![Build Status][ci-badge]][ci-url]
 [![Build Status][release-badge]][release-url]
 
-## Architecture
-```
-+----------+      +-------------------+      +===============+      +---------------+      +-----------------+
-| Your App |----->|   Ombrac Client   |----->|   Encrypted   |----->| Ombrac Server |----->| Target Internet |
-|          |<-----| (SOCKS5/HTTP/TUN) |<-----| （QUIC/Other） |<-----|               |<-----|                 |
-+----------+      +-------------------+      +===============+      +---------------+      +-----------------+
-```
-
 ## Installation
 The easiest way to get started is to download the latest pre-compiled binary from the [Releases Page](https://github.com/ombrac/ombrac/releases).
-
 
 ### Homebrew (macOS & Linux)
 ```shell
@@ -62,8 +53,7 @@ ombrac-server \
   -l "[::]:443" \
   -k "your-secret-key" \
   --tls-cert "/path/to/your/cert.pem" \
-  --tls-key "/path/to/your/key.pem" \
-  --log-level INFO
+  --tls-key "/path/to/your/key.pem"
 ```
 
 - `-l`: The address to listen on.
@@ -75,8 +65,7 @@ ombrac-server \
 ombrac-client \
   -s "your-server:443" \
   -k "your-secret-key" \
-  --socks "127.0.0.1:1080" \
-  --log-level INFO
+  --socks "127.0.0.1:1080"
 ```
 
 - `-s`: The server address to connect to.  
@@ -140,8 +129,6 @@ Transport:
 
 Logging:
       --log-level <LEVEL>  Logging level (e.g., INFO, WARN, ERROR) [default: INFO]
-      --log-dir <PATH>     Path to the log directory
-      --log-prefix <STR>   Prefix for log file names (only used when log dir is specified)
 
 ```
 
@@ -184,8 +171,6 @@ Transport:
 
 Logging:
       --log-level <LEVEL>  Logging level (e.g., INFO, WARN, ERROR) [default: INFO]
-      --log-dir <PATH>     Path to the log directory
-      --log-prefix <STR>   Prefix for log file names (only used when log dir is specified)
 
 ```
 

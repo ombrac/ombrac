@@ -92,9 +92,6 @@ where
     where
         Builder: ServiceBuilder<Acceptor = T, Connection = C>,
     {
-        #[cfg(feature = "tracing")]
-        crate::logging::init(crate::logging::LoggingMode::Default(config.logging.clone()));
-
         let server = Builder::build(&config).await?;
         let (shutdown_tx, shutdown_rx) = broadcast::channel(1);
 
