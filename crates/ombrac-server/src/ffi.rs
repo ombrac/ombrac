@@ -49,12 +49,12 @@ unsafe fn c_str_to_str<'a>(s: *const c_char) -> &'a str {
 /// # Safety
 ///
 /// The provided `callback` function pointer must be valid and remain valid for
-/// the lifetime of the program. This function is not thread-safe and should be
-/// called only once during initialization.
+/// the lifetime of the program. If a null pointer is passed, logging will be
+/// disabled.
 #[cfg(feature = "tracing")]
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn ombrac_server_logging_init(callback: LogCallback) {
-    crate::logging::set_log_callback(Some(callback));
+pub unsafe extern "C" fn ombrac_server_logging_init(callback: Option<LogCallback>) {
+    crate::logging::set_log_callback(callback);
 }
 
 /// Initializes and starts the service with a given JSON configuration.
