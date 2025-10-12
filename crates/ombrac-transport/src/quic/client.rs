@@ -1,5 +1,5 @@
 use std::io;
-use std::net::{SocketAddr, UdpSocket};
+use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, UdpSocket};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -10,6 +10,7 @@ use crate::quic::TransportConfig;
 
 #[derive(Debug, Clone)]
 pub struct Config {
+    pub bind_addr: SocketAddr,
     pub server_name: String,
     pub server_addr: SocketAddr,
 
@@ -24,9 +25,15 @@ pub struct Config {
 
 impl Config {
     pub fn new(server_addr: SocketAddr, server_name: String) -> Self {
+        let default_bind_addr = match server_addr {
+            SocketAddr::V4(_) => SocketAddr::new(Ipv4Addr::UNSPECIFIED.into(), 0),
+            SocketAddr::V6(_) => SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), 0),
+        };
+
         Self {
             server_name,
             server_addr,
+            bind_addr: default_bind_addr,
             root_ca_path: None,
             client_cert_key_paths: None,
             skip_server_verification: false,
@@ -97,7 +104,8 @@ pub struct Client {
 }
 
 impl Client {
-    pub fn new(socket: UdpSocket, config: Config) -> Result<Self> {
+    pub fn new(config: Config) -> Result<Self> {
+        let socket = UdpSocket::bind(config.bind_addr)?;
         let client_config = config.build_client_config()?;
         let endpoint_config = config.build_endpoint_config()?;
 
@@ -118,7 +126,13 @@ impl Client {
         Ok(self.endpoint.local_addr()?)
     }
 
-    async fn connect(&self) -> Result<quinn::Connection> {
+    pub fn rebind(&self) -> Result<()> {
+        self.endpoint
+            .rebind(UdpSocket::bind(self.config.bind_addr)?)?;
+        Ok(())
+    }
+
+    pub async fn connect(&self) -> Result<quinn::Connection> {
         let connecting = self
             .endpoint
             .connect(self.config.server_addr, &self.config.server_name)?;
@@ -156,6 +170,10 @@ impl crate::Initiator for Client {
 
     fn local_addr(&self) -> io::Result<SocketAddr> {
         Client::local_addr(self).map_err(io::Error::other)
+    }
+
+    async fn rebind(&self) -> io::Result<()> {
+        Client::rebind(self).map_err(io::Error::other)
     }
 
     async fn connect(&self) -> io::Result<Self::Connection> {
