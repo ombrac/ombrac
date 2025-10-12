@@ -157,7 +157,9 @@ impl Initiator for MockInitiator {
         Ok(self.local_addr)
     }
 
-    async fn rebind(&self) -> io::Result<()> { Ok(()) }
+    async fn rebind(&self) -> io::Result<()> {
+        Ok(())
+    }
 
     fn connect(&self) -> impl Future<Output = io::Result<Self::Connection>> + Send {
         let (client_conn, server_conn) = create_connection_pair(self.local_addr, self.server_addr);
