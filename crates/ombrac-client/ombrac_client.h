@@ -5,7 +5,10 @@
 #include <stdint.h>
 #include <stdlib.h>
 
-typedef struct Option_LogCallback Option_LogCallback;
+/**
+ * A type alias for the C-style callback function pointer.
+ */
+typedef void (*LogCallback)(const char *message);
 
 /**
  * Initializes the logging system to use a C-style callback for log messages.
@@ -25,7 +28,7 @@ typedef struct Option_LogCallback Option_LogCallback;
  * the lifetime of the program. If a null pointer is passed, logging will be
  * disabled.
  */
-void ombrac_client_set_log_callback(struct Option_LogCallback callback);
+void ombrac_client_set_log_callback(const LogCallback *callback);
 
 /**
  * Initializes and starts the service with a given JSON configuration.

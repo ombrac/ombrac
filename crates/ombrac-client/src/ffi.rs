@@ -53,7 +53,12 @@ unsafe fn c_str_to_str<'a>(s: *const c_char) -> &'a str {
 /// disabled.
 #[cfg(feature = "tracing")]
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn ombrac_client_set_log_callback(callback: Option<LogCallback>) {
+pub unsafe extern "C" fn ombrac_client_set_log_callback(callback: *const LogCallback) {
+    let callback = if callback.is_null() {
+        None
+    } else {
+        Some(unsafe { *callback })
+    };
     crate::logging::set_log_callback(callback);
 }
 
