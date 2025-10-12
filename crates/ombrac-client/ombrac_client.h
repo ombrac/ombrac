@@ -55,6 +55,24 @@ void ombrac_client_set_log_callback(struct Option_LogCallback callback);
 int32_t ombrac_client_service_startup(const char *config_json);
 
 /**
+ * Triggers a network rebind on the underlying transport.
+ *
+ * This is useful in scenarios where the network environment changes,
+ * to ensure the client can re-establish its connection through a new socket.
+ *
+ * # Returns
+ *
+ * * `0` on success.
+ * * `-1` if the service is not running or the rebind operation fails.
+ *
+ * # Safety
+ *
+ * This function is not thread-safe and should not be called concurrently with
+ * other service management functions.
+ */
+int32_t ombrac_client_service_rebind(void);
+
+/**
  * Shuts down the running service and releases all associated resources.
  *
  * This function will gracefully stop the service and terminate the asynchronous

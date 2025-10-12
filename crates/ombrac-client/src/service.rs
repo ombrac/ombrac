@@ -79,6 +79,7 @@ where
     T: Initiator<Connection = C>,
     C: Connection,
 {
+    client: Arc<Client<T, C>>,
     handles: Vec<JoinHandle<()>>,
     shutdown_tx: broadcast::Sender<()>,
     _transport: PhantomData<T>,
@@ -149,11 +150,16 @@ where
         }
 
         Ok(Service {
+            client,
             handles,
             shutdown_tx,
             _transport: PhantomData,
             _connection: PhantomData,
         })
+    }
+
+    pub async fn rebind(&self) -> io::Result<()> {
+        self.client.rebind().await
     }
 
     pub async fn shutdown(self) {
