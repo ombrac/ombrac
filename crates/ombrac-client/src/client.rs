@@ -3,6 +3,7 @@ use std::io;
 use std::sync::Arc;
 #[cfg(feature = "datagram")]
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
 
 use arc_swap::{ArcSwap, Guard};
 use bytes::Bytes;
@@ -127,6 +128,11 @@ where
 
         Ok(stream)
     }
+
+    // Rebind the transport to a new socket to ensure a clean state for reconnection.
+    pub async fn rebind(&self) -> io::Result<()> {
+        self.inner.transport.rebind().await
+    }
 }
 
 impl<T, C> Drop for Client<T, C> {
@@ -188,6 +194,9 @@ where
         let current_conn_id = Arc::as_ptr(&self.connection.load()) as usize;
         // Check if another task has already reconnected.
         if current_conn_id == old_conn_id {
+            // Rebind the transport to a new socket to ensure a clean state for reconnection.
+            self.transport.rebind().await?;
+
             let new_connection =
                 handshake(&self.transport, self.secret, self.options.clone()).await?;
             self.connection.store(Arc::new(new_connection));
@@ -204,46 +213,58 @@ where
     T: Initiator<Connection = C>,
     C: Connection,
 {
-    let connection = transport.connect().await?;
-    let mut stream = connection.open_bidirectional().await?;
+    const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 
-    let hello_message = UpstreamMessage::Hello(ClientHello {
-        version: PROTOCOLS_VERSION,
-        secret,
-        options,
-    });
+    let do_handshake = async {
+        let connection = transport.connect().await?;
+        let mut stream = connection.open_bidirectional().await?;
 
-    let encoded_bytes = protocol::encode(&hello_message)?;
-    let mut framed = Framed::new(&mut stream, length_codec());
+        let hello_message = UpstreamMessage::Hello(ClientHello {
+            version: PROTOCOLS_VERSION,
+            secret,
+            options,
+        });
 
-    framed.send(encoded_bytes).await?;
+        let encoded_bytes = protocol::encode(&hello_message)?;
+        let mut framed = Framed::new(&mut stream, length_codec());
 
-    match framed.next().await {
-        Some(Ok(payload)) => {
-            let response: ServerHandshakeResponse = protocol::decode(&payload)?;
-            match response {
-                ServerHandshakeResponse::Ok => {
-                    info!("Handshake with server successful");
-                    stream.shutdown().await?;
-                    Ok(connection)
-                }
-                ServerHandshakeResponse::Err(e) => {
-                    error!("Handshake failed: {:?}", e);
-                    let err_kind = match e {
-                        HandshakeError::InvalidSecret => io::ErrorKind::PermissionDenied,
-                        _ => io::ErrorKind::InvalidData,
-                    };
-                    Err(io::Error::new(
-                        err_kind,
-                        format!("Server rejected handshake: {:?}", e),
-                    ))
+        framed.send(encoded_bytes).await?;
+
+        match framed.next().await {
+            Some(Ok(payload)) => {
+                let response: ServerHandshakeResponse = protocol::decode(&payload)?;
+                match response {
+                    ServerHandshakeResponse::Ok => {
+                        info!("Handshake with server successful");
+                        stream.shutdown().await?;
+                        Ok(connection)
+                    }
+                    ServerHandshakeResponse::Err(e) => {
+                        error!("Handshake failed: {:?}", e);
+                        let err_kind = match e {
+                            HandshakeError::InvalidSecret => io::ErrorKind::PermissionDenied,
+                            _ => io::ErrorKind::InvalidData,
+                        };
+                        Err(io::Error::new(
+                            err_kind,
+                            format!("Server rejected handshake: {:?}", e),
+                        ))
+                    }
                 }
             }
+            Some(Err(e)) => Err(e),
+            None => Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "Connection closed by server during handshake",
+            )),
         }
-        Some(Err(e)) => Err(e),
-        None => Err(io::Error::new(
-            io::ErrorKind::UnexpectedEof,
-            "Connection closed by server during handshake",
+    };
+
+    match tokio::time::timeout(HANDSHAKE_TIMEOUT, do_handshake).await {
+        Ok(result) => result,
+        Err(_) => Err(io::Error::new(
+            io::ErrorKind::TimedOut,
+            "Client hello timed out",
         )),
     }
 }
@@ -257,6 +278,7 @@ fn is_connection_error(e: &io::Error) -> bool {
             | io::ErrorKind::NotConnected
             | io::ErrorKind::TimedOut
             | io::ErrorKind::UnexpectedEof
+            | io::ErrorKind::NetworkUnreachable
     )
 }
 

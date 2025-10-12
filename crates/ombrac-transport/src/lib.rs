@@ -14,6 +14,7 @@ pub trait Initiator: Send + Sync + 'static {
     type Connection: Connection;
 
     fn local_addr(&self) -> Result<SocketAddr>;
+    fn rebind(&self) -> impl Future<Output = Result<()>> + Send;
     fn connect(&self) -> impl Future<Output = Result<Self::Connection>> + Send;
 }
 

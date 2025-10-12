@@ -5,10 +5,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 
-/**
- * A type alias for the C-style callback function pointer.
- */
-typedef void (*LogCallback)(const char *message);
+typedef struct Option_LogCallback Option_LogCallback;
 
 /**
  * Initializes the logging system to use a C-style callback for log messages.
@@ -25,9 +22,10 @@ typedef void (*LogCallback)(const char *message);
  * # Safety
  *
  * The provided `callback` function pointer must be valid and remain valid for
- * the lifetime of the program.
+ * the lifetime of the program. If a null pointer is passed, logging will be
+ * disabled.
  */
-void ombrac_client_set_log_callback(LogCallback callback);
+void ombrac_client_set_log_callback(struct Option_LogCallback callback);
 
 /**
  * Initializes and starts the service with a given JSON configuration.
@@ -55,6 +53,24 @@ void ombrac_client_set_log_callback(LogCallback callback);
  * called concurrently with `ombrac_client_service_shutdown`.
  */
 int32_t ombrac_client_service_startup(const char *config_json);
+
+/**
+ * Triggers a network rebind on the underlying transport.
+ *
+ * This is useful in scenarios where the network environment changes,
+ * to ensure the client can re-establish its connection through a new socket.
+ *
+ * # Returns
+ *
+ * * `0` on success.
+ * * `-1` if the service is not running or the rebind operation fails.
+ *
+ * # Safety
+ *
+ * This function is not thread-safe and should not be called concurrently with
+ * other service management functions.
+ */
+int32_t ombrac_client_service_rebind(void);
 
 /**
  * Shuts down the running service and releases all associated resources.

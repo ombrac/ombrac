@@ -49,11 +49,12 @@ unsafe fn c_str_to_str<'a>(s: *const c_char) -> &'a str {
 /// # Safety
 ///
 /// The provided `callback` function pointer must be valid and remain valid for
-/// the lifetime of the program.
+/// the lifetime of the program. If a null pointer is passed, logging will be
+/// disabled.
 #[cfg(feature = "tracing")]
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn ombrac_client_set_log_callback(callback: LogCallback) {
-    crate::logging::set_log_callback(Some(callback));
+pub unsafe extern "C" fn ombrac_client_set_log_callback(callback: Option<LogCallback>) {
+    crate::logging::set_log_callback(callback);
 }
 
 /// Initializes and starts the service with a given JSON configuration.
@@ -140,6 +141,12 @@ pub unsafe extern "C" fn ombrac_client_service_startup(config_json: *const c_cha
         }
     };
 
+    #[cfg(not(feature = "transport-quic"))]
+    {
+        error!("The application was compiled without a transport feature");
+        return -1;
+    }
+
     let mut handle_guard = SERVICE_HANDLE.lock().unwrap();
     if handle_guard.is_some() {
         error!("Service is already running. Please shut down the existing service first.");
@@ -155,6 +162,39 @@ pub unsafe extern "C" fn ombrac_client_service_startup(config_json: *const c_cha
     info!("Service started successfully");
 
     0
+}
+
+/// Triggers a network rebind on the underlying transport.
+///
+/// This is useful in scenarios where the network environment changes,
+/// to ensure the client can re-establish its connection through a new socket.
+///
+/// # Returns
+///
+/// * `0` on success.
+/// * `-1` if the service is not running or the rebind operation fails.
+///
+/// # Safety
+///
+/// This function is not thread-safe and should not be called concurrently with
+/// other service management functions.
+#[unsafe(no_mangle)]
+pub extern "C" fn ombrac_client_service_rebind() -> i32 {
+    let handle_guard = SERVICE_HANDLE.lock().unwrap();
+    if let Some(handle) = handle_guard.as_ref() {
+        #[cfg(feature = "transport-quic")]
+        if let Some(service) = &handle.service {
+            let result = handle.runtime.block_on(service.rebind());
+            if let Err(e) = result {
+                error!("Failed to rebind: {}", e);
+                return -1;
+            } else {
+                info!("Service rebind successful");
+                return 0;
+            }
+        }
+    }
+    -1
 }
 
 /// Shuts down the running service and releases all associated resources.

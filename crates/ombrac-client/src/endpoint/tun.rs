@@ -527,7 +527,6 @@ where
                 }
             }
 
-            // 检查绝对超时
             if start_time.elapsed() > self.config.udp_absolute_timeout {
                 info!(
                     "UDP stream {} to {} closed due to absolute timeout.",

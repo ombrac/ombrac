@@ -1,6 +1,5 @@
 use std::io;
 use std::marker::PhantomData;
-use std::net::{SocketAddr, UdpSocket};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -80,6 +79,7 @@ where
     T: Initiator<Connection = C>,
     C: Connection,
 {
+    client: Arc<Client<T, C>>,
     handles: Vec<JoinHandle<()>>,
     shutdown_tx: broadcast::Sender<()>,
     _transport: PhantomData<T>,
@@ -150,11 +150,16 @@ where
         }
 
         Ok(Service {
+            client,
             handles,
             shutdown_tx,
             _transport: PhantomData,
             _connection: PhantomData,
         })
+    }
+
+    pub async fn rebind(&self) -> io::Result<()> {
+        self.client.rebind().await
     }
 
     pub async fn shutdown(self) {
@@ -338,11 +343,6 @@ async fn quic_client_from_config(config: &ServiceConfig) -> io::Result<QuicClien
         )
     })?;
 
-    let bind_addr = transport_cfg.bind.unwrap_or_else(|| match server_addr {
-        SocketAddr::V4(_) => SocketAddr::new(std::net::Ipv4Addr::UNSPECIFIED.into(), 0),
-        SocketAddr::V6(_) => SocketAddr::new(std::net::Ipv6Addr::UNSPECIFIED.into(), 0),
-    });
-
     let mut quic_config = QuicConfig::new(server_addr, server_name);
 
     quic_config.enable_zero_rtt = transport_cfg.zero_rtt.unwrap_or(false);
@@ -397,6 +397,5 @@ async fn quic_client_from_config(config: &ServiceConfig) -> io::Result<QuicClien
     }
     quic_config.transport_config(transport_config);
 
-    let socket = UdpSocket::bind(bind_addr)?;
-    Ok(QuicClient::new(socket, quic_config)?)
+    Ok(QuicClient::new(quic_config)?)
 }
