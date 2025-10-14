@@ -44,17 +44,26 @@ impl ReassemblyBuffer {
             ..
         } = fragment
         {
-            // If this is the first fragment we see, initialize the buffer properly
+            // Initialize the buffer with the fragment_count from the first fragment we see.
             if self.total_count == 0 {
+                if fragment_count == 0 {
+                    return false; // Invalid fragment
+                }
                 self.total_count = fragment_count;
                 self.fragments = vec![None; fragment_count as usize];
             } else if self.total_count != fragment_count {
-                // Mismatch in fragment count, likely a corrupted or malicious packet
+                // Mismatch in fragment count, likely a corrupted or malicious packet.
                 return false;
             }
 
-            if self.address.is_none() && fragment_index == 0 {
-                self.address = address;
+            // The address is only present in the first fragment.
+            if fragment_index == 0 {
+                if self.address.is_none() {
+                    self.address = address;
+                } else if self.address != address {
+                    // Address mismatch, could be an attack or a hash collision.
+                    return false;
+                }
             }
 
             let index = fragment_index as usize;
