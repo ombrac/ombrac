@@ -145,7 +145,6 @@ pub struct TunConfig {
     pub udp_idle_timeout: Duration,
     pub udp_absolute_timeout: Duration,
     pub udp_session_channel_capacity: usize,
-    pub udp_response_channel_capacity: usize,
 }
 
 impl Default for TunConfig {
@@ -157,7 +156,6 @@ impl Default for TunConfig {
             udp_idle_timeout: Duration::from_secs(60),
             udp_absolute_timeout: Duration::from_secs(300),
             udp_session_channel_capacity: 128,
-            udp_response_channel_capacity: 256,
         }
     }
 }
@@ -382,22 +380,14 @@ where
     }
 
     async fn process_udp_packets(self, udp_socket: UdpTunnel, token: CancellationToken) {
-        let (mut reader, mut writer) = udp_socket.split();
+        let (mut reader, writer) = udp_socket.split();
         let sessions: Arc<DashMap<SocketAddr, mpsc::Sender<(Bytes, Address)>>> =
             Arc::new(DashMap::new());
-        let (response_tx, mut response_rx) =
-            mpsc::channel::<UdpPacket>(self.config.udp_response_channel_capacity);
 
         loop {
             tokio::select! {
                 biased;
                 _ = token.cancelled() => break,
-
-                Some(packet_to_send) = response_rx.recv() => {
-                    if let Err(e) = writer.send(packet_to_send).await {
-                        error!("Failed to send UDP packet back to TUN stack: {}", e);
-                    }
-                },
 
                 packet_option = reader.recv() => {
                     let packet = match packet_option {
@@ -406,11 +396,12 @@ where
                     };
 
                     if packet.dst_addr.port() == 53 {
-                        self.handle_dns_packet(packet, &mut writer).await;
+                        let mut dns_writer = writer.clone();
+                        self.handle_dns_packet(packet, &mut dns_writer).await;
                         continue;
                     }
 
-                    self.handle_data_packet(packet, &sessions, response_tx.clone()).await;
+                    self.handle_data_packet(packet, &sessions, writer.clone()).await;
                 }
             }
         }
@@ -442,7 +433,7 @@ where
         &self,
         packet: UdpPacket,
         sessions: &Arc<DashMap<SocketAddr, mpsc::Sender<(Bytes, Address)>>>,
-        response_tx: mpsc::Sender<UdpPacket>,
+        writer: SplitWrite,
     ) {
         let local_addr = packet.src_addr;
         let initial_remote_addr = packet.dst_addr;
@@ -474,7 +465,7 @@ where
 
                 tokio::spawn(self.clone().handle_udp_flow(
                     rx,
-                    response_tx,
+                    writer,
                     sessions.clone(),
                     local_addr,
                     initial_remote_addr,
@@ -486,7 +477,7 @@ where
     async fn handle_udp_flow(
         self,
         mut rx: mpsc::Receiver<(Bytes, Address)>,
-        response_tx: mpsc::Sender<UdpPacket>,
+        mut writer: SplitWrite,
         sessions: Arc<DashMap<SocketAddr, mpsc::Sender<(Bytes, Address)>>>,
         local_addr: SocketAddr,
         initial_remote_addr: SocketAddr,
@@ -501,22 +492,24 @@ where
         loop {
             tokio::select! {
                 Some((data, dest_addr)) = rx.recv() => {
+                    info!("[TUN] UDP Upstream: local_addr={}, dest_addr={}, size={}", local_addr, dest_addr, data.len());
                     if let Err(e) = udp_session.send_to(data, dest_addr.clone()).await {
                         error!("Failed to send UDP packet from {} to {}: {}", local_addr, dest_addr, e);
                     }
                     idle_timeout.as_mut().reset(tokio::time::Instant::now() + self.config.udp_idle_timeout);
                 }
 
-                Some((data, _from_addr)) = udp_session.recv_from() => {
+                Some((data, from_addr)) = udp_session.recv_from() => {
+                    info!("[TUN] UDP Downstream: from_addr={}, local_addr={}, size={}", from_addr, local_addr, data.len());
                     let response_packet = UdpPacket {
                         data: Packet::new(data),
                         src_addr: initial_remote_addr,
                         dst_addr: local_addr,
                     };
 
-                    if response_tx.send(response_packet).await.is_err() {
-                         error!("UDP response channel closed, terminating flow for {}", local_addr);
-                         break;
+                    if writer.send(response_packet).await.is_err() {
+                        error!("Failed to send UDP packet to TUN stack, terminating flow for {}", local_addr);
+                        break;
                     }
                     idle_timeout.as_mut().reset(tokio::time::Instant::now() + self.config.udp_idle_timeout);
                 }

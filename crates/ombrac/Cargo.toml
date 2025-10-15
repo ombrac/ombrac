@@ -10,7 +10,8 @@ description.workspace = true
 readme = "../../README.md"
 
 [features]
-default = []
+default = ["tracing"]
+tracing = ["dep:tracing"]
 
 [dependencies]
 bytes = { workspace = true }
@@ -19,6 +20,8 @@ tokio-util = { workspace = true, features = ["codec"] }
 serde = { workspace = true, features = ["derive"] }
 bincode = { workspace = true, features = ["alloc", "serde"] }
 moka = { workspace = true, features = ["future"] }
+ombrac-macros = { workspace = true }
+tracing = { workspace = true, optional = true }
 
 [lints]
 workspace = true

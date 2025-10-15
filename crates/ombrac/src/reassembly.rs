@@ -7,6 +7,7 @@ use moka::future::Cache;
 use tokio::sync::Mutex;
 
 use crate::protocol::{Address, UdpPacket};
+use ombrac_macros::info;
 
 const DEFAULT_REASSEMBLY_TIMEOUT: Duration = Duration::from_secs(10);
 const DEFAULT_MAX_CONCURRENT_REASSEMBLIES: u64 = 8192;
@@ -151,9 +152,18 @@ impl UdpReassembler {
                 let mut buffer = buffer_lock.lock().await;
 
                 // Add the fragment. If it's a duplicate, this will do nothing.
-                buffer.add_fragment(packet);
+                if buffer.add_fragment(packet) {
+                    info!(
+                        "[Reassembly] Added fragment ({}/{}) for session={}, fragment_id={}",
+                        buffer.received_count, buffer.total_count, session_id, fragment_id
+                    );
+                }
 
                 if buffer.is_complete() {
+                    info!(
+                        "[Reassembly] Completed reassembly for session={}, fragment_id={}",
+                        session_id, fragment_id
+                    );
                     let assembled_data = buffer.assemble_and_take();
                     self.cache.invalidate(&cache_key).await;
                     return Ok(assembled_data);
