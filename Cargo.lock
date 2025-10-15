@@ -1765,11 +1765,9 @@ dependencies = [
  "bincode",
  "bytes",
  "moka",
- "ombrac-macros",
  "serde",
  "tokio",
  "tokio-util",
- "tracing",
 ]
 
 [[package]]

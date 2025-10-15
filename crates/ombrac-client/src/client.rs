@@ -104,7 +104,10 @@ where
     #[cfg(feature = "datagram")]
     pub fn open_associate(&self) -> UdpSession<T, C> {
         let session_id = self.inner.new_session_id();
-        info!("[Client] New UDP session created with session_id={}", session_id);
+        info!(
+            "[Client] New UDP session created with session_id={}",
+            session_id
+        );
         let receiver = self.inner.udp_dispatcher.register_session(session_id);
 
         UdpSession::new(session_id, Arc::clone(&self.inner), receiver)
@@ -289,12 +292,12 @@ fn is_connection_error(e: &io::Error) -> bool {
 mod datagram {
     use std::io;
     use std::sync::Arc;
-    use std::sync::atomic::{AtomicU16, Ordering};
+    use std::sync::atomic::{AtomicU32, Ordering};
 
     use bytes::Bytes;
     use ombrac::protocol::{Address, UdpPacket};
     use ombrac::reassembly::UdpReassembler;
-    use ombrac_macros::{debug, info, warn};
+    use ombrac_macros::{debug, warn};
     use ombrac_transport::{Connection, Initiator};
 
     use super::ClientInner;
@@ -305,7 +308,7 @@ mod datagram {
         session_id: u64,
         dest_addr: Address,
         data: Bytes,
-        fragment_id_counter: &AtomicU16,
+        fragment_id_counter: &AtomicU32,
     ) -> io::Result<()>
     where
         T: Initiator<Connection = C>,
@@ -329,12 +332,6 @@ mod datagram {
                 data,
             };
             let encoded = packet.encode()?;
-            info!(
-                "[Client] UDP Upstream: session_id={}, dest_addr={}, size={}",
-                session_id,
-                dest_addr,
-                encoded.len()
-            );
             inner
                 .with_retry(|conn| {
                     let data_for_attempt = encoded.clone();
@@ -392,12 +389,6 @@ mod datagram {
 
             match reassembler.process(packet).await {
                 Ok(Some((session_id, address, data))) => {
-                    info!(
-                        "[Client] UDP Downstream: session_id={}, from_addr={}, size={}",
-                        session_id,
-                        address,
-                        data.len()
-                    );
                     return Ok((session_id, address, data));
                 }
                 Ok(None) => {
@@ -423,14 +414,14 @@ mod datagram {
         pub(crate) struct UdpDispatcher {
             // Maps a session_id to a sender that forwards data to the `UdpSession`.
             dispatch_map: DashMap<u64, UdpSessionSender>,
-            fragment_id_counter: AtomicU16,
+            fragment_id_counter: AtomicU32,
         }
 
         impl UdpDispatcher {
             pub(crate) fn new() -> Self {
                 Self {
                     dispatch_map: DashMap::new(),
-                    fragment_id_counter: AtomicU16::new(0),
+                    fragment_id_counter: AtomicU32::new(0),
                 }
             }
 
@@ -500,7 +491,7 @@ mod datagram {
             }
 
             /// Provides access to the fragment ID counter for sending datagrams.
-            pub(crate) fn fragment_id_counter(&self) -> &AtomicU16 {
+            pub(crate) fn fragment_id_counter(&self) -> &AtomicU32 {
                 &self.fragment_id_counter
             }
         }

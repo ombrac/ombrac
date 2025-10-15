@@ -2,7 +2,7 @@ use std::future::Future;
 use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use bytes::Bytes;
 use dashmap::{DashMap, Entry};
@@ -143,7 +143,6 @@ mod fakedns {
 pub struct TunConfig {
     pub fakedns_cidr: Ipv4Net,
     pub udp_idle_timeout: Duration,
-    pub udp_absolute_timeout: Duration,
     pub udp_session_channel_capacity: usize,
 }
 
@@ -154,7 +153,6 @@ impl Default for TunConfig {
                 .parse()
                 .expect("Hardcoded FakeDNS CIDR is invalid"),
             udp_idle_timeout: Duration::from_secs(60),
-            udp_absolute_timeout: Duration::from_secs(300),
             udp_session_channel_capacity: 128,
         }
     }
@@ -463,7 +461,10 @@ where
 
                 entry.insert(tx);
 
-                info!("[TUN] New UDP flow for local_addr={}, initial_remote_addr={}", local_addr, initial_remote_addr);
+                info!(
+                    "[TUN] New UDP flow for local_addr={}, initial_remote_addr={}",
+                    local_addr, initial_remote_addr
+                );
 
                 tokio::spawn(self.clone().handle_udp_flow(
                     rx,
@@ -486,7 +487,6 @@ where
     ) {
         debug!("UDP New Stream from {}", local_addr);
         let mut udp_session = self.client.open_associate();
-        let start_time = Instant::now();
 
         let idle_timeout = tokio::time::sleep(self.config.udp_idle_timeout);
         tokio::pin!(idle_timeout);
@@ -520,14 +520,6 @@ where
                     info!("UDP stream {} to {} timed out due to inactivity.", local_addr, initial_remote_addr);
                     break;
                 }
-            }
-
-            if start_time.elapsed() > self.config.udp_absolute_timeout {
-                info!(
-                    "UDP stream {} to {} closed due to absolute timeout.",
-                    local_addr, initial_remote_addr
-                );
-                break;
             }
         }
 
