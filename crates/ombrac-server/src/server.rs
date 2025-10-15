@@ -264,6 +264,7 @@ impl<C: Connection> ConnectionHandler<C> {
                 #[cfg(feature = "tracing")]
                 tracing::info!(
                     src_addr = _peer_addr.to_string(),
+                    dst_addr = original_dest.to_string(),
                     send = _stats.a_to_b_bytes,
                     recv = _stats.b_to_a_bytes,
                     status = "ok",
@@ -274,6 +275,7 @@ impl<C: Connection> ConnectionHandler<C> {
                 #[cfg(feature = "tracing")]
                 tracing::error!(
                     src_addr = _peer_addr.to_string(),
+                    dst_addr = original_dest.to_string(),
                     send = _stats.a_to_b_bytes,
                     recv = _stats.b_to_a_bytes,
                     status = "err",
@@ -392,10 +394,15 @@ mod datagram {
                 }
             };
 
-            info!("[Server] Received UDP packet from client: {:?}", packet.encode().unwrap().len());
-
             // Process the packet through the reassembler. It returns a full datagram when ready.
             if let Some((session_id, address, data)) = self.reassembler.process(packet).await? {
+                info!(
+                    "[Server] UDP Upstream: peer_addr={}, session_id={}, dest_addr={}, size={}",
+                    self.peer_addr,
+                    session_id,
+                    address,
+                    data.len()
+                );
                 // Get or create the UDP socket for this session.
                 let socket = self
                     .get_or_create_session_socket(session_id, address.clone())
@@ -547,28 +554,27 @@ mod datagram {
                         let address = original_dest.clone();
                         let data = Bytes::copy_from_slice(&buf[..len]);
 
-                        info!(
-                            "{} [Session][{}] Received UDP response from {}, size={}",
-                            peer_addr, session_id, address, len
-                        );
-
                         // This packet might need to be fragmented before sending back to client.
                         if data.len() <= max_payload_size {
                             let packet = UdpPacket::Unfragmented { session_id, address, data };
-                            info!("[Server] Sending unfragmented UDP packet to client: {:?}", packet.encode().unwrap().len());
-                            if let Ok(encoded) = packet.encode()
-                                && connection.send_datagram(encoded).await.is_err() { break; }
+                            if let Ok(encoded) = packet.encode() {
+                                info!(
+                                    "[Server] UDP Downstream: peer_addr={}, session_id={}, from_addr={}, size={}",
+                                    peer_addr, session_id, original_dest, encoded.len()
+                                );
+                                if connection.send_datagram(encoded).await.is_err() { break; }
+                            }
                         } else {
-                            info!(
-                                "{} [Session][{}] Downstream packet for {} is too large ({} > max {}), fragmenting...",
-                                peer_addr, session_id, address, len, max_payload_size
-                            );
                             let fragment_id = fragment_id_counter.fetch_add(1, Ordering::Relaxed);
                             let fragments = UdpPacket::split_packet(session_id, address, data, max_payload_size, fragment_id);
                             for fragment in fragments {
-                                info!("[Server] Sending fragmented UDP packet to client: {:?}", fragment.encode().unwrap().len());
-                                if let Ok(encoded) = fragment.encode()
-                                    && connection.send_datagram(encoded).await.is_err() { break; }
+                                if let Ok(encoded) = fragment.encode() {
+                                    info!(
+                                        "[Server] UDP Downstream (Fragment): peer_addr={}, session_id={}, from_addr={}, size={}",
+                                        peer_addr, session_id, original_dest, encoded.len()
+                                    );
+                                    if connection.send_datagram(encoded).await.is_err() { break; }
+                                }
                             }
                         }
                     }

@@ -104,6 +104,7 @@ where
     #[cfg(feature = "datagram")]
     pub fn open_associate(&self) -> UdpSession<T, C> {
         let session_id = self.inner.new_session_id();
+        info!("[Client] New UDP session created with session_id={}", session_id);
         let receiver = self.inner.udp_dispatcher.register_session(session_id);
 
         UdpSession::new(session_id, Arc::clone(&self.inner), receiver)
@@ -293,7 +294,7 @@ mod datagram {
     use bytes::Bytes;
     use ombrac::protocol::{Address, UdpPacket};
     use ombrac::reassembly::UdpReassembler;
-    use ombrac_macros::{debug, warn};
+    use ombrac_macros::{debug, info, warn};
     use ombrac_transport::{Connection, Initiator};
 
     use super::ClientInner;
@@ -328,8 +329,8 @@ mod datagram {
                 data,
             };
             let encoded = packet.encode()?;
-            debug!(
-                "[Session][{}] Sending {} {} bytes",
+            info!(
+                "[Client] UDP Upstream: session_id={}, dest_addr={}, size={}",
                 session_id,
                 dest_addr,
                 encoded.len()
@@ -391,8 +392,8 @@ mod datagram {
 
             match reassembler.process(packet).await {
                 Ok(Some((session_id, address, data))) => {
-                    debug!(
-                        "[Session][{}] Receive {} {} bytes",
+                    info!(
+                        "[Client] UDP Downstream: session_id={}, from_addr={}, size={}",
                         session_id,
                         address,
                         data.len()

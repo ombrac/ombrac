@@ -463,6 +463,8 @@ where
 
                 entry.insert(tx);
 
+                info!("[TUN] New UDP flow for local_addr={}, initial_remote_addr={}", local_addr, initial_remote_addr);
+
                 tokio::spawn(self.clone().handle_udp_flow(
                     rx,
                     writer,
@@ -515,7 +517,7 @@ where
                 }
 
                 _ = &mut idle_timeout => {
-                    debug!("UDP stream {} to {} timed out due to inactivity.", local_addr, initial_remote_addr);
+                    info!("UDP stream {} to {} timed out due to inactivity.", local_addr, initial_remote_addr);
                     break;
                 }
             }
@@ -530,6 +532,6 @@ where
         }
 
         sessions.remove(&local_addr);
-        debug!("UDP stream from {} closed and cleaned up.", local_addr);
+        info!("UDP stream from {} closed and cleaned up.", local_addr);
     }
 }
