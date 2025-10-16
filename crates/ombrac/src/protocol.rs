@@ -47,9 +47,9 @@ pub enum UdpPacket {
     },
     Fragmented {
         session_id: u64,
-        fragment_id: u16,
-        fragment_index: u8,
-        fragment_count: u8,
+        fragment_id: u32,
+        fragment_index: u16,
+        fragment_count: u16,
         address: Option<Address>,
         #[serde(with = "serde_bytes")]
         data: Bytes,
@@ -58,8 +58,8 @@ pub enum UdpPacket {
 
 impl UdpPacket {
     pub fn fragmented_overhead() -> usize {
-        // Type + u64 + u16 + u8 + u8
-        let fixed_overhead = 1 + 8 + 2 + 1 + 1;
+        // Type + u64 + u32 + u16 + u16
+        let fixed_overhead = 1 + 8 + 4 + 2 + 2;
         // 1 byte tag + 2 bytes len + 255 bytes domain + 2 bytes port
         const MAX_ADDRESS_OVERHEAD: usize = 260;
         fixed_overhead + MAX_ADDRESS_OVERHEAD
@@ -70,16 +70,16 @@ impl UdpPacket {
         address: Address,
         data: Bytes,
         max_payload_size: usize,
-        fragment_id: u16,
+        fragment_id: u32,
     ) -> impl Iterator<Item = UdpPacket> {
         let data_chunks: Vec<Bytes> = data
             .chunks(max_payload_size)
             .map(Bytes::copy_from_slice)
             .collect();
-        let fragment_count = data_chunks.len() as u8;
+        let fragment_count = data_chunks.len() as u16;
 
         data_chunks.into_iter().enumerate().map(move |(i, chunk)| {
-            let fragment_index = i as u8;
+            let fragment_index = i as u16;
             UdpPacket::Fragmented {
                 session_id,
                 fragment_id,
