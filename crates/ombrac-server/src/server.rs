@@ -9,7 +9,7 @@ use tracing::{Instrument, error, info};
 
 use ombrac_transport::{Acceptor, Connection};
 
-use crate::connection::ConnectionHandler;
+use crate::connection::ClientConnection;
 
 pub struct Server<T: Acceptor> {
     acceptor: Arc<T>,
@@ -39,7 +39,7 @@ impl<T: Acceptor> Server<T> {
                             tokio::spawn(async move {
                                 let start_time = Instant::now();
                                 info!("Connection Start");
-                                if let Err(e) = ConnectionHandler::handle(connection, secret).await {
+                                if let Err(e) = ClientConnection::handle(connection, secret).await {
                                     if e.kind() != io::ErrorKind::ConnectionReset && e.kind() != io::ErrorKind::BrokenPipe && e.kind() != io::ErrorKind::UnexpectedEof {
                                         error!(error = %e, "Connection handler failed");
                                     } else {
