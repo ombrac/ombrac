@@ -63,7 +63,7 @@ clap = { workspace = true, features = ["std", "derive", "color", "help", "usage"
 tokio = { workspace = true, features = ["rt-multi-thread", "net", "macros", "signal"] }
 tokio-util = { workspace = true, features = ["codec"] }
 moka = { workspace = true, features = ["future"], optional = true }
-tracing = { workspace = true, optional = true }
+tracing = { workspace = true, features = ["attributes"], optional = true }
 tracing-appender = { workspace = true, optional = true }
 tracing-subscriber = { workspace = true, features = ["ansi", "env-filter", "registry"], optional = true }
 

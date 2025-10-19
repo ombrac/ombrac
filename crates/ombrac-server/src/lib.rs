@@ -1,4 +1,5 @@
 pub mod config;
+pub mod connection;
 pub mod ffi;
 #[cfg(feature = "tracing")]
 pub mod logging;
