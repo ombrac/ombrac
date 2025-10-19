@@ -175,97 +175,97 @@ impl<C: Connection> DatagramTunnel<C> {
         socket: Arc<UdpSocket>,
         downstream_bytes: Arc<AtomicU64>,
     ) -> AbortHandle {
+        let handler = DownstreamHandler {
+            connection: Arc::clone(&self.connection),
+            shutdown: self.shutdown.child_token(),
+            fragment_id_counter: Arc::clone(&self.fragment_id_counter),
+            session_id,
+            socket,
+            downstream_bytes,
+        };
+        tokio::spawn(handler.accept_loop().in_current_span()).abort_handle()
+    }
+}
+
+struct DownstreamHandler<C: Connection> {
+    connection: Arc<C>,
+    session_id: u64,
+    socket: Arc<UdpSocket>,
+    shutdown: CancellationToken,
+    downstream_bytes: Arc<AtomicU64>,
+    fragment_id_counter: Arc<AtomicU32>,
+}
+
+impl<C: Connection> DownstreamHandler<C> {
+    /// Runs the downstream loop, receiving packets from the destination and sending them to the client connection.
+    async fn accept_loop(self) {
         let overhead = UdpPacket::fragmented_overhead();
-        let connection = Arc::clone(&self.connection);
-        let token = self.shutdown.child_token();
-        let frag_counter = Arc::clone(&self.fragment_id_counter);
-        let max_datagram_size = connection
+        let max_datagram_size = self
+            .connection
             .max_datagram_size()
             .unwrap_or(DEFAULT_MAX_DATAGRAM_SIZE);
         let max_payload_size = max_datagram_size.saturating_sub(overhead).max(1);
+        let mut buf = vec![0u8; MAX_UDP_PAYLOAD_SIZE];
 
-        let future = async move {
-            let mut buf = vec![0u8; MAX_UDP_PAYLOAD_SIZE];
-            loop {
-                tokio::select! {
-                    _ = token.cancelled() => break,
-                    result = socket.recv_from(&mut buf) => {
-                        let (len, from_addr) = match result {
-                            Ok(r) => r,
-                            Err(e) => {
-                                warn!(session_id, error = %e, "Error receiving from remote socket");
+        loop {
+            tokio::select! {
+                _ = self.shutdown.cancelled() => break,
+                result = self.socket.recv_from(&mut buf) => {
+                    match result {
+                        Ok((len, from_addr)) => {
+                            let address = Address::from(from_addr);
+                            let data = Bytes::copy_from_slice(&buf[..len]);
+                            self.downstream_bytes.fetch_add(len as u64, Ordering::Relaxed);
+
+                            if let Err(_err) = self.process_and_send_datagram(address, data, max_payload_size).await {
+                                warn!("failed to send packet to client, {_err} terminating loop.");
                                 break;
                             }
-                        };
-
-                        let address = Address::from(from_addr);
-                        let data = Bytes::copy_from_slice(&buf[..len]);
-                        downstream_bytes.fetch_add(len as u64, Ordering::Relaxed);
-
-                        if !Self::process_and_send_downstream_packet(
-                            &connection,
-                            session_id,
-                            address,
-                            data,
-                            max_payload_size,
-                            &frag_counter,
-                        )
-                        .await
-                        {
-                            break; // Connection error, terminate loop
+                        },
+                        Err(_err) => {
+                            warn!("failed to receiving from remote socket {_err}");
+                            break;
                         }
-                    }
+                    };
                 }
             }
         }
-        .in_current_span();
-
-        tokio::spawn(future).abort_handle()
     }
 
-    /// Processes a downstream packet, fragmenting it if necessary, and sends it to the client.
-    /// Returns `false` if sending fails.
-    async fn process_and_send_downstream_packet(
-        connection: &Arc<C>,
-        session_id: u64,
+    /// Processes a packet, fragmenting it if necessary, and sends it to the client connection.
+    async fn process_and_send_datagram(
+        &self,
         address: Address,
         data: Bytes,
         max_payload_size: usize,
-        fragment_id_counter: &Arc<AtomicU32>,
-    ) -> bool {
+    ) -> io::Result<()> {
         if data.len() <= max_payload_size {
             let packet = UdpPacket::Unfragmented {
-                session_id,
+                session_id: self.session_id,
                 address,
                 data,
             };
-            Self::send_downstream_packet(connection, packet).await
+            Self::send_datagram(&self.connection, packet).await?
         } else {
-            let fragment_id = fragment_id_counter.fetch_add(1, Ordering::Relaxed);
-            let fragments =
-                UdpPacket::split_packet(session_id, address, data, max_payload_size, fragment_id);
+            let fragment_id = self.fragment_id_counter.fetch_add(1, Ordering::Relaxed);
+            let fragments = UdpPacket::split_packet(
+                self.session_id,
+                address,
+                data,
+                max_payload_size,
+                fragment_id,
+            );
             for fragment in fragments {
-                if !Self::send_downstream_packet(connection, fragment).await {
-                    return false; // Stop sending fragments if one fails
-                }
+                Self::send_datagram(&self.connection, fragment).await?
             }
-            true
         }
+
+        Ok(())
     }
 
-    /// Encodes and sends a single downstream packet to the client.
-    async fn send_downstream_packet(client: &Arc<C>, packet: UdpPacket) -> bool {
-        match packet.encode() {
-            Ok(encoded) => {
-                if client.send_datagram(encoded).await.is_err() {
-                    return false;
-                }
-            }
-            Err(e) => {
-                warn!(error = %e, "Failed to encode UDP packet for client");
-            }
-        }
-        true
+    async fn send_datagram(connection: &Arc<C>, packet: UdpPacket) -> io::Result<()> {
+        let data = packet.encode()?;
+        connection.send_datagram(data).await
     }
 }
 
