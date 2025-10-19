@@ -7,6 +7,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
 use tokio_util::codec::Framed;
 use tokio_util::sync::CancellationToken;
+#[cfg(feature = "tracing")]
 use tracing::Instrument;
 
 use ombrac::{codec, protocol};
@@ -35,19 +36,22 @@ impl Default for StreamGuard {
 
 impl Drop for StreamGuard {
     fn drop(&mut self) {
-        let (upstream_bytes, downstream_bytes) = self
-            .stats
-            .as_ref()
-            .map(|s| (s.a_to_b_bytes, s.b_to_a_bytes))
-            .unwrap_or_default();
+        #[cfg(feature = "tracing")]
+        {
+            let (upstream_bytes, downstream_bytes) = self
+                .stats
+                .as_ref()
+                .map(|s| (s.a_to_b_bytes, s.b_to_a_bytes))
+                .unwrap_or_default();
 
-        tracing::info!(
-            destination = %self.destination.as_ref().map(|a| a.to_string()).unwrap_or_else(|| "unknown".to_string()),
-            upstream_bytes = upstream_bytes + self.initial_upstream_bytes,
-            downstream_bytes,
-            duration_ms = self.start_time.elapsed().as_millis(),
-            reason = %DisconnectReason(&self.reason),
-        );
+            tracing::info!(
+                destination = %self.destination.as_ref().map(|a| a.to_string()).unwrap_or_else(|| "unknown".to_string()),
+                upstream_bytes = upstream_bytes + self.initial_upstream_bytes,
+                downstream_bytes,
+                duration_ms = self.start_time.elapsed().as_millis(),
+                reason = %DisconnectReason(&self.reason),
+            );
+        }
     }
 }
 
@@ -70,12 +74,17 @@ impl<C: Connection> StreamTunnel<C> {
                 _ = self.shutdown.cancelled() => break,
                 result = self.connection.accept_bidirectional() => {
                     let stream = result?;
-                    tokio::spawn(async move {
+                    let task = async move {
                         let mut guard = StreamGuard::default();
                         if let Err(e) = Self::handle_connect(stream, &mut guard).await {
                             guard.reason = Some(e);
                         }
-                    }.in_current_span());
+                    };
+
+                    #[cfg(feature = "tracing")]
+                    tokio::spawn(task.in_current_span());
+                    #[cfg(not(feature = "tracing"))]
+                    tokio::spawn(task);
                 }
             }
         }
@@ -110,7 +119,7 @@ impl<C: Connection> StreamTunnel<C> {
             }
             Err((e, stats)) => {
                 guard.stats = Some(stats);
-                Err(e.into())
+                Err(e)
             }
         }
     }
@@ -129,7 +138,7 @@ impl<C: Connection> StreamTunnel<C> {
                     )),
                 }
             }
-            Some(Err(e)) => Err(e.into()),
+            Some(Err(e)) => Err(e),
             None => Err(io::Error::new(
                 io::ErrorKind::UnexpectedEof,
                 "failed to read connect message on stream",
