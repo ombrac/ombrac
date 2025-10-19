@@ -42,7 +42,7 @@ impl<C: Connection> ClientConnection<C> {
             shutdown_token: CancellationToken::new(),
         };
 
-        handler.manage_proxy_loops().await;
+        handler.manage_acceptor_loops().await;
 
         Ok(())
     }
@@ -55,18 +55,18 @@ impl<C: Connection> ClientConnection<C> {
     ) -> io::Result<()> {
         let response = match message {
             UpstreamMessage::Hello(hello) if hello.version != PROTOCOLS_VERSION => {
-                warn!("Handshake failed: Unsupported protocol version");
+                warn!("handshake failed: unsupported protocol version");
                 ServerHandshakeResponse::Err(HandshakeError::UnsupportedVersion)
             }
             UpstreamMessage::Hello(hello) if hello.secret != secret => {
-                warn!("Handshake failed: Invalid secret");
+                warn!("handshake failed: invalid secret");
                 ServerHandshakeResponse::Err(HandshakeError::InvalidSecret)
             }
             UpstreamMessage::Hello(_) => ServerHandshakeResponse::Ok,
             _ => {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
-                    "Expected Hello message",
+                    "expected Hello message",
                 ));
             }
         };
@@ -77,14 +77,14 @@ impl<C: Connection> ClientConnection<C> {
         if matches!(response, ServerHandshakeResponse::Err(_)) {
             return Err(io::Error::new(
                 io::ErrorKind::PermissionDenied,
-                "Handshake failed",
+                "handshake failed",
             ));
         }
 
         Ok(())
     }
 
-    async fn manage_proxy_loops(&self) {
+    async fn manage_acceptor_loops(&self) {
         let connect_acceptor = self.spawn_client_connect_acceptor();
         #[cfg(feature = "datagram")]
         let datagram_acceptor = self.spawn_client_datagram_acceptor();
@@ -103,15 +103,13 @@ impl<C: Connection> ClientConnection<C> {
 
         match result {
             Ok(Ok(_)) => {
-                debug!("Client connection closed gracefully.");
+                debug!("connection closed gracefully.");
             }
-            Ok(Err(e)) => {
-                if e.kind() != io::ErrorKind::ConnectionAborted {
-                    warn!("Client connection closed with an error: {e}");
-                }
+            Ok(Err(_err)) => {
+                warn!("connection closed with an error: {_err}");
             }
-            Err(join_err) => {
-                warn!("Client connection handler task failed: {join_err}");
+            Err(_err) => {
+                warn!("connection handler task failed: {_err}");
             }
         }
     }

@@ -116,10 +116,10 @@ impl<C: Connection> DatagramTunnel<C> {
                 session
                     .upstream_bytes
                     .fetch_add(data.len() as u64, Ordering::Relaxed);
-                if let Ok(dest_addr) = lookup_host(&dns_cache, &address).await {
-                    if let Err(_err) = session.socket.send_to(&data, dest_addr).await {
-                        warn!("failed to send udp packet to {address}, {_err}");
-                    }
+                if let Ok(dest_addr) = lookup_host(&dns_cache, &address).await
+                    && let Err(_err) = session.socket.send_to(&data, dest_addr).await
+                {
+                    warn!("failed to send udp packet to {address}, {_err}");
                 }
             }
             .in_current_span();
