@@ -27,6 +27,15 @@ impl<C: Connection> ClientConnection<C> {
         match control_frame.next().await {
             Some(Ok(payload)) => {
                 let hello_message: UpstreamMessage = protocol::decode(&payload)?;
+                #[cfg(feature = "tracing")]
+                if let UpstreamMessage::Hello(hello) = &hello_message {
+                    let secret_hex = hello
+                        .secret
+                        .iter()
+                        .map(|b| format!("{:02x}", b))
+                        .collect::<String>();
+                    tracing::span::Span::current().record("secret", &secret_hex);
+                }
                 Self::validate_handshake(hello_message, secret, &mut control_frame).await?;
             }
             _ => {

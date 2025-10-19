@@ -35,22 +35,23 @@ impl<T: Acceptor> Server<T> {
                             let peer_addr = connection.remote_address().unwrap();
                             let connection_id = connection.id();
 
-                            let conn_span = tracing::info_span!("connection", id = connection_id, from = %peer_addr);
+                            let conn_span = tracing::info_span!("connection", id = connection_id, from = %peer_addr, secret = tracing::field::Empty);
                             tokio::spawn(async move {
                                 let start_time = Instant::now();
-                                info!("Connection Start");
                                 if let Err(e) = ClientConnection::handle(connection, secret).await {
-                                    if e.kind() != io::ErrorKind::ConnectionReset && e.kind() != io::ErrorKind::BrokenPipe && e.kind() != io::ErrorKind::UnexpectedEof {
-                                        error!(error = %e, "Connection handler failed");
-                                    } else {
-                                        info!("Connection closed by peer");
+                                    if !matches!(e.kind(),
+                                        io::ErrorKind::ConnectionReset |
+                                        io::ErrorKind::BrokenPipe |
+                                        io::ErrorKind::UnexpectedEof
+                                    ) {
+                                        error!("Connection handler failed, {e}");
                                     }
-                                };
-                                info!(duration_ms = start_time.elapsed().as_millis(), "Connection closed");
+                                }
+                                info!(duration_ms = start_time.elapsed().as_millis(), "connection closed");
                             }.instrument(conn_span));
                         },
-                        Err(_e) => {
-                            error!("Failed to accept connection: {}", _e)
+                        Err(_err) => {
+                            error!("failed to accept connection: {}", _err)
                         },
                     }
                 },
