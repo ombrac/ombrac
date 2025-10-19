@@ -116,7 +116,7 @@ impl<C: Connection> DatagramTunnel<C> {
                     warn!(%address, error = %e, "Failed to resolve destination address");
                 }
             }
-        });
+        }.in_current_span());
     }
 
     async fn resolve_address(
@@ -146,7 +146,6 @@ impl<C: Connection> DatagramTunnel<C> {
         }
     }
 
-    /// Retrieves an existing UDP socket for a session or creates a new one.
     async fn get_or_create_session(
         &self,
         session_id: u64,
@@ -183,7 +182,6 @@ impl<C: Connection> DatagramTunnel<C> {
         Ok(session)
     }
 
-    /// Spawns a dedicated task for handling downstream traffic for a single UDP session.
     fn spawn_downstream_loop(
         &self,
         session_id: u64,
@@ -206,7 +204,7 @@ impl<C: Connection> DatagramTunnel<C> {
                 )
                 .await;
             }
-            .instrument(tracing::info_span!("downstream_loop", session_id)),
+            .in_current_span(),
         );
 
         handle.abort_handle()

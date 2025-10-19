@@ -15,7 +15,7 @@ use ombrac_transport::Connection;
 use ombrac_transport::io::{CopyBidirectionalStats, copy_bidirectional};
 
 pub(crate) struct StreamGuard {
-    start_time: Instant,
+    created_at: Instant,
     initial_upstream_bytes: u64,
     destination: Option<protocol::Address>,
     reason: Option<io::Error>,
@@ -25,7 +25,7 @@ pub(crate) struct StreamGuard {
 impl Default for StreamGuard {
     fn default() -> Self {
         Self {
-            start_time: Instant::now(),
+            created_at: Instant::now(),
             initial_upstream_bytes: 0,
             destination: None,
             reason: None,
@@ -48,7 +48,7 @@ impl Drop for StreamGuard {
                 dest = %self.destination.as_ref().map(|a| a.to_string()).unwrap_or_else(|| "unknown".to_string()),
                 up = up + self.initial_upstream_bytes,
                 down,
-                duration = self.start_time.elapsed().as_millis(),
+                duration = self.created_at.elapsed().as_millis(),
                 reason = %DisconnectReason(&self.reason),
             );
         }
@@ -74,7 +74,7 @@ impl<C: Connection> StreamTunnel<C> {
                 _ = self.shutdown.cancelled() => break,
                 result = self.connection.accept_bidirectional() => {
                     let stream = result?;
-                    let task = async move {
+                    let future = async move {
                         let mut guard = StreamGuard::default();
                         if let Err(e) = Self::handle_connect(stream, &mut guard).await {
                             guard.reason = Some(e);
@@ -82,9 +82,9 @@ impl<C: Connection> StreamTunnel<C> {
                     };
 
                     #[cfg(feature = "tracing")]
-                    tokio::spawn(task.in_current_span());
+                    tokio::spawn(future.in_current_span());
                     #[cfg(not(feature = "tracing"))]
-                    tokio::spawn(task);
+                    tokio::spawn(future);
                 }
             }
         }
@@ -147,7 +147,7 @@ impl<C: Connection> StreamTunnel<C> {
     }
 }
 
-struct DisconnectReason<'a>(&'a Option<io::Error>);
+pub(crate) struct DisconnectReason<'a>(pub(crate) &'a Option<io::Error>);
 
 impl std::fmt::Display for DisconnectReason<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
