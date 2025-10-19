@@ -38,17 +38,17 @@ impl Drop for StreamGuard {
     fn drop(&mut self) {
         #[cfg(feature = "tracing")]
         {
-            let (upstream_bytes, downstream_bytes) = self
+            let (up, down) = self
                 .stats
                 .as_ref()
                 .map(|s| (s.a_to_b_bytes, s.b_to_a_bytes))
                 .unwrap_or_default();
 
             tracing::info!(
-                destination = %self.destination.as_ref().map(|a| a.to_string()).unwrap_or_else(|| "unknown".to_string()),
-                upstream_bytes = upstream_bytes + self.initial_upstream_bytes,
-                downstream_bytes,
-                duration_ms = self.start_time.elapsed().as_millis(),
+                dest = %self.destination.as_ref().map(|a| a.to_string()).unwrap_or_else(|| "unknown".to_string()),
+                up = up + self.initial_upstream_bytes,
+                down,
+                duration = self.start_time.elapsed().as_millis(),
                 reason = %DisconnectReason(&self.reason),
             );
         }
