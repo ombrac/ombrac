@@ -16,8 +16,17 @@ use ombrac_transport::Connection;
 
 use ombrac::reassembly::UdpReassembler;
 
+pub(crate) struct DatagramTunnel<C: Connection> {
+    connection: Arc<C>,
+    shutdown: CancellationToken,
+    sessions: Cache<u64, DatagramSession>,
+    dns_cache: Cache<Bytes, SocketAddr>,
+    reassembler: Arc<UdpReassembler>,
+    fragment_id_counter: Arc<AtomicU32>,
+}
+
 #[derive(Clone)]
-pub(super) struct DatagramSession {
+pub(crate) struct DatagramSession {
     socket: Arc<UdpSocket>,
     abort_handle: AbortHandle,
     destination: Address,
@@ -26,20 +35,11 @@ pub(super) struct DatagramSession {
     created_at: Instant,
 }
 
-pub(super) struct Datagram<C: Connection> {
-    client_connection: Arc<C>,
-    shutdown_token: CancellationToken,
-    sessions: Cache<u64, DatagramSession>,
-    dns_cache: Cache<Bytes, SocketAddr>,
-    reassembler: Arc<UdpReassembler>,
-    fragment_id_counter: Arc<AtomicU32>,
-}
-
-impl<C: Connection> Datagram<C> {
-    pub(super) fn new(client_connection: Arc<C>, shutdown_token: CancellationToken) -> Self {
+impl<C: Connection> DatagramTunnel<C> {
+    pub(crate) fn new(connection: Arc<C>, shutdown: CancellationToken) -> Self {
         Self {
-            client_connection,
-            shutdown_token,
+            connection,
+            shutdown,
             sessions: Cache::builder()
                 .max_capacity(8192)
                 .time_to_idle(Duration::from_secs(65))
@@ -63,12 +63,11 @@ impl<C: Connection> Datagram<C> {
         }
     }
 
-    /// Runs the main UDP proxy loop, handling upstream data from the client.
-    pub(super) async fn run_upstream_loop(self) -> io::Result<()> {
+    pub(crate) async fn accept_loop(self) -> io::Result<()> {
         loop {
             tokio::select! {
-                _ = self.shutdown_token.cancelled() => return Ok(()),
-                result = self.client_connection.read_datagram() => {
+                _ = self.shutdown.cancelled() => break,
+                result = self.connection.read_datagram() => {
                     let packet_bytes = match result {
                         Ok(bytes) => bytes,
                         Err(e) if e.kind() == io::ErrorKind::TimedOut => continue,
@@ -78,9 +77,10 @@ impl<C: Connection> Datagram<C> {
                 }
             }
         }
+
+        Ok(())
     }
 
-    /// Processes a single raw packet received from the client.
     async fn process_upstream_packet(&self, packet_bytes: Bytes) -> io::Result<()> {
         let packet = match UdpPacket::decode(&packet_bytes) {
             Ok(p) => p,
@@ -190,14 +190,14 @@ impl<C: Connection> Datagram<C> {
         socket: Arc<UdpSocket>,
         downstream_bytes: Arc<AtomicU64>,
     ) -> AbortHandle {
-        let client_connection = Arc::clone(&self.client_connection);
-        let token = self.shutdown_token.child_token();
+        let connection = Arc::clone(&self.connection);
+        let token = self.shutdown.child_token();
         let frag_counter = Arc::clone(&self.fragment_id_counter);
 
         let handle = tokio::spawn(
             async move {
                 Self::run_downstream_loop(
-                    client_connection,
+                    connection,
                     session_id,
                     socket,
                     frag_counter,
@@ -213,14 +213,14 @@ impl<C: Connection> Datagram<C> {
     }
 
     async fn run_downstream_loop(
-        client_connection: Arc<C>,
+        connection: Arc<C>,
         session_id: u64,
         socket: Arc<UdpSocket>,
         fragment_id_counter: Arc<AtomicU32>,
         token: CancellationToken,
         downstream_bytes: Arc<AtomicU64>,
     ) {
-        let max_datagram_size = client_connection.max_datagram_size().unwrap_or(1350);
+        let max_datagram_size = connection.max_datagram_size().unwrap_or(1350);
         let overhead = UdpPacket::fragmented_overhead();
         let max_payload_size = max_datagram_size.saturating_sub(overhead).max(1);
         let mut buf = vec![0u8; 65535];
@@ -243,12 +243,12 @@ impl<C: Connection> Datagram<C> {
 
                     if data.len() <= max_payload_size {
                         let packet = UdpPacket::Unfragmented { session_id, address, data };
-                        Self::send_packet_to_client(&client_connection, packet).await;
+                        Self::send_packet_to_client(&connection, packet).await;
                     } else {
                         let fragment_id = fragment_id_counter.fetch_add(1, Ordering::Relaxed);
                         let fragments = UdpPacket::split_packet(session_id, address, data, max_payload_size, fragment_id);
                         for fragment in fragments {
-                            if !Self::send_packet_to_client(&client_connection, fragment).await {
+                            if !Self::send_packet_to_client(&connection, fragment).await {
                                 break;
                             }
                         }
