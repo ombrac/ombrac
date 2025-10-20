@@ -133,7 +133,8 @@ pub unsafe extern "C" fn ombrac_server_service_startup(config_json: *const c_cha
 
     let service = runtime.block_on(async {
         #[cfg(feature = "transport-quic")]
-        Service::build::<QuicServiceBuilder>(Arc::new(service_config)).await
+        Service::build::<QuicServiceBuilder, ombrac::protocol::Secret>(Arc::new(service_config))
+            .await
     });
 
     #[cfg(feature = "transport-quic")]

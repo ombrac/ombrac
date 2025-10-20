@@ -37,7 +37,6 @@ pub struct ClientConnect {
     pub address: Address,
 }
 
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ServerHandshakeResponse {
     Ok,

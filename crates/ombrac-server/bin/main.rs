@@ -32,8 +32,10 @@ pub async fn run_from_cli(config: ombrac_server::config::ServiceConfig) -> io::R
         use ombrac_server::service::{QuicServiceBuilder, Service};
         use ombrac_transport::quic::{Connection as QuicConnection, server::Server as QuicServer};
 
-        match Service::<QuicServer, QuicConnection>::build::<QuicServiceBuilder>(config.into())
-            .await
+        match Service::<QuicServer, QuicConnection>::build::<QuicServiceBuilder, [u8; 32]>(
+            config.into(),
+        )
+        .await
         {
             Ok(session) => {
                 tokio::signal::ctrl_c().await?;

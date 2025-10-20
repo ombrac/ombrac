@@ -22,6 +22,19 @@ pub trait HandshakeValidator: Send + Sync {
     -> Result<(), protocol::HandshakeError>;
 }
 
+impl HandshakeValidator for ombrac::protocol::Secret {
+    fn validate_hello(
+        &self,
+        hello: &protocol::ClientHello,
+    ) -> Result<(), protocol::HandshakeError> {
+        if &hello.secret == self {
+            Ok(())
+        } else {
+            Err(protocol::HandshakeError::InvalidSecret)
+        }
+    }
+}
+
 pub struct ClientConnection<C: Connection> {
     client_connection: Arc<C>,
     shutdown_token: CancellationToken,

@@ -17,7 +17,7 @@ use tokio_util::sync::CancellationToken;
 use ombrac::codec::{UpstreamMessage, length_codec};
 use ombrac::protocol::{
     self, Address, ClientConnect, ClientHello, HandshakeError, PROTOCOLS_VERSION, Secret,
-    ServerHandshakeResponse
+    ServerHandshakeResponse,
 };
 use ombrac_macros::{error, info, warn};
 use ombrac_transport::{Connection, Initiator};
