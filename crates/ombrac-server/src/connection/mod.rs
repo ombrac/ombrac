@@ -118,7 +118,7 @@ impl<C: Connection> ClientConnection<C> {
                 debug!("connection closed gracefully.");
             }
             Ok(Err(_err)) => {
-                warn!("connection closed with an error: {_err}");
+                debug!("connection closed with an error: {_err}");
             }
             Err(_err) => {
                 warn!("connection handler task failed: {_err}");

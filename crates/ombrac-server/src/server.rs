@@ -92,7 +92,7 @@ impl<T: Acceptor> Server<T> {
 
         info!(
             duration = created_at.elapsed().as_millis(),
-            reason = reason.as_ref(),
+            reason = %reason.as_ref(),
             "connection closed"
         );
     }

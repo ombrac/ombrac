@@ -66,7 +66,7 @@ impl<C: Connection> DatagramTunnel<C> {
                     up = session.upstream_bytes.load(Ordering::Relaxed),
                     down = session.downstream_bytes.load(Ordering::Relaxed),
                     duration = session.created_at.elapsed().as_millis(),
-                    reason = "ok",
+                    reason = %"ok",
                 );
             })
             .build()
