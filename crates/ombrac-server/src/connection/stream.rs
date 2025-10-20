@@ -11,6 +11,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::Instrument;
 
 use ombrac::{codec, protocol};
+use ombrac_macros::info;
 use ombrac_transport::Connection;
 use ombrac_transport::io::{CopyBidirectionalStats, copy_bidirectional};
 
@@ -44,7 +45,7 @@ impl Drop for StreamGuard {
                 .map(|s| (s.a_to_b_bytes, s.b_to_a_bytes))
                 .unwrap_or_default();
 
-            tracing::info!(
+            info!(
                 dest = %self.destination.as_ref().map(|a| a.to_string()).unwrap_or_else(|| "unknown".to_string()),
                 up = up + self.initial_upstream_bytes,
                 down,

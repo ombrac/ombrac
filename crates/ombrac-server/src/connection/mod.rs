@@ -1,3 +1,4 @@
+#[cfg(feature = "datagram")]
 mod datagram;
 mod stream;
 
@@ -8,10 +9,12 @@ use futures::{SinkExt, StreamExt};
 use tokio::task::JoinHandle;
 use tokio_util::codec::Framed;
 use tokio_util::sync::CancellationToken;
-use tracing::{Instrument, debug, warn};
+#[cfg(feature = "tracing")]
+use tracing::Instrument;
 
 use ombrac::codec::{LengthDelimitedCodec, ServerHandshakeResponse, UpstreamMessage, length_codec};
 use ombrac::protocol::{self, HandshakeError, PROTOCOLS_VERSION, Secret};
+use ombrac_macros::{debug, warn};
 use ombrac_transport::Connection;
 
 pub struct ClientConnection<C: Connection> {
@@ -130,7 +133,12 @@ impl<C: Connection> ClientConnection<C> {
         let shutdown = self.shutdown_token.child_token();
         let tunnel = StreamTunnel::new(connection, shutdown);
 
-        tokio::spawn(tunnel.accept_loop().in_current_span())
+        #[cfg(not(feature = "tracing"))]
+        let handle = tokio::spawn(tunnel.accept_loop());
+        #[cfg(feature = "tracing")]
+        let handle = tokio::spawn(tunnel.accept_loop().in_current_span());
+
+        handle
     }
 
     #[cfg(feature = "datagram")]
@@ -141,6 +149,11 @@ impl<C: Connection> ClientConnection<C> {
         let shutdown = self.shutdown_token.child_token();
         let tunnel = DatagramTunnel::new(connection, shutdown);
 
-        tokio::spawn(tunnel.accept_loop().in_current_span())
+        #[cfg(not(feature = "tracing"))]
+        let handle = tokio::spawn(tunnel.accept_loop());
+        #[cfg(feature = "tracing")]
+        let handle = tokio::spawn(tunnel.accept_loop().in_current_span());
+
+        handle
     }
 }

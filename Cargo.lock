@@ -1809,6 +1809,9 @@ dependencies = [
 [[package]]
 name = "ombrac-macros"
 version = "0.6.2"
+dependencies = [
+ "tracing",
+]
 
 [[package]]
 name = "ombrac-netstack"

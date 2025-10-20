@@ -12,7 +12,10 @@ readme = "../../README.md"
 [features]
 default = ["quic"]
 
-tracing = ["dep:tracing"]
+tracing = [
+    "dep:tracing",
+    "ombrac-macros/tracing"
+]
 
 datagram = []
 

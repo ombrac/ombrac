@@ -5,8 +5,10 @@ use std::time::Instant;
 
 use ombrac::protocol::Secret;
 use tokio::sync::broadcast;
-use tracing::{Instrument, error, info};
+#[cfg(feature = "tracing")]
+use tracing::Instrument;
 
+use ombrac_macros::{error, info};
 use ombrac_transport::{Acceptor, Connection};
 
 use crate::connection::ClientConnection;
@@ -31,34 +33,68 @@ impl<T: Acceptor> Server<T> {
                 accepted = self.acceptor.accept() => {
                     match accepted {
                         Ok(connection) => {
-                            let secret = self.secret;
-                            let peer_addr = connection.remote_address().unwrap();
-                            let connection_id = connection.id();
-
-                            let conn_span = tracing::info_span!("connection", id = connection_id, from = %peer_addr, secret = tracing::field::Empty);
-                            tokio::spawn(async move {
-                                let start_time = Instant::now();
-                                if let Err(e) = ClientConnection::handle(connection, secret).await {
-                                    if !matches!(e.kind(),
-                                        io::ErrorKind::ConnectionReset |
-                                        io::ErrorKind::BrokenPipe |
-                                        io::ErrorKind::UnexpectedEof
-                                    ) {
-                                        error!("Connection handler failed, {e}");
-                                    }
-                                }
-                                info!(duration_ms = start_time.elapsed().as_millis(), "connection closed");
-                            }.instrument(conn_span));
+                            #[cfg(not(feature = "tracing"))]
+                            tokio::spawn(Self::handle_connection(connection, self.secret));
+                            #[cfg(feature = "tracing")]
+                            tokio::spawn(Self::handle_connection(connection, self.secret).in_current_span());
                         },
-                        Err(_err) => {
-                            error!("failed to accept connection: {}", _err)
-                        },
+                        Err(_err) => error!("failed to accept connection: {}", _err)
                     }
                 },
             }
         }
 
         Ok(())
+    }
+
+    #[cfg_attr(feature = "tracing",
+        tracing::instrument(
+            name = "connection",
+            skip_all,
+            fields(
+                id = connection.id(),
+                from = tracing::field::Empty,
+                secret = tracing::field::Empty
+            )
+        )
+    )]
+    pub async fn handle_connection(connection: <T as Acceptor>::Connection, secret: Secret) {
+        #[cfg(feature = "tracing")]
+        let created_at = Instant::now();
+
+        let peer_addr = match connection.remote_address() {
+            Ok(addr) => addr,
+            Err(_err) => {
+                return error!("failed to get remote address for incoming connection {_err}");
+            }
+        };
+
+        #[cfg(feature = "tracing")]
+        tracing::Span::current().record("from", tracing::field::display(peer_addr));
+
+        let reason: std::borrow::Cow<'static, str> =
+            match ClientConnection::handle(connection, secret).await {
+                Ok(_) => "ok".into(),
+                Err(e) => {
+                    if matches!(
+                        e.kind(),
+                        io::ErrorKind::ConnectionReset
+                            | io::ErrorKind::BrokenPipe
+                            | io::ErrorKind::UnexpectedEof
+                    ) {
+                        format!("client disconnect: {}", e.kind()).into()
+                    } else {
+                        error!("connection handler failed: {e}");
+                        format!("error: {e}").into()
+                    }
+                }
+            };
+
+        info!(
+            duration = created_at.elapsed().as_millis(),
+            reason = reason.as_ref(),
+            "connection closed"
+        );
     }
 
     pub fn local_addr(&self) -> io::Result<SocketAddr> {

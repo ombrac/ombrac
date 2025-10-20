@@ -9,5 +9,12 @@ description.workspace = true
 keywords.workspace = true
 readme = "../../README.md"
 
+[features]
+default = []
+tracing = ["dep:tracing"]
+
+[dependencies]
+tracing = { workspace = true, optional = true }
+
 [lints]
 workspace = true

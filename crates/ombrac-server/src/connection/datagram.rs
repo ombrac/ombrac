@@ -9,10 +9,12 @@ use moka::future::Cache;
 use tokio::net::UdpSocket;
 use tokio::task::AbortHandle;
 use tokio_util::sync::CancellationToken;
-use tracing::{Instrument, info, warn};
+#[cfg(feature = "tracing")]
+use tracing::Instrument;
 
 use ombrac::protocol::{Address, UdpPacket};
 use ombrac::reassembly::UdpReassembler;
+use ombrac_macros::{info, warn};
 use ombrac_transport::Connection;
 
 const MAX_SESSIONS: u64 = 8192;
@@ -116,15 +118,23 @@ impl<C: Connection> DatagramTunnel<C> {
                 session
                     .upstream_bytes
                     .fetch_add(data.len() as u64, Ordering::Relaxed);
-                if let Ok(dest_addr) = lookup_host(&dns_cache, &address).await
-                    && let Err(_err) = session.socket.send_to(&data, dest_addr).await
-                {
-                    warn!("failed to send udp packet to {address}, {_err}");
-                }
-            }
-            .in_current_span();
 
+                match lookup_host(&dns_cache, &address).await {
+                    Ok(dest_addr) => {
+                        if let Err(err) = session.socket.send_to(&data, dest_addr).await {
+                            warn!("failed to send udp packet to {address}: {err}");
+                        }
+                    }
+                    Err(err) => {
+                        warn!("failed to resolve DNS for {address}: {err}");
+                    }
+                }
+            };
+
+            #[cfg(not(feature = "tracing"))]
             tokio::spawn(future);
+            #[cfg(feature = "tracing")]
+            tokio::spawn(future.in_current_span());
         }
         Ok(())
     }
@@ -183,7 +193,13 @@ impl<C: Connection> DatagramTunnel<C> {
             socket,
             downstream_bytes,
         };
-        tokio::spawn(handler.accept_loop().in_current_span()).abort_handle()
+
+        #[cfg(feature = "tracing")]
+        let abort = tokio::spawn(handler.accept_loop()).abort_handle();
+        #[cfg(not(feature = "tracing"))]
+        let abort = tokio::spawn(handler.accept_loop()).abort_handle();
+
+        abort
     }
 }
 
