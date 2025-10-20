@@ -12,10 +12,15 @@ use tokio_util::sync::CancellationToken;
 #[cfg(feature = "tracing")]
 use tracing::Instrument;
 
-use ombrac::codec::{LengthDelimitedCodec, ServerHandshakeResponse, UpstreamMessage, length_codec};
-use ombrac::protocol::{self, HandshakeError, PROTOCOLS_VERSION, Secret};
+use ombrac::codec;
+use ombrac::protocol;
 use ombrac_macros::{debug, warn};
 use ombrac_transport::Connection;
+
+pub trait HandshakeValidator: Send + Sync {
+    fn validate_hello(&self, hello: &protocol::ClientHello)
+    -> Result<(), protocol::HandshakeError>;
+}
 
 pub struct ClientConnection<C: Connection> {
     client_connection: Arc<C>,
@@ -23,28 +28,51 @@ pub struct ClientConnection<C: Connection> {
 }
 
 impl<C: Connection> ClientConnection<C> {
-    pub async fn handle(connection: C, secret: Secret) -> io::Result<()> {
+    pub async fn handle<V: HandshakeValidator>(connection: C, validator: &V) -> io::Result<()> {
         let mut control_stream = connection.accept_bidirectional().await?;
-        let mut control_frame = Framed::new(&mut control_stream, length_codec());
+        let mut control_frame = Framed::new(&mut control_stream, codec::length_codec());
 
         match control_frame.next().await {
             Some(Ok(payload)) => {
-                let hello_message: UpstreamMessage = protocol::decode(&payload)?;
-                #[cfg(feature = "tracing")]
-                if let UpstreamMessage::Hello(hello) = &hello_message {
-                    let secret_hex = hello
-                        .secret
-                        .iter()
-                        .map(|b| format!("{:02x}", b))
-                        .collect::<String>();
-                    tracing::span::Span::current().record("secret", &secret_hex);
+                let hello_message: codec::UpstreamMessage = protocol::decode(&payload)?;
+
+                if let codec::UpstreamMessage::Hello(hello) = &hello_message {
+                    #[cfg(feature = "tracing")]
+                    {
+                        let secret_hex = hello
+                            .secret
+                            .iter()
+                            .map(|b| format!("{:02x}", b))
+                            .collect::<String>();
+                        tracing::span::Span::current().record("secret", &secret_hex);
+                    }
+
+                    let response = if hello.version != protocol::PROTOCOLS_VERSION {
+                        protocol::ServerHandshakeResponse::Err(
+                            protocol::HandshakeError::UnsupportedVersion,
+                        )
+                    } else {
+                        match validator.validate_hello(hello) {
+                            Ok(_) => protocol::ServerHandshakeResponse::Ok,
+                            Err(e) => protocol::ServerHandshakeResponse::Err(e),
+                        }
+                    };
+
+                    let response_payload = protocol::encode(&response)?;
+                    control_frame.send(response_payload.into()).await?;
+
+                    if let protocol::ServerHandshakeResponse::Err(e) = response {
+                        return Err(io::Error::new(
+                            io::ErrorKind::PermissionDenied,
+                            format!("handshake validation failed: {:?}", e),
+                        ));
+                    }
                 }
-                Self::validate_handshake(hello_message, secret, &mut control_frame).await?;
             }
             _ => {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
-                    "Failed to read Hello message",
+                    "failed to read hello message",
                 ));
             }
         }
@@ -55,43 +83,6 @@ impl<C: Connection> ClientConnection<C> {
         };
 
         handler.manage_acceptor_loops().await;
-
-        Ok(())
-    }
-
-    /// Validates the client's Hello message and sends the appropriate response.
-    async fn validate_handshake(
-        message: UpstreamMessage,
-        secret: Secret,
-        framed: &mut Framed<&mut C::Stream, LengthDelimitedCodec>,
-    ) -> io::Result<()> {
-        let response = match message {
-            UpstreamMessage::Hello(hello) if hello.version != PROTOCOLS_VERSION => {
-                warn!("handshake failed: unsupported protocol version");
-                ServerHandshakeResponse::Err(HandshakeError::UnsupportedVersion)
-            }
-            UpstreamMessage::Hello(hello) if hello.secret != secret => {
-                warn!("handshake failed: invalid secret");
-                ServerHandshakeResponse::Err(HandshakeError::InvalidSecret)
-            }
-            UpstreamMessage::Hello(_) => ServerHandshakeResponse::Ok,
-            _ => {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "expected Hello message",
-                ));
-            }
-        };
-
-        let response_bytes = protocol::encode(&response)?;
-        framed.send(response_bytes).await?;
-
-        if matches!(response, ServerHandshakeResponse::Err(_)) {
-            return Err(io::Error::new(
-                io::ErrorKind::PermissionDenied,
-                "handshake failed",
-            ));
-        }
 
         Ok(())
     }

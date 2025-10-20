@@ -3,7 +3,6 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Instant;
 
-use ombrac::protocol::Secret;
 use tokio::sync::broadcast;
 #[cfg(feature = "tracing")]
 use tracing::Instrument;
@@ -11,18 +10,18 @@ use tracing::Instrument;
 use ombrac_macros::{error, info};
 use ombrac_transport::{Acceptor, Connection};
 
-use crate::connection::ClientConnection;
+use crate::connection::{ClientConnection, HandshakeValidator};
 
-pub struct Server<T: Acceptor> {
+pub struct Server<T, V> {
     acceptor: Arc<T>,
-    secret: Secret,
+    validator: Arc<V>,
 }
 
-impl<T: Acceptor> Server<T> {
-    pub fn new(acceptor: T, secret: Secret) -> Self {
+impl<T: Acceptor, V: HandshakeValidator + 'static> Server<T, V> {
+    pub fn new(acceptor: T, validator: V) -> Self {
         Self {
             acceptor: Arc::new(acceptor),
-            secret,
+            validator: Arc::new(validator),
         }
     }
 
@@ -33,10 +32,11 @@ impl<T: Acceptor> Server<T> {
                 accepted = self.acceptor.accept() => {
                     match accepted {
                         Ok(connection) => {
+                            let validator = Arc::clone(&self.validator);
                             #[cfg(not(feature = "tracing"))]
-                            tokio::spawn(Self::handle_connection(connection, self.secret));
+                            tokio::spawn(Self::handle_connection(connection, validator));
                             #[cfg(feature = "tracing")]
-                            tokio::spawn(Self::handle_connection(connection, self.secret).in_current_span());
+                            tokio::spawn(Self::handle_connection(connection, validator).in_current_span());
                         },
                         Err(_err) => error!("failed to accept connection: {}", _err)
                     }
@@ -58,7 +58,7 @@ impl<T: Acceptor> Server<T> {
             )
         )
     )]
-    pub async fn handle_connection(connection: <T as Acceptor>::Connection, secret: Secret) {
+    pub async fn handle_connection(connection: <T as Acceptor>::Connection, validator: Arc<V>) {
         #[cfg(feature = "tracing")]
         let created_at = Instant::now();
 
@@ -72,8 +72,8 @@ impl<T: Acceptor> Server<T> {
         #[cfg(feature = "tracing")]
         tracing::Span::current().record("from", tracing::field::display(peer_addr));
 
-        let reason: std::borrow::Cow<'static, str> =
-            match ClientConnection::handle(connection, secret).await {
+        let reason: std::borrow::Cow<'static, str> = {
+            match ClientConnection::handle(connection, validator.as_ref()).await {
                 Ok(_) => "ok".into(),
                 Err(e) => {
                     if matches!(
@@ -88,7 +88,8 @@ impl<T: Acceptor> Server<T> {
                         format!("error: {e}").into()
                     }
                 }
-            };
+            }
+        };
 
         info!(
             duration = created_at.elapsed().as_millis(),

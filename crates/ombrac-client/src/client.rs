@@ -14,9 +14,10 @@ use tokio_util::codec::Framed;
 #[cfg(feature = "datagram")]
 use tokio_util::sync::CancellationToken;
 
-use ombrac::codec::{ServerHandshakeResponse, UpstreamMessage, length_codec};
+use ombrac::codec::{UpstreamMessage, length_codec};
 use ombrac::protocol::{
     self, Address, ClientConnect, ClientHello, HandshakeError, PROTOCOLS_VERSION, Secret,
+    ServerHandshakeResponse
 };
 use ombrac_macros::{error, info, warn};
 use ombrac_transport::{Connection, Initiator};
