@@ -82,7 +82,7 @@ tracing-appender = { version = "0.2", default-features = false }
 # dev dependencies
 curl = { version = "0.4", default-features = false }
 ntest = { version = "0.9" , default-features = false }
-rcgen = { version = "0.13", default-features = false }
+rcgen = { version = "0.14", default-features = false }
 
 # benches
 criterion = { version = "0.7", default-features = false }
