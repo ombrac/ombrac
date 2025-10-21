@@ -5,7 +5,8 @@ use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::LazyLock;
 
-use rcgen::{Ia5String, SanType};
+use rcgen::string::Ia5String;
+use rcgen::SanType;
 
 use crate::path::BinaryLocator;
 
