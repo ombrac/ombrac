@@ -44,6 +44,7 @@ tracing = [
     "dep:tracing-appender",
     "dep:tracing-subscriber",
     "ombrac-netstack/tracing",
+    "ombrac-macros/tracing",
     "ombrac-transport/tracing"
 ]
 endpoint-default = ["endpoint-socks"]
