@@ -38,6 +38,12 @@ pub struct ClientConnect {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ServerHandshakeResponse {
+    Ok,
+    Err(HandshakeError),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum UdpPacket {
     Unfragmented {
         session_id: u64,

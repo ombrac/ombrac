@@ -17,6 +17,7 @@ use ombrac_transport::quic::{
 use ombrac_transport::{Acceptor, Connection};
 
 use crate::config::ServiceConfig;
+use crate::connection::HandshakeValidator;
 use crate::server::Server;
 
 #[cfg(feature = "transport-quic")]
@@ -50,10 +51,11 @@ macro_rules! require_config {
 pub trait ServiceBuilder {
     type Acceptor: Acceptor<Connection = Self::Connection>;
     type Connection: Connection;
+    type Validator: HandshakeValidator + 'static;
 
     fn build(
         config: &Arc<ServiceConfig>,
-    ) -> impl Future<Output = Result<Arc<Server<Self::Acceptor>>>> + Send;
+    ) -> impl Future<Output = Result<Arc<Server<Self::Acceptor, Self::Validator>>>> + Send;
 }
 
 #[cfg(feature = "transport-quic")]
@@ -63,8 +65,11 @@ pub struct QuicServiceBuilder;
 impl ServiceBuilder for QuicServiceBuilder {
     type Acceptor = QuicServer;
     type Connection = QuicConnection;
+    type Validator = ombrac::protocol::Secret;
 
-    async fn build(config: &Arc<ServiceConfig>) -> Result<Arc<Server<Self::Acceptor>>> {
+    async fn build(
+        config: &Arc<ServiceConfig>,
+    ) -> Result<Arc<Server<Self::Acceptor, Self::Validator>>> {
         let acceptor = quic_server_from_config(config).await?;
         let secret = *blake3::hash(config.secret.as_bytes()).as_bytes();
         let server = Arc::new(Server::new(acceptor, secret));
@@ -88,9 +93,10 @@ where
     T: Acceptor<Connection = C> + Send + Sync + 'static,
     C: Connection + Send + Sync + 'static,
 {
-    pub async fn build<Builder>(config: Arc<ServiceConfig>) -> Result<Self>
+    pub async fn build<Builder, V>(config: Arc<ServiceConfig>) -> Result<Self>
     where
-        Builder: ServiceBuilder<Acceptor = T, Connection = C>,
+        Builder: ServiceBuilder<Acceptor = T, Connection = C, Validator = V>,
+        V: HandshakeValidator + Send + Sync + 'static,
     {
         let server = Builder::build(&config).await?;
         let (shutdown_tx, shutdown_rx) = broadcast::channel(1);
