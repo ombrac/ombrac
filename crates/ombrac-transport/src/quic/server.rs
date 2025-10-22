@@ -57,7 +57,7 @@ impl Config {
     fn build_tls_config(&self) -> Result<rustls::ServerConfig> {
         let (certs, key) = if self.enable_self_signed {
             let cert = rcgen::generate_simple_self_signed(vec!["localhost".into()])?;
-            let key = PrivatePkcs8KeyDer::from(cert.key_pair.serialize_der()).into();
+            let key = PrivatePkcs8KeyDer::from(cert.signing_key.serialize_der()).into();
             let certs = vec![CertificateDer::from(cert.cert)];
             (certs, key)
         } else {

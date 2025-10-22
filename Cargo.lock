@@ -210,7 +210,7 @@ checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
 name = "benches"
-version = "0.6.2"
+version = "0.6.3"
 dependencies = [
  "criterion",
  "ombrac",
@@ -259,7 +259,7 @@ dependencies = [
  "bitflags 2.9.4",
  "cexpr",
  "clang-sys",
- "itertools 0.10.5",
+ "itertools 0.13.0",
  "log",
  "prettyplease",
  "proc-macro2",
@@ -1684,7 +1684,7 @@ dependencies = [
 
 [[package]]
 name = "ombrac"
-version = "0.6.2"
+version = "0.6.3"
 dependencies = [
  "bincode",
  "bytes",
@@ -1696,7 +1696,7 @@ dependencies = [
 
 [[package]]
 name = "ombrac-client"
-version = "0.6.2"
+version = "0.6.3"
 dependencies = [
  "arc-swap",
  "bincode",
@@ -1732,14 +1732,14 @@ dependencies = [
 
 [[package]]
 name = "ombrac-macros"
-version = "0.6.2"
+version = "0.6.3"
 dependencies = [
  "tracing",
 ]
 
 [[package]]
 name = "ombrac-netstack"
-version = "0.6.2"
+version = "0.6.3"
 dependencies = [
  "bytes",
  "crossbeam-queue",
@@ -1754,7 +1754,7 @@ dependencies = [
 
 [[package]]
 name = "ombrac-server"
-version = "0.6.2"
+version = "0.6.3"
 dependencies = [
  "arc-swap",
  "bincode",
@@ -1779,7 +1779,7 @@ dependencies = [
 
 [[package]]
 name = "ombrac-transport"
-version = "0.6.2"
+version = "0.6.3"
 dependencies = [
  "arc-swap",
  "async-channel",
@@ -2141,9 +2141,9 @@ dependencies = [
 
 [[package]]
 name = "rcgen"
-version = "0.13.2"
+version = "0.14.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "75e669e5202259b5314d1ea5397316ad400819437857b90861765f24c4cf80a2"
+checksum = "5fae430c6b28f1ad601274e78b7dffa0546de0b73b4cd32f46723c0c2a16f7a5"
 dependencies = [
  "aws-lc-rs",
  "pem",
@@ -2612,7 +2612,7 @@ dependencies = [
 
 [[package]]
 name = "tests-integration"
-version = "0.6.2"
+version = "0.6.3"
 dependencies = [
  "bytes",
  "curl",
@@ -2628,7 +2628,7 @@ dependencies = [
 
 [[package]]
 name = "tests-support"
-version = "0.6.2"
+version = "0.6.3"
 dependencies = [
  "bytes",
  "ombrac-transport",
