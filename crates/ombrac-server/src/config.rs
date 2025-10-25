@@ -49,6 +49,7 @@ pub struct Args {
 
 // JSON Config File
 #[derive(Deserialize, Serialize, Debug, Default)]
+#[serde(rename_all = "kebab-case")]
 pub struct ConfigFile {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub secret: Option<String>,
@@ -63,8 +64,9 @@ pub struct ConfigFile {
     pub logging: LoggingConfig,
 }
 
-#[derive(Deserialize, Serialize, Debug, Parser, Clone)]
 #[cfg(feature = "transport-quic")]
+#[derive(Deserialize, Serialize, Debug, Parser, Clone)]
+#[serde(rename_all = "kebab-case")]
 pub struct TransportConfig {
     /// Set the TLS mode for the connection
     /// tls: Standard TLS with server certificate verification
@@ -132,6 +134,7 @@ pub struct TransportConfig {
 
 #[cfg(feature = "tracing")]
 #[derive(Deserialize, Serialize, Debug, Parser, Clone)]
+#[serde(rename_all = "kebab-case")]
 pub struct LoggingConfig {
     /// Logging level (e.g., INFO, WARN, ERROR) [default: INFO]
     #[clap(long, help_heading = "Logging", value_name = "LEVEL")]
@@ -140,9 +143,8 @@ pub struct LoggingConfig {
 }
 
 #[cfg(feature = "transport-quic")]
-#[derive(ValueEnum, Clone, Debug, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(ValueEnum, Clone, Debug, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "kebab-case")]
-#[derive(Default)]
 pub enum TlsMode {
     #[default]
     Tls,
