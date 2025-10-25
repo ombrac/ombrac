@@ -69,7 +69,14 @@ impl ServiceBuilder for QuicServiceBuilder {
     ) -> Result<Arc<Client<Self::Initiator, Self::Connection>>> {
         let transport = quic_client_from_config(config).await?;
         let secret = *blake3::hash(config.secret.as_bytes()).as_bytes();
-        let client = Arc::new(Client::new(transport, secret, None).await?);
+        let client = Arc::new(
+            Client::new(
+                transport,
+                secret,
+                config.handshake_option.clone().map(Into::into),
+            )
+            .await?,
+        );
         Ok(client)
     }
 }

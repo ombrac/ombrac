@@ -105,6 +105,7 @@ pub unsafe extern "C" fn ombrac_client_service_startup(config_json: *const c_cha
         (Some(secret), Some(server)) => ServiceConfig {
             secret,
             server,
+            handshake_option: config_file.handshake_option,
             endpoint: config_file.endpoint,
             #[cfg(feature = "transport-quic")]
             transport: config_file.transport,
