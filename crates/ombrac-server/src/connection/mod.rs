@@ -72,7 +72,7 @@ impl<C: Connection> ClientConnection<C> {
                     };
 
                     let response_payload = protocol::encode(&response)?;
-                    control_frame.send(response_payload.into()).await?;
+                    control_frame.send(response_payload).await?;
 
                     if let protocol::ServerHandshakeResponse::Err(e) = response {
                         return Err(io::Error::new(

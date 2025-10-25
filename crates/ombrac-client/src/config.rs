@@ -58,7 +58,6 @@ pub struct Args {
 
 // JSON Config File
 #[derive(Deserialize, Serialize, Debug, Default)]
-#[serde(rename_all = "kebab-case")]
 pub struct ConfigFile {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub secret: Option<String>,
@@ -79,7 +78,6 @@ pub struct ConfigFile {
 }
 
 #[derive(Deserialize, Serialize, Debug, Parser, Clone, Default)]
-#[serde(rename_all = "kebab-case")]
 pub struct EndpointConfig {
     /// The address to bind for the HTTP/HTTPS server
     #[cfg(feature = "endpoint-http")]
@@ -101,7 +99,6 @@ pub struct EndpointConfig {
 
 #[cfg(feature = "transport-quic")]
 #[derive(Deserialize, Serialize, Debug, Parser, Clone)]
-#[serde(rename_all = "kebab-case")]
 pub struct TransportConfig {
     /// The address to bind for transport
     #[clap(long, help_heading = "Transport", value_name = "ADDR")]
@@ -181,7 +178,6 @@ pub struct TransportConfig {
 
 #[cfg(feature = "tracing")]
 #[derive(Deserialize, Serialize, Debug, Parser, Clone)]
-#[serde(rename_all = "kebab-case")]
 pub struct LoggingConfig {
     /// Logging level (e.g., INFO, WARN, ERROR) [default: INFO]
     #[clap(long, help_heading = "Logging", value_name = "LEVEL")]
@@ -191,7 +187,6 @@ pub struct LoggingConfig {
 
 #[cfg(feature = "endpoint-tun")]
 #[derive(Deserialize, Serialize, Debug, Parser, Clone)]
-#[serde(rename_all = "kebab-case")]
 pub struct TunConfig {
     /// Use a pre-existing TUN device by providing its file descriptor.  
     /// `tun_ipv4`, `tun_ipv6`, and `tun_mtu` will be ignored.
