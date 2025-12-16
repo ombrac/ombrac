@@ -17,19 +17,29 @@ use ombrac::protocol;
 use ombrac_macros::{debug, warn};
 use ombrac_transport::Connection;
 
+pub struct ConnectionHandle<C> {
+    inner: Arc<C>,
+}
+
+impl<C: Connection> ConnectionHandle<C> {
+    pub fn close(&self, error_code: u32, reason: &[u8]) {
+        self.inner.close(error_code, reason);
+    }
+}
+
 pub trait ConnectionHandler<T>: Send + Sync {
-    type Output: Send;
+    type Context: Send;
 
     fn verify(
         &self,
         hello: &protocol::ClientHello,
-    ) -> Result<Self::Output, protocol::HandshakeError>;
+    ) -> Result<Self::Context, protocol::HandshakeError>;
 
-    fn accept(&self, output: Self::Output, connection: Arc<T>);
+    fn accept(&self, output: Self::Context, connection: ConnectionHandle<T>);
 }
 
 impl<T> ConnectionHandler<T> for ombrac::protocol::Secret {
-    type Output = ();
+    type Context = ();
 
     fn verify(&self, hello: &protocol::ClientHello) -> Result<(), protocol::HandshakeError> {
         if &hello.secret == self {
@@ -39,7 +49,7 @@ impl<T> ConnectionHandler<T> for ombrac::protocol::Secret {
         }
     }
 
-    fn accept(&self, _output: Self::Output, _connection: Arc<T>) {
+    fn accept(&self, _output: Self::Context, _connection: ConnectionHandle<T>) {
         ()
     }
 }
@@ -58,7 +68,12 @@ impl<C: Connection> ClientConnection<C> {
 
         let client_connection = Arc::new(connection);
 
-        validator.accept(validation_ctx, client_connection.clone());
+        validator.accept(
+            validation_ctx,
+            ConnectionHandle {
+                inner: client_connection.clone(),
+            },
+        );
 
         let handler = Self {
             client_connection,
@@ -70,7 +85,7 @@ impl<C: Connection> ClientConnection<C> {
         Ok(())
     }
 
-    async fn perform_handshake<V>(connection: C, validator: &V) -> io::Result<(V::Output, C)>
+    async fn perform_handshake<V>(connection: C, validator: &V) -> io::Result<(V::Context, C)>
     where
         V: ConnectionHandler<C>,
     {
