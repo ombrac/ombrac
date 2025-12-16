@@ -112,6 +112,10 @@ impl Connection for MockConnection {
             })
         }
     }
+
+    fn close(&self, _error_code: u32, _reason: &[u8]) {
+        ()
+    }
 }
 
 fn create_connection_pair(

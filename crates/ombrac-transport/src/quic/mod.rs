@@ -200,4 +200,8 @@ impl crate::Connection for quinn::Connection {
     fn id(&self) -> usize {
         quinn::Connection::stable_id(self)
     }
+
+    fn close(&self, error_code: u32, reason: &[u8]) {
+        self.close(error_code.into(), reason);
+    }
 }

@@ -30,6 +30,7 @@ pub trait Acceptor: Send + Sync + 'static {
 pub trait Connection: Send + Sync + 'static {
     type Stream: AsyncRead + AsyncWrite + Unpin + Send + Sync;
     fn id(&self) -> usize;
+    fn close(&self, error_code: u32, reason: &[u8]);
     fn remote_address(&self) -> Result<SocketAddr>;
 
     fn open_bidirectional(&self) -> impl Future<Output = Result<Self::Stream>> + Send;

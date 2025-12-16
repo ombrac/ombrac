@@ -17,7 +17,7 @@ use ombrac_transport::quic::{
 use ombrac_transport::{Acceptor, Connection};
 
 use crate::config::ServiceConfig;
-use crate::connection::HandshakeValidator;
+use crate::connection::ConnectionHandler;
 use crate::server::Server;
 
 #[cfg(feature = "transport-quic")]
@@ -51,7 +51,7 @@ macro_rules! require_config {
 pub trait ServiceBuilder {
     type Acceptor: Acceptor<Connection = Self::Connection>;
     type Connection: Connection;
-    type Validator: HandshakeValidator + 'static;
+    type Validator: ConnectionHandler<Self::Connection> + 'static;
 
     fn build(
         config: &Arc<ServiceConfig>,
@@ -96,7 +96,7 @@ where
     pub async fn build<Builder, V>(config: Arc<ServiceConfig>) -> Result<Self>
     where
         Builder: ServiceBuilder<Acceptor = T, Connection = C, Validator = V>,
-        V: HandshakeValidator + Send + Sync + 'static,
+        V: ConnectionHandler<C> + Send + Sync + 'static,
     {
         let server = Builder::build(&config).await?;
         let (shutdown_tx, shutdown_rx) = broadcast::channel(1);

@@ -10,14 +10,14 @@ use tracing::Instrument;
 use ombrac_macros::{error, info};
 use ombrac_transport::{Acceptor, Connection};
 
-use crate::connection::{ClientConnection, HandshakeValidator};
+use crate::connection::{ClientConnection, ConnectionHandler};
 
 pub struct Server<T, V> {
     acceptor: Arc<T>,
     validator: Arc<V>,
 }
 
-impl<T: Acceptor, V: HandshakeValidator + 'static> Server<T, V> {
+impl<T: Acceptor, V: ConnectionHandler<T::Connection> + 'static> Server<T, V> {
     pub fn new(acceptor: T, validator: V) -> Self {
         Self {
             acceptor: Arc::new(acceptor),
