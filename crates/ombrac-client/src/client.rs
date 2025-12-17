@@ -10,6 +10,7 @@ use bytes::Bytes;
 use futures::{SinkExt, StreamExt};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::Mutex;
+use tokio::time::Instant;
 use tokio_util::codec::Framed;
 #[cfg(feature = "datagram")]
 use tokio_util::sync::CancellationToken;
@@ -26,6 +27,20 @@ use ombrac_transport::{Connection, Initiator};
 use datagram::dispatcher::UdpDispatcher;
 #[cfg(feature = "datagram")]
 pub use datagram::session::UdpSession;
+
+struct ReconnectState {
+    last_attempt: Option<Instant>,
+    backoff: Duration,
+}
+
+impl Default for ReconnectState {
+    fn default() -> Self {
+        Self {
+            last_attempt: None,
+            backoff: Duration::from_secs(1),
+        }
+    }
+}
 
 /// The central client responsible for managing the connection to the server.
 ///
@@ -48,7 +63,7 @@ pub(crate) struct ClientInner<T, C> {
     pub(crate) transport: T,
     pub(crate) connection: ArcSwap<C>,
     // A lock to ensure only one task attempts to reconnect at a time.
-    reconnect_lock: Mutex<()>,
+    reconnect_lock: Mutex<ReconnectState>,
     secret: Secret,
     options: Bytes,
     #[cfg(feature = "datagram")]
@@ -76,7 +91,7 @@ where
         let inner = Arc::new(ClientInner {
             transport,
             connection: ArcSwap::new(Arc::new(connection)),
-            reconnect_lock: Mutex::new(()),
+            reconnect_lock: Mutex::new(ReconnectState::default()),
             secret,
             options,
             #[cfg(feature = "datagram")]
@@ -193,22 +208,51 @@ where
     /// Handles the reconnection logic.
     ///
     /// It uses a mutex to prevent multiple tasks from trying to reconnect simultaneously.
-    async fn reconnect(&self, old_conn_id: usize) -> io::Result<()> {
-        let _lock = self.reconnect_lock.lock().await;
+     async fn reconnect(&self, old_conn_id: usize) -> io::Result<()> {
+        let mut state = self.reconnect_lock.lock().await;
 
-        let current_conn_id = Arc::as_ptr(&self.connection.load()) as usize;
-        // Check if another task has already reconnected.
-        if current_conn_id == old_conn_id {
-            // Rebind the transport to a new socket to ensure a clean state for reconnection.
-            self.transport.rebind().await?;
-
-            let new_connection =
-                handshake(&self.transport, self.secret, self.options.clone()).await?;
-            self.connection.store(Arc::new(new_connection));
-            info!("Reconnection successful");
+        let current_conn = self.connection.load();
+        let current_conn_id = Arc::as_ptr(&current_conn) as usize;
+        if current_conn_id != old_conn_id {
+            return Ok(());
         }
 
-        Ok(())
+        if let Some(last) = state.last_attempt {
+            let elapsed = last.elapsed();
+            if elapsed < state.backoff {
+                let wait_time = state.backoff - elapsed;
+                warn!("Too many reconnect attempts. Global throttling for {:?}...", wait_time);
+
+                drop(state);
+                tokio::time::sleep(wait_time).await; 
+                return Err(io::Error::new(io::ErrorKind::Other, "Reconnect throttled"));
+            }
+        }
+
+        info!("Attemping to reconnect...");
+        
+        state.last_attempt = Some(Instant::now());
+
+        if let Err(e) = self.transport.rebind().await {
+            state.backoff = (state.backoff * 2).min(Duration::from_secs(60));
+            return Err(e);
+        }
+
+        match handshake(&self.transport, self.secret, self.options.clone()).await {
+            Ok(new_connection) => {
+                state.backoff = Duration::from_secs(1);
+                state.last_attempt = None;
+                
+                self.connection.store(Arc::new(new_connection));
+                info!("Reconnection successful");
+                Ok(())
+            }
+            Err(e) => {
+                state.backoff = (state.backoff * 2).min(Duration::from_secs(60));
+                error!("Reconnect failed: {}. Next retry backoff: {:?}", e, state.backoff);
+                Err(e)
+            }
+        }
     }
 }
 
@@ -405,6 +449,8 @@ mod datagram {
 
     /// Contains the `UdpDispatcher` which runs as a background task.
     pub(crate) mod dispatcher {
+        use std::time::Duration;
+
         use super::*;
         use dashmap::DashMap;
         use tokio::sync::mpsc;
@@ -436,6 +482,9 @@ mod datagram {
                 C: Connection,
             {
                 let mut reassembler = UdpReassembler::default();
+                const INITIAL_DELAY: Duration = Duration::from_secs(1);
+                const MAX_DELAY: Duration = Duration::from_secs(60);
+                let mut current_delay = INITIAL_DELAY;
 
                 loop {
                     tokio::select! {
@@ -447,12 +496,16 @@ mod datagram {
                         result = read_datagram(&inner, &mut reassembler) => {
                             match result {
                                 Ok((session_id, address, data)) => {
+                                    if current_delay != INITIAL_DELAY {
+                                        current_delay = INITIAL_DELAY;
+                                    }
+                                    
                                     inner.udp_dispatcher.dispatch(session_id, data, address).await;
                                 }
                                 Err(_e) => {
-                                    warn!("Error reading datagram: {}. Retrying after delay...", _e);
-                                     // A small delay to prevent a tight loop on persistent errors.
-                                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                                    warn!("Error reading datagram: {}. Retrying in {:?}...", _e, current_delay);
+                                    tokio::time::sleep(current_delay).await;
+                                    current_delay = (current_delay * 2).min(MAX_DELAY);
                                 }
                             }
                         }
