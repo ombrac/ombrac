@@ -88,7 +88,10 @@ impl<C: Connection> DatagramTunnel<C> {
                                 warn!("failed to handle upstream packet: {}", e);
                             }
                         }
-                        Err(e) if e.kind() == io::ErrorKind::TimedOut => continue,
+                        Err(e) if e.kind() == io::ErrorKind::TimedOut => {
+                            tokio::time::sleep(Duration::from_millis(1)).await;
+                            continue
+                        },
                         Err(e) => return Err(e),
                     };
                 }
