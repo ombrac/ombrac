@@ -10,7 +10,7 @@ use tracing::Instrument;
 use ombrac_macros::{error, info};
 use ombrac_transport::{Acceptor, Connection};
 
-use crate::connection::{ClientConnection, ConnectionHandler};
+use crate::connection::{ConnectionDriver, ConnectionHandler};
 
 pub struct Server<T, V> {
     acceptor: Arc<T>,
@@ -73,7 +73,7 @@ impl<T: Acceptor, V: ConnectionHandler<T::Connection> + 'static> Server<T, V> {
         tracing::Span::current().record("from", tracing::field::display(peer_addr));
 
         let reason: std::borrow::Cow<'static, str> = {
-            match ClientConnection::handle(connection, validator.as_ref()).await {
+            match ConnectionDriver::handle(connection, validator.as_ref()).await {
                 Ok(_) => "ok".into(),
                 Err(e) => {
                     if matches!(

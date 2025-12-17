@@ -2,8 +2,10 @@
 mod datagram;
 mod stream;
 
+use std::future::Future;
 use std::io;
 use std::sync::Arc;
+use std::sync::Weak;
 
 use futures::{SinkExt, StreamExt};
 use tokio::task::JoinHandle;
@@ -22,6 +24,10 @@ pub struct ConnectionHandle<C> {
 }
 
 impl<C: Connection> ConnectionHandle<C> {
+    pub fn downgrade_inner(&self) -> Weak<C> {
+        Arc::downgrade(&self.inner)
+    }
+
     pub fn close(&self, error_code: u32, reason: &[u8]) {
         self.inner.close(error_code, reason);
     }
@@ -33,15 +39,19 @@ pub trait ConnectionHandler<T>: Send + Sync {
     fn verify(
         &self,
         hello: &protocol::ClientHello,
-    ) -> Result<Self::Context, protocol::HandshakeError>;
+    ) -> impl Future<Output = Result<Self::Context, protocol::HandshakeError>> + Send;
 
-    fn accept(&self, output: Self::Context, connection: ConnectionHandle<T>);
+    fn accept(
+        &self,
+        output: Self::Context,
+        connection: ConnectionHandle<T>,
+    ) -> impl Future<Output = ()> + Send;
 }
 
-impl<T> ConnectionHandler<T> for ombrac::protocol::Secret {
+impl<T: Send + Sync> ConnectionHandler<T> for ombrac::protocol::Secret {
     type Context = ();
 
-    fn verify(&self, hello: &protocol::ClientHello) -> Result<(), protocol::HandshakeError> {
+    async fn verify(&self, hello: &protocol::ClientHello) -> Result<(), protocol::HandshakeError> {
         if &hello.secret == self {
             Ok(())
         } else {
@@ -49,17 +59,17 @@ impl<T> ConnectionHandler<T> for ombrac::protocol::Secret {
         }
     }
 
-    fn accept(&self, _output: Self::Context, _connection: ConnectionHandle<T>) {
+    async fn accept(&self, _output: Self::Context, _connection: ConnectionHandle<T>) {
         ()
     }
 }
 
-pub struct ClientConnection<C: Connection> {
+pub struct ConnectionDriver<C: Connection> {
     client_connection: Arc<C>,
     shutdown_token: CancellationToken,
 }
 
-impl<C: Connection> ClientConnection<C> {
+impl<C: Connection> ConnectionDriver<C> {
     pub async fn handle<V>(connection: C, validator: &V) -> io::Result<()>
     where
         V: ConnectionHandler<C>,
@@ -68,12 +78,14 @@ impl<C: Connection> ClientConnection<C> {
 
         let client_connection = Arc::new(connection);
 
-        validator.accept(
-            validation_ctx,
-            ConnectionHandle {
-                inner: client_connection.clone(),
-            },
-        );
+        validator
+            .accept(
+                validation_ctx,
+                ConnectionHandle {
+                    inner: client_connection.clone(),
+                },
+            )
+            .await;
 
         let handler = Self {
             client_connection,
@@ -121,7 +133,7 @@ impl<C: Connection> ClientConnection<C> {
         let validation_result = if hello.version != protocol::PROTOCOLS_VERSION {
             Err(protocol::HandshakeError::UnsupportedVersion)
         } else {
-            validator.verify(&hello)
+            validator.verify(&hello).await
         };
 
         let response = match validation_result {
