@@ -12,6 +12,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "alloca"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e5a7d05ea6aea7e9e64d25b9156ba2fee3fdd659e34e41063cd2fc7cd020d7f4"
+dependencies = [
+ "cc",
+]
+
+[[package]]
 name = "anes"
 version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -249,7 +258,7 @@ checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
 name = "benches"
-version = "0.6.4"
+version = "0.6.5"
 dependencies = [
  "criterion",
  "ombrac",
@@ -574,10 +583,11 @@ checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
 
 [[package]]
 name = "criterion"
-version = "0.7.0"
+version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e1c047a62b0cc3e145fa84415a3191f628e980b194c2755aa12300a4e6cbd928"
+checksum = "4d883447757bb0ee46f233e9dc22eb84d93a9508c9b868687b274fc431d886bf"
 dependencies = [
+ "alloca",
  "anes",
  "cast",
  "ciborium",
@@ -586,6 +596,7 @@ dependencies = [
  "itertools 0.13.0",
  "num-traits",
  "oorandom",
+ "page_size",
  "plotters",
  "rayon",
  "regex",
@@ -597,9 +608,9 @@ dependencies = [
 
 [[package]]
 name = "criterion-plot"
-version = "0.6.0"
+version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9b1bcc0dc7dfae599d84ad0b1a55f80cde8af3725da8313b528da95ef783e338"
+checksum = "ed943f81ea2faa8dcecbbfa50164acf95d555afec96a27871663b300e387b2e4"
 dependencies = [
  "cast",
  "itertools 0.13.0",
@@ -834,7 +845,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.1",
 ]
 
 [[package]]
@@ -1758,7 +1769,7 @@ dependencies = [
 
 [[package]]
 name = "ombrac"
-version = "0.6.4"
+version = "0.6.5"
 dependencies = [
  "bincode",
  "bytes",
@@ -1770,7 +1781,7 @@ dependencies = [
 
 [[package]]
 name = "ombrac-client"
-version = "0.6.4"
+version = "0.6.5"
 dependencies = [
  "arc-swap",
  "bincode",
@@ -1806,14 +1817,14 @@ dependencies = [
 
 [[package]]
 name = "ombrac-macros"
-version = "0.6.4"
+version = "0.6.5"
 dependencies = [
  "tracing",
 ]
 
 [[package]]
 name = "ombrac-netstack"
-version = "0.6.4"
+version = "0.6.5"
 dependencies = [
  "bytes",
  "crossbeam-queue",
@@ -1828,7 +1839,7 @@ dependencies = [
 
 [[package]]
 name = "ombrac-server"
-version = "0.6.4"
+version = "0.6.5"
 dependencies = [
  "arc-swap",
  "bincode",
@@ -1853,7 +1864,7 @@ dependencies = [
 
 [[package]]
 name = "ombrac-transport"
-version = "0.6.4"
+version = "0.6.5"
 dependencies = [
  "arc-swap",
  "async-channel",
@@ -1895,6 +1906,16 @@ name = "oorandom"
 version = "11.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6790f58c7ff633d8771f42965289203411a5e5c68388703c06e14f24770b41e"
+
+[[package]]
+name = "page_size"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "30d5b2194ed13191c1999ae0704b7839fb18384fa22e49b57eeaa97d79ce40da"
+dependencies = [
+ "libc",
+ "winapi",
+]
 
 [[package]]
 name = "parking"
@@ -2357,7 +2378,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.11.0",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.1",
 ]
 
 [[package]]
@@ -2691,12 +2712,12 @@ dependencies = [
  "getrandom 0.3.3",
  "once_cell",
  "rustix 1.1.2",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.1",
 ]
 
 [[package]]
 name = "tests-integration"
-version = "0.6.4"
+version = "0.6.5"
 dependencies = [
  "bytes",
  "curl",
@@ -2712,7 +2733,7 @@ dependencies = [
 
 [[package]]
 name = "tests-support"
-version = "0.6.4"
+version = "0.6.5"
 dependencies = [
  "bytes",
  "ombrac-transport",
@@ -3277,7 +3298,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.60.2",
+ "windows-sys 0.61.1",
 ]
 
 [[package]]
