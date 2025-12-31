@@ -27,17 +27,13 @@ fn main() {
 /// A high-level function to run the server from a command-line context.
 /// It builds the service, waits for a Ctrl+C signal, and then gracefully shuts down.
 pub async fn run_from_cli(config: ombrac_server::config::ServiceConfig) -> io::Result<()> {
-    use ombrac_server::service::{QuicServiceBuilder, Service};
-    use ombrac_transport::quic::{Connection as QuicConnection, server::Server as QuicServer};
+    use ombrac_server::service::OmbracServer;
+    use std::sync::Arc;
 
-    match Service::<QuicServer, QuicConnection>::build::<QuicServiceBuilder, [u8; 32]>(
-        config.into(),
-    )
-    .await
-    {
-        Ok(session) => {
+    match OmbracServer::build(Arc::new(config)).await {
+        Ok(server) => {
             tokio::signal::ctrl_c().await?;
-            session.shutdown().await;
+            server.shutdown().await;
             Ok(())
         }
         Err(e) => Err(io::Error::other(e.to_string())),

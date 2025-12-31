@@ -1,6 +1,4 @@
-use std::future::Future;
 use std::io;
-use std::marker::PhantomData;
 use std::net::UdpSocket;
 use std::sync::Arc;
 use std::time::Duration;
@@ -10,14 +8,12 @@ use tokio::task::JoinHandle;
 
 use ombrac_macros::{error, info, warn};
 use ombrac_transport::quic::{
-    self, Connection as QuicConnection, TransportConfig as QuicTransportConfig,
+    self, TransportConfig as QuicTransportConfig,
     server::{Config as QuicConfig, Server as QuicServer},
 };
-use ombrac_transport::{Acceptor, Connection};
 
 use crate::config::{ServiceConfig, TlsMode};
-use crate::connection::ConnectionHandler;
-use crate::server::Server;
+use crate::connection::ConnectionAcceptor;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -44,77 +40,115 @@ macro_rules! require_config {
     };
 }
 
-pub trait ServiceBuilder {
-    type Acceptor: Acceptor<Connection = Self::Connection>;
-    type Connection: Connection;
-    type Validator: ConnectionHandler<Self::Connection> + 'static;
-
-    fn build(
-        config: &Arc<ServiceConfig>,
-    ) -> impl Future<Output = Result<Arc<Server<Self::Acceptor, Self::Validator>>>> + Send;
-}
-
-pub struct QuicServiceBuilder;
-
-impl ServiceBuilder for QuicServiceBuilder {
-    type Acceptor = QuicServer;
-    type Connection = QuicConnection;
-    type Validator = ombrac::protocol::Secret;
-
-    async fn build(
-        config: &Arc<ServiceConfig>,
-    ) -> Result<Arc<Server<Self::Acceptor, Self::Validator>>> {
-        let acceptor = quic_server_from_config(config).await?;
-        let secret = *blake3::hash(config.secret.as_bytes()).as_bytes();
-        let server = Arc::new(Server::new(acceptor, secret));
-        Ok(server)
-    }
-}
-
-pub struct Service<T, C>
-where
-    T: Acceptor<Connection = C>,
-    C: Connection,
-{
+/// OmbracServer provides a simple, easy-to-use API for starting and managing
+/// the ombrac server using QUIC transport.
+///
+/// This struct hides all transport-specific implementation details and provides
+/// a clean interface for external users.
+///
+/// # Example
+///
+/// ```no_run
+/// use ombrac_server::{OmbracServer, ServiceConfig};
+/// use std::sync::Arc;
+///
+/// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+/// let config = Arc::new(ServiceConfig {
+///     secret: "my-secret".to_string(),
+///     listen: "0.0.0.0:8080".parse()?,
+///     transport: Default::default(),
+///     connection: Default::default(),
+/// });
+///
+/// let server = OmbracServer::build(config).await?;
+/// // ... use server ...
+/// server.shutdown().await;
+/// # Ok(())
+/// # }
+/// ```
+pub struct OmbracServer {
     handle: JoinHandle<Result<()>>,
     shutdown_tx: broadcast::Sender<()>,
-    _acceptor: PhantomData<T>,
-    _connection: PhantomData<C>,
 }
 
-impl<T, C> Service<T, C>
-where
-    T: Acceptor<Connection = C> + Send + Sync + 'static,
-    C: Connection + Send + Sync + 'static,
-{
-    pub async fn build<Builder, V>(config: Arc<ServiceConfig>) -> Result<Self>
-    where
-        Builder: ServiceBuilder<Acceptor = T, Connection = C, Validator = V>,
-        V: ConnectionHandler<C> + Send + Sync + 'static,
-    {
-        let server = Builder::build(&config).await?;
+impl OmbracServer {
+    /// Builds a new server instance from the configuration.
+    ///
+    /// This method:
+    /// 1. Creates a QUIC server from the transport configuration
+    /// 2. Sets up connection validation using the secret
+    /// 3. Spawns the accept loop in a background task
+    /// 4. Returns an OmbracServer handle for lifecycle management
+    ///
+    /// # Arguments
+    ///
+    /// * `config` - The service configuration containing transport, connection, and secret settings
+    ///
+    /// # Returns
+    ///
+    /// A configured `OmbracServer` instance ready to accept connections, or an error
+    /// if configuration is invalid or server setup fails.
+    pub async fn build(config: Arc<ServiceConfig>) -> Result<Self> {
+        // Build QUIC server from config
+        let acceptor = quic_server_from_config(&config).await?;
+
+        // Create secret authenticator from config
+        let secret = *blake3::hash(config.secret.as_bytes()).as_bytes();
+
+        // Create connection acceptor with connection config
+        let connection_config = Arc::new(config.connection.clone());
+        let acceptor = Arc::new(ConnectionAcceptor::with_config(
+            acceptor,
+            secret,
+            connection_config,
+        ));
+
+        // Set up shutdown channel
         let (shutdown_tx, shutdown_rx) = broadcast::channel(1);
 
+        // Spawn accept loop
         let handle =
-            tokio::spawn(async move { server.accept_loop(shutdown_rx).await.map_err(Error::Io) });
+            tokio::spawn(async move { acceptor.accept_loop(shutdown_rx).await.map_err(Error::Io) });
 
-        Ok(Service {
+        Ok(OmbracServer {
             handle,
             shutdown_tx,
-            _acceptor: PhantomData,
-            _connection: PhantomData,
         })
     }
 
+    /// Gracefully shuts down the server.
+    ///
+    /// This method will:
+    /// 1. Send a shutdown signal to stop accepting new connections
+    /// 2. Wait for the accept loop to finish gracefully
+    /// 3. Wait for existing connections to close
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ombrac_server::OmbracServer;
+    /// # use std::sync::Arc;
+    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// # let config = Arc::new(ombrac_server::ServiceConfig {
+    /// #     secret: "test".to_string(),
+    /// #     listen: "0.0.0.0:0".parse()?,
+    /// #     transport: Default::default(),
+    /// #     connection: Default::default(),
+    /// # });
+    /// # let server = OmbracServer::build(config).await?;
+    /// server.shutdown().await;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn shutdown(self) {
         let _ = self.shutdown_tx.send(());
         match self.handle.await {
             Ok(Ok(_)) => {}
-            Ok(Err(_e)) => {
-                error!("The main server task exited with an error: {_e}");
+            Ok(Err(e)) => {
+                error!("The main server task exited with an error: {e}");
             }
-            Err(_e) => {
-                error!("The main server task failed to shut down cleanly: {_e}");
+            Err(e) => {
+                error!("The main server task failed to shut down cleanly: {e}");
             }
         }
         warn!("Service shutdown complete");

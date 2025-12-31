@@ -1,25 +1,21 @@
 use std::ffi::{CStr, c_char};
 use std::sync::{Arc, Mutex};
 
-use figment::Figment;
-use figment::providers::{Format, Json, Serialized};
 use tokio::runtime::{Builder, Runtime};
 
 use ombrac_macros::{error, info};
 
-use crate::config::{ConfigFile, ServiceConfig};
+use crate::config::{ServiceConfig, load_from_json};
 #[cfg(feature = "tracing")]
 use crate::logging::LogCallback;
-use crate::service::{QuicServiceBuilder, Service};
+use crate::service::OmbracServer;
 
 // A global, thread-safe handle to the running service instance.
 static SERVICE_HANDLE: Mutex<Option<ServiceHandle>> = Mutex::new(None);
 
 // Encapsulates the service instance and its associated Tokio runtime.
 struct ServiceHandle {
-    service: Option<
-        Box<Service<ombrac_transport::quic::server::Server, ombrac_transport::quic::Connection>>,
-    >,
+    service: Option<OmbracServer>,
     runtime: Runtime,
 }
 
@@ -86,32 +82,10 @@ pub unsafe extern "C" fn ombrac_server_set_log_callback(callback: *const LogCall
 pub unsafe extern "C" fn ombrac_server_service_startup(config_json: *const c_char) -> i32 {
     let config_str = unsafe { c_str_to_str(config_json) };
 
-    let config_file: ConfigFile = match Figment::new()
-        .merge(Serialized::defaults(ConfigFile::default()))
-        .merge(Json::string(config_str))
-        .extract()
-    {
+    let service_config: ServiceConfig = match load_from_json(config_str) {
         Ok(cfg) => cfg,
-        Err(_e) => {
-            error!("Failed to parse config JSON: {_e}");
-            return -1;
-        }
-    };
-
-    let service_config = match (config_file.secret, config_file.listen) {
-        (Some(secret), Some(listen)) => ServiceConfig {
-            secret,
-            listen,
-            transport: config_file.transport,
-            #[cfg(feature = "tracing")]
-            logging: config_file.logging,
-        },
-        (None, _) => {
-            error!("Configuration error: missing required field `secret` in JSON config");
-            return -1;
-        }
-        (_, None) => {
-            error!("Configuration error: missing required field `listen` in JSON config");
+        Err(e) => {
+            error!("Failed to parse config JSON: {}", e);
             return -1;
         }
     };
@@ -127,10 +101,7 @@ pub unsafe extern "C" fn ombrac_server_service_startup(config_json: *const c_cha
         }
     };
 
-    let service = runtime.block_on(async {
-        Service::build::<QuicServiceBuilder, ombrac::protocol::Secret>(Arc::new(service_config))
-            .await
-    });
+    let service = runtime.block_on(async { OmbracServer::build(Arc::new(service_config)).await });
 
     let service = match service {
         Ok(s) => s,
@@ -147,7 +118,7 @@ pub unsafe extern "C" fn ombrac_server_service_startup(config_json: *const c_cha
     }
 
     *handle_guard = Some(ServiceHandle {
-        service: Some(Box::new(service)),
+        service: Some(service),
         runtime,
     });
 

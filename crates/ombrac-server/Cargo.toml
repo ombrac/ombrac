@@ -25,13 +25,13 @@ default = [
 ]
 
 binary = [
-    "datagram",
-    "tracing"
+    "tracing",
+    "datagram"
 ]
 
 datagram = [
-    "ombrac-transport/datagram",
-    "moka"
+    "moka",
+    "ombrac-transport/datagram"
 ]
 
 tracing = [

@@ -56,6 +56,9 @@ pub struct ConfigFile {
 
     pub transport: TransportConfig,
 
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub connection: Option<ConnectionConfig>,
+
     #[cfg(feature = "tracing")]
     pub logging: LoggingConfig,
 }
@@ -126,6 +129,26 @@ pub struct TransportConfig {
     pub max_streams: Option<u64>,
 }
 
+/// Connection-level configuration for managing connection lifecycle and resource limits
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub struct ConnectionConfig {
+    /// Maximum number of concurrent connections [default: 10000]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_connections: Option<usize>,
+
+    /// Handshake timeout in seconds [default: 10]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub handshake_timeout_secs: Option<u64>,
+
+    /// Maximum concurrent stream connections per client connection [default: 4096]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_concurrent_streams: Option<usize>,
+
+    /// Maximum concurrent datagram handlers per client connection [default: 4096]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_concurrent_datagrams: Option<usize>,
+}
+
 #[cfg(feature = "tracing")]
 #[derive(Deserialize, Serialize, Debug, Parser, Clone)]
 pub struct LoggingConfig {
@@ -149,6 +172,7 @@ pub struct ServiceConfig {
     pub secret: String,
     pub listen: SocketAddr,
     pub transport: TransportConfig,
+    pub connection: ConnectionConfig,
     #[cfg(feature = "tracing")]
     pub logging: LoggingConfig,
 }
@@ -171,6 +195,17 @@ impl Default for TransportConfig {
     }
 }
 
+impl Default for ConnectionConfig {
+    fn default() -> Self {
+        Self {
+            max_connections: Some(10000),
+            handshake_timeout_secs: Some(10),
+            max_concurrent_streams: Some(4096),
+            max_concurrent_datagrams: Some(4096),
+        }
+    }
+}
+
 #[cfg(feature = "tracing")]
 impl Default for LoggingConfig {
     fn default() -> Self {
@@ -180,6 +215,16 @@ impl Default for LoggingConfig {
     }
 }
 
+/// Loads configuration from command-line arguments and/or JSON file.
+///
+/// This function is intended for use in binary applications. It merges:
+/// 1. Default configuration values
+/// 2. Values from JSON config file (if provided)
+/// 3. Command-line argument overrides
+///
+/// # Returns
+///
+/// A `ServiceConfig` ready to use, or an error if required fields are missing.
 #[cfg(feature = "binary")]
 pub fn load() -> Result<ServiceConfig, Box<figment::Error>> {
     use figment::Figment;
@@ -205,6 +250,7 @@ pub fn load() -> Result<ServiceConfig, Box<figment::Error>> {
         secret: args.secret,
         listen: args.listen,
         transport: args.transport,
+        connection: None,
         #[cfg(feature = "tracing")]
         logging: args.logging,
     };
@@ -224,6 +270,91 @@ pub fn load() -> Result<ServiceConfig, Box<figment::Error>> {
         secret,
         listen,
         transport: config.transport,
+        connection: config.connection.unwrap_or_default(),
+        #[cfg(feature = "tracing")]
+        logging: config.logging,
+    })
+}
+
+/// Loads configuration from a JSON string.
+///
+/// This function is useful for programmatic configuration or when loading
+/// from external sources (e.g., environment variables, API responses).
+///
+/// # Arguments
+///
+/// * `json_str` - A JSON string containing the configuration
+///
+/// # Returns
+///
+/// A `ServiceConfig` ready to use, or an error if parsing fails or required fields are missing.
+pub fn load_from_json(json_str: &str) -> Result<ServiceConfig, Box<figment::Error>> {
+    use figment::Figment;
+    use figment::providers::{Format, Json, Serialized};
+
+    let config: ConfigFile = Figment::new()
+        .merge(Serialized::defaults(ConfigFile::default()))
+        .merge(Json::string(json_str))
+        .extract()?;
+
+    let secret = config
+        .secret
+        .ok_or_else(|| figment::Error::from("missing field `secret` in JSON config"))?;
+    let listen = config
+        .listen
+        .ok_or_else(|| figment::Error::from("missing field `listen` in JSON config"))?;
+
+    Ok(ServiceConfig {
+        secret,
+        listen,
+        transport: config.transport,
+        connection: config.connection.unwrap_or_default(),
+        #[cfg(feature = "tracing")]
+        logging: config.logging,
+    })
+}
+
+/// Loads configuration from a JSON file.
+///
+/// This function reads configuration from a file path.
+///
+/// # Arguments
+///
+/// * `config_path` - Path to the JSON configuration file
+///
+/// # Returns
+///
+/// A `ServiceConfig` ready to use, or an error if the file doesn't exist,
+/// parsing fails, or required fields are missing.
+pub fn load_from_file(config_path: &std::path::Path) -> Result<ServiceConfig, Box<figment::Error>> {
+    use figment::Figment;
+    use figment::providers::{Format, Json, Serialized};
+
+    if !config_path.exists() {
+        let err = std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!("Configuration file not found: {}", config_path.display()),
+        );
+        return Err(Box::new(figment::Error::from(err.to_string())));
+    }
+
+    let config: ConfigFile = Figment::new()
+        .merge(Serialized::defaults(ConfigFile::default()))
+        .merge(Json::file(config_path))
+        .extract()?;
+
+    let secret = config
+        .secret
+        .ok_or_else(|| figment::Error::from("missing field `secret` in config file"))?;
+    let listen = config
+        .listen
+        .ok_or_else(|| figment::Error::from("missing field `listen` in config file"))?;
+
+    Ok(ServiceConfig {
+        secret,
+        listen,
+        transport: config.transport,
+        connection: config.connection.unwrap_or_default(),
         #[cfg(feature = "tracing")]
         logging: config.logging,
     })
