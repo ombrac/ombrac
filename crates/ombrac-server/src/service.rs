@@ -9,19 +9,15 @@ use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 
 use ombrac_macros::{error, info, warn};
-#[cfg(feature = "transport-quic")]
 use ombrac_transport::quic::{
     self, Connection as QuicConnection, TransportConfig as QuicTransportConfig,
     server::{Config as QuicConfig, Server as QuicServer},
 };
 use ombrac_transport::{Acceptor, Connection};
 
-use crate::config::ServiceConfig;
+use crate::config::{ServiceConfig, TlsMode};
 use crate::connection::ConnectionHandler;
 use crate::server::Server;
-
-#[cfg(feature = "transport-quic")]
-use crate::config::TlsMode;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -58,10 +54,8 @@ pub trait ServiceBuilder {
     ) -> impl Future<Output = Result<Arc<Server<Self::Acceptor, Self::Validator>>>> + Send;
 }
 
-#[cfg(feature = "transport-quic")]
 pub struct QuicServiceBuilder;
 
-#[cfg(feature = "transport-quic")]
 impl ServiceBuilder for QuicServiceBuilder {
     type Acceptor = QuicServer;
     type Connection = QuicConnection;
@@ -127,7 +121,6 @@ where
     }
 }
 
-#[cfg(feature = "transport-quic")]
 async fn quic_server_from_config(config: &ServiceConfig) -> Result<QuicServer> {
     let transport_cfg = &config.transport;
     let mut quic_config = QuicConfig::new();

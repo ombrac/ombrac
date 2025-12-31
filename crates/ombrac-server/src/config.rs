@@ -7,7 +7,6 @@ use clap::{Parser, ValueEnum};
 
 use serde::{Deserialize, Serialize};
 
-#[cfg(feature = "transport-quic")]
 use ombrac_transport::quic::Congestion;
 
 // CLI Args
@@ -38,7 +37,6 @@ pub struct Args {
     )]
     pub listen: Option<SocketAddr>,
 
-    #[cfg(feature = "transport-quic")]
     #[clap(flatten)]
     pub transport: TransportConfig,
 
@@ -56,14 +54,12 @@ pub struct ConfigFile {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub listen: Option<SocketAddr>,
 
-    #[cfg(feature = "transport-quic")]
     pub transport: TransportConfig,
 
     #[cfg(feature = "tracing")]
     pub logging: LoggingConfig,
 }
 
-#[cfg(feature = "transport-quic")]
 #[derive(Deserialize, Serialize, Debug, Parser, Clone)]
 pub struct TransportConfig {
     /// Set the TLS mode for the connection
@@ -139,7 +135,6 @@ pub struct LoggingConfig {
     pub log_level: Option<String>,
 }
 
-#[cfg(feature = "transport-quic")]
 #[derive(ValueEnum, Clone, Debug, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "kebab-case")]
 pub enum TlsMode {
@@ -153,13 +148,11 @@ pub enum TlsMode {
 pub struct ServiceConfig {
     pub secret: String,
     pub listen: SocketAddr,
-    #[cfg(feature = "transport-quic")]
     pub transport: TransportConfig,
     #[cfg(feature = "tracing")]
     pub logging: LoggingConfig,
 }
 
-#[cfg(feature = "transport-quic")]
 impl Default for TransportConfig {
     fn default() -> Self {
         Self {
@@ -211,7 +204,6 @@ pub fn load() -> Result<ServiceConfig, Box<figment::Error>> {
     let cli_overrides = ConfigFile {
         secret: args.secret,
         listen: args.listen,
-        #[cfg(feature = "transport-quic")]
         transport: args.transport,
         #[cfg(feature = "tracing")]
         logging: args.logging,
@@ -231,7 +223,6 @@ pub fn load() -> Result<ServiceConfig, Box<figment::Error>> {
     Ok(ServiceConfig {
         secret,
         listen,
-        #[cfg(feature = "transport-quic")]
         transport: config.transport,
         #[cfg(feature = "tracing")]
         logging: config.logging,

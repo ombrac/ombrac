@@ -21,14 +21,12 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 [features]
 default = [
     "tracing",
-    "datagram",
-    "transport-default"
+    "datagram"
 ]
 
 binary = [
     "datagram",
-    "tracing",
-    "transport-quic"
+    "tracing"
 ]
 
 datagram = [
@@ -44,13 +42,10 @@ tracing = [
     "ombrac-transport/tracing"
 ]
 
-transport-default = ["transport-quic"]
-transport-quic = ["ombrac-transport/quic"]
-
 [dependencies]
 ombrac = { workspace = true }
 ombrac-macros = { workspace = true }
-ombrac-transport = { workspace = true }
+ombrac-transport = { workspace = true, features = ["quic"] }
 
 bytes = { workspace = true }
 blake3 = { workspace = true }

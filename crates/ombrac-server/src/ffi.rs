@@ -10,16 +10,13 @@ use ombrac_macros::{error, info};
 use crate::config::{ConfigFile, ServiceConfig};
 #[cfg(feature = "tracing")]
 use crate::logging::LogCallback;
-#[cfg(feature = "transport-quic")]
-use crate::service::QuicServiceBuilder;
-use crate::service::Service;
+use crate::service::{QuicServiceBuilder, Service};
 
 // A global, thread-safe handle to the running service instance.
 static SERVICE_HANDLE: Mutex<Option<ServiceHandle>> = Mutex::new(None);
 
 // Encapsulates the service instance and its associated Tokio runtime.
 struct ServiceHandle {
-    #[cfg(feature = "transport-quic")]
     service: Option<
         Box<Service<ombrac_transport::quic::server::Server, ombrac_transport::quic::Connection>>,
     >,
@@ -105,7 +102,6 @@ pub unsafe extern "C" fn ombrac_server_service_startup(config_json: *const c_cha
         (Some(secret), Some(listen)) => ServiceConfig {
             secret,
             listen,
-            #[cfg(feature = "transport-quic")]
             transport: config_file.transport,
             #[cfg(feature = "tracing")]
             logging: config_file.logging,
@@ -132,12 +128,10 @@ pub unsafe extern "C" fn ombrac_server_service_startup(config_json: *const c_cha
     };
 
     let service = runtime.block_on(async {
-        #[cfg(feature = "transport-quic")]
         Service::build::<QuicServiceBuilder, ombrac::protocol::Secret>(Arc::new(service_config))
             .await
     });
 
-    #[cfg(feature = "transport-quic")]
     let service = match service {
         Ok(s) => s,
         Err(e) => {
@@ -146,12 +140,6 @@ pub unsafe extern "C" fn ombrac_server_service_startup(config_json: *const c_cha
         }
     };
 
-    #[cfg(not(feature = "transport-quic"))]
-    {
-        error!("The application was compiled without a transport feature");
-        return -1;
-    }
-
     let mut handle_guard = SERVICE_HANDLE.lock().unwrap();
     if handle_guard.is_some() {
         error!("Service is already running. Please shut down the existing service first.");
@@ -159,7 +147,6 @@ pub unsafe extern "C" fn ombrac_server_service_startup(config_json: *const c_cha
     }
 
     *handle_guard = Some(ServiceHandle {
-        #[cfg(feature = "transport-quic")]
         service: Some(Box::new(service)),
         runtime,
     });
@@ -190,7 +177,6 @@ pub extern "C" fn ombrac_server_service_shutdown() -> i32 {
     if let Some(mut handle) = handle_guard.take() {
         info!("Shutting down service");
 
-        #[cfg(feature = "transport-quic")]
         if let Some(service) = handle.service.take() {
             handle.runtime.block_on(async {
                 service.shutdown().await;
