@@ -7,24 +7,24 @@ use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 
 use ombrac_macros::{error, info, warn};
-use ombrac_transport::quic::{
-    self, TransportConfig as QuicTransportConfig,
-    server::{Config as QuicConfig, Server as QuicServer},
-};
+use ombrac_transport::quic::TransportConfig as QuicTransportConfig;
+use ombrac_transport::quic::error::Error as QuicError;
+use ombrac_transport::quic::server::Config as QuicConfig;
+use ombrac_transport::quic::server::Server as QuicServer;
 
 use crate::config::{ServiceConfig, TlsMode};
 use crate::connection::ConnectionAcceptor;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
-    #[error("Configuration error: {0}")]
-    Config(String),
-
-    #[error("{0}")]
+    #[error(transparent)]
     Io(#[from] io::Error),
 
-    #[error("Transport layer error: {0}")]
-    Transport(String),
+    #[error("{0}")]
+    Config(String),
+
+    #[error(transparent)]
+    Quic(#[from] QuicError),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -151,7 +151,6 @@ impl OmbracServer {
                 error!("The main server task failed to shut down cleanly: {e}");
             }
         }
-        warn!("Service shutdown complete");
     }
 }
 
@@ -159,12 +158,10 @@ async fn quic_server_from_config(config: &ServiceConfig) -> Result<QuicServer> {
     let transport_cfg = &config.transport;
     let mut quic_config = QuicConfig::new();
 
-    quic_config.enable_zero_rtt = transport_cfg.zero_rtt.unwrap_or(false);
-    if let Some(protocols) = &transport_cfg.alpn_protocols {
-        quic_config.alpn_protocols = protocols.clone();
-    }
+    quic_config.enable_zero_rtt = transport_cfg.zero_rtt();
+    quic_config.alpn_protocols = transport_cfg.alpn_protocols();
 
-    match transport_cfg.tls_mode.unwrap_or(TlsMode::Tls) {
+    match transport_cfg.tls_mode() {
         TlsMode::Tls => {
             let cert_path = require_config!(transport_cfg.tls_cert.clone(), "transport.tls_cert")?;
             let key_path = require_config!(transport_cfg.tls_key.clone(), "transport.tls_key")?;
@@ -190,27 +187,19 @@ async fn quic_server_from_config(config: &ServiceConfig) -> Result<QuicServer> {
     }
 
     let mut transport_config = QuicTransportConfig::default();
-    let map_transport_err = |e: quic::error::Error| Error::Transport(e.to_string());
-    if let Some(timeout) = transport_cfg.idle_timeout {
-        transport_config
-            .max_idle_timeout(Duration::from_millis(timeout))
-            .map_err(map_transport_err)?;
-    }
-    if let Some(interval) = transport_cfg.keep_alive {
-        transport_config
-            .keep_alive_period(Duration::from_millis(interval))
-            .map_err(map_transport_err)?;
-    }
-    if let Some(max_streams) = transport_cfg.max_streams {
-        transport_config
-            .max_open_bidirectional_streams(max_streams)
-            .map_err(map_transport_err)?;
-    }
-    if let Some(congestion) = transport_cfg.congestion {
-        transport_config
-            .congestion(congestion, transport_cfg.cwnd_init)
-            .map_err(map_transport_err)?;
-    }
+    let map_transport_err = |e: QuicError| Error::Quic(e);
+    transport_config
+        .max_idle_timeout(Duration::from_millis(transport_cfg.idle_timeout()))
+        .map_err(map_transport_err)?;
+    transport_config
+        .keep_alive_period(Duration::from_millis(transport_cfg.keep_alive()))
+        .map_err(map_transport_err)?;
+    transport_config
+        .max_open_bidirectional_streams(transport_cfg.max_streams())
+        .map_err(map_transport_err)?;
+    transport_config
+        .congestion(transport_cfg.congestion(), transport_cfg.cwnd_init)
+        .map_err(map_transport_err)?;
     quic_config.transport_config(transport_config);
 
     info!("Binding UDP socket to {}", config.listen);
@@ -218,5 +207,5 @@ async fn quic_server_from_config(config: &ServiceConfig) -> Result<QuicServer> {
 
     QuicServer::new(socket, quic_config)
         .await
-        .map_err(|e| Error::Transport(e.to_string()))
+        .map_err(|e| Error::Quic(e))
 }

@@ -143,7 +143,7 @@ impl<C: Connection> ClientConnectionProcessor<C> {
     where
         A: Authenticator<C>,
     {
-        let handshake_timeout = Duration::from_secs(config.handshake_timeout_secs.unwrap_or(10));
+        let handshake_timeout = Duration::from_secs(config.handshake_timeout_secs());
 
         let mut control_stream = connection.accept_bidirectional().await?;
         let mut control_frame = Framed::new(&mut control_stream, codec::length_codec());
@@ -315,7 +315,7 @@ impl<T: Acceptor, A: Authenticator<T::Connection> + 'static> ConnectionAcceptor<
 
     /// Creates a new connection acceptor with custom connection configuration.
     pub fn with_config(acceptor: T, authenticator: A, config: Arc<ConnectionConfig>) -> Self {
-        let max_connections = config.max_connections.unwrap_or(10000);
+        let max_connections = config.max_connections();
         Self {
             acceptor: Arc::new(acceptor),
             authenticator: Arc::new(authenticator),
@@ -366,7 +366,7 @@ impl<T: Acceptor, A: Authenticator<T::Connection> + 'static> ConnectionAcceptor<
                                 },
                                 Err(_) => {
                                     warn!("Connection rejected: maximum concurrent connections ({}) reached",
-                                        self.config.max_connections.unwrap_or(10000));
+                                        self.config.max_connections());
                                     // Connection is dropped here, which should trigger cleanup
                                 }
                             }

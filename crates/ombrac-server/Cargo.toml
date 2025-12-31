@@ -21,12 +21,9 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 [features]
 default = [
     "tracing",
-    "datagram"
-]
-
-binary = [
-    "tracing",
-    "datagram"
+    "datagram",
+    "binary",
+    "ffi"
 ]
 
 datagram = [
@@ -34,10 +31,22 @@ datagram = [
     "ombrac-transport/datagram"
 ]
 
+ffi = [
+    "tracing",
+    "datagram",
+    "dep:tracing-appender",
+    "dep:tracing-subscriber"
+]
+
+binary = [
+    "tracing",
+    "datagram",
+    "dep:tracing-appender",
+    "dep:tracing-subscriber"
+]
+
 tracing = [
     "dep:tracing", 
-    "dep:tracing-appender",
-    "dep:tracing-subscriber",
     "ombrac-macros/tracing",
     "ombrac-transport/tracing"
 ]
@@ -54,7 +63,7 @@ futures = { workspace = true }
 arc-swap = { workspace = true }
 thiserror = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
-figment = { workspace = true, features = ["json"] }
+serde_json = { workspace = true }
 clap = { workspace = true, features = ["std", "derive", "color", "help", "usage", "error-context", "suggestions"] }
 tokio = { workspace = true, features = ["rt-multi-thread", "net", "macros", "signal"] }
 tokio-util = { workspace = true, features = ["codec"] }
