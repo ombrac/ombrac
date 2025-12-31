@@ -16,6 +16,10 @@ use ombrac_macros::info;
 use ombrac_transport::Connection;
 use ombrac_transport::io::{CopyBidirectionalStats, copy_bidirectional};
 
+const MAX_CONCURRENT_CONNECTIONS: usize = 4096;
+const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
+const UPSTREAM_CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
+
 pub(crate) struct StreamTunnel<C: Connection> {
     connection: Arc<C>,
     shutdown: CancellationToken,
@@ -23,14 +27,11 @@ pub(crate) struct StreamTunnel<C: Connection> {
 }
 
 impl<C: Connection> StreamTunnel<C> {
-    const DEFAULT_MAX_CONCURRENT_CONNECTIONS: usize = 4096;
-    const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
-
     pub(crate) fn new(connection: Arc<C>, shutdown: CancellationToken) -> Self {
         Self {
             connection,
             shutdown,
-            semaphore: Arc::new(Semaphore::new(Self::DEFAULT_MAX_CONCURRENT_CONNECTIONS)),
+            semaphore: Arc::new(Semaphore::new(MAX_CONCURRENT_CONNECTIONS)),
         }
     }
 
@@ -105,7 +106,7 @@ impl<C: Connection> StreamTunnel<C> {
     async fn read_connect_message(
         framed: &mut Framed<&mut C::Stream, codec::LengthDelimitedCodec>,
     ) -> io::Result<protocol::Address> {
-        let payload = tokio::time::timeout(Self::DEFAULT_CONNECT_TIMEOUT, framed.next())
+        let payload = tokio::time::timeout(HANDSHAKE_TIMEOUT, framed.next())
             .await
             .map_err(|_| {
                 io::Error::new(io::ErrorKind::TimedOut, "Timeout reading connect message")
@@ -128,7 +129,7 @@ impl<C: Connection> StreamTunnel<C> {
         // TOOD: use trust-dns-resolver
         let addr = destination.to_socket_addr().await?;
 
-        tokio::time::timeout(Self::DEFAULT_CONNECT_TIMEOUT, TcpStream::connect(addr))
+        tokio::time::timeout(UPSTREAM_CONNECT_TIMEOUT, TcpStream::connect(addr))
             .await
             .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "Connection timeout"))?
             .map_err(Into::into)
