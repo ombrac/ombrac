@@ -8,7 +8,7 @@ mod tests {
 
     use ombrac::protocol::{Address, Secret};
     use ombrac_client::client::Client;
-    use ombrac_server::server::Server;
+    use ombrac_server::connection::ConnectionAcceptor;
 
     fn random_secret() -> Secret {
         use rand::RngCore;
@@ -28,8 +28,8 @@ mod tests {
 
         let (shutdown_tx, shutdown_rx) = broadcast::channel(1);
         tokio::spawn(async move {
-            let server = Server::new(acceptor, secret);
-            server.accept_loop(shutdown_rx).await.unwrap();
+            let acceptor = ConnectionAcceptor::new(acceptor, secret);
+            acceptor.accept_loop(shutdown_rx).await.unwrap();
         });
 
         let client = Client::new(initiator, secret, None).await.unwrap();
@@ -123,8 +123,8 @@ mod tests {
 
         let (_shutdown_tx, shutdown_rx) = broadcast::channel(1);
         tokio::spawn(async move {
-            let server = Server::new(acceptor, server_secret);
-            let _ = server.accept_loop(shutdown_rx).await;
+            let acceptor = ConnectionAcceptor::new(acceptor, server_secret);
+            let _ = acceptor.accept_loop(shutdown_rx).await;
         });
 
         let client_result = Client::new(initiator, client_secret, None).await;
@@ -147,8 +147,8 @@ mod tests {
 
         let (_shutdown_tx, shutdown_rx) = broadcast::channel(1);
         tokio::spawn(async move {
-            let server = Server::new(acceptor, secret);
-            let _ = server.accept_loop(shutdown_rx).await;
+            let acceptor = ConnectionAcceptor::new(acceptor, secret);
+            let _ = acceptor.accept_loop(shutdown_rx).await;
         });
 
         // The handshake happens here. We expect it to succeed.

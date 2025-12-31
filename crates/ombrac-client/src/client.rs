@@ -11,7 +11,10 @@ use ombrac::protocol::{Address, Secret};
 use ombrac_macros::info;
 use ombrac_transport::{Connection, Initiator};
 
-use crate::connection::{BufferedStream, ClientConnection, UdpDispatcher, UdpSession};
+use crate::connection::BufferedStream;
+use crate::connection::ClientConnection;
+#[cfg(feature = "datagram")]
+use crate::connection::{UdpDispatcher, UdpSession};
 
 /// The central client responsible for managing the connection to the server.
 ///

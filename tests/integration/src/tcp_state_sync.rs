@@ -9,7 +9,7 @@ mod tests {
 
     use ombrac::protocol::{Address, Secret};
     use ombrac_client::client::Client;
-    use ombrac_server::server::Server;
+    use ombrac_server::connection::ConnectionAcceptor;
 
     fn random_secret() -> Secret {
         use rand::RngCore;
@@ -29,8 +29,8 @@ mod tests {
 
         let (shutdown_tx, shutdown_rx) = broadcast::channel(1);
         tokio::spawn(async move {
-            let server = Server::new(acceptor, secret);
-            server.accept_loop(shutdown_rx).await.unwrap();
+            let acceptor = ConnectionAcceptor::new(acceptor, secret);
+            acceptor.accept_loop(shutdown_rx).await.unwrap();
         });
 
         let client = Client::new(initiator, secret, None).await.unwrap();
@@ -56,7 +56,10 @@ mod tests {
             "Connection to unreachable address should fail"
         );
 
-        let err = result.unwrap_err();
+        let err = match result {
+            Ok(_) => panic!("Connection to unreachable address should fail"),
+            Err(e) => e,
+        };
         // Error should indicate connection failure
         assert!(
             matches!(
@@ -104,7 +107,10 @@ mod tests {
             return;
         }
 
-        let err = result.unwrap_err();
+        let err = match result {
+            Ok(_) => return, // If it succeeds, that's also valid
+            Err(e) => e,
+        };
         // Should be connection-related error
         assert!(
             matches!(
@@ -167,11 +173,11 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let server_addr = listener.local_addr().unwrap();
 
-        let (ready_tx, mut ready_rx) = tokio::sync::oneshot::channel();
+        let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
 
         tokio::spawn(async move {
             ready_tx.send(()).ok();
-            if let Ok((mut stream, _)) = listener.accept().await {
+            if let Ok((stream, _)) = listener.accept().await {
                 // Just accept and close immediately to verify connection was established
                 drop(stream);
             }

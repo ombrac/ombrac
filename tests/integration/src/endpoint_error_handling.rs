@@ -5,13 +5,11 @@ mod tests {
     use std::time::Duration;
 
     use tests_support::mock_transport::{MockConnection, MockInitiator, mock_transport_pair};
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    use tokio::net::{TcpListener, TcpStream};
     use tokio::sync::broadcast;
 
     use ombrac::protocol::{Address, Secret};
     use ombrac_client::client::Client;
-    use ombrac_server::server::Server;
+    use ombrac_server::connection::ConnectionAcceptor;
 
     fn random_secret() -> Secret {
         use rand::RngCore;
@@ -31,8 +29,8 @@ mod tests {
 
         let (shutdown_tx, shutdown_rx) = broadcast::channel(1);
         tokio::spawn(async move {
-            let server = Server::new(acceptor, secret);
-            server.accept_loop(shutdown_rx).await.unwrap();
+            let acceptor = ConnectionAcceptor::new(acceptor, secret);
+            acceptor.accept_loop(shutdown_rx).await.unwrap();
         });
 
         let client = Arc::new(Client::new(initiator, secret, None).await.unwrap());
@@ -61,7 +59,12 @@ mod tests {
             "HTTP endpoint should propagate connection errors from open_bidirectional"
         );
 
-        let err = result.unwrap_err();
+        let err = match result {
+            Ok(_) => {
+                panic!("HTTP endpoint should propagate connection errors from open_bidirectional")
+            }
+            Err(e) => e,
+        };
         // Error should be connection-related
         assert!(
             matches!(
@@ -115,7 +118,12 @@ mod tests {
             "TUN endpoint should propagate connection errors"
         );
 
-        let err = result.unwrap_err();
+        let err = match result {
+            Ok(_) => {
+                panic!("HTTP endpoint should propagate connection errors from open_bidirectional")
+            }
+            Err(e) => e,
+        };
         // Error should be connection-related
         assert!(
             matches!(
@@ -151,7 +159,12 @@ mod tests {
             return;
         }
 
-        let err = result.unwrap_err();
+        let err = match result {
+            Ok(_) => {
+                panic!("HTTP endpoint should propagate connection errors from open_bidirectional")
+            }
+            Err(e) => e,
+        };
         // Error should be connection-related
         assert!(
             matches!(

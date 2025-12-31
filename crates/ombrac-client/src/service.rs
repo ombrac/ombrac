@@ -156,7 +156,7 @@ impl OmbracClient {
 
         if handles.is_empty() {
             return Err(Error::Config(
-                "No endpoints were configured or enabled. The service has nothing to do."
+                "no endpoints were configured or enabled, the service has nothing to do."
                     .to_string(),
             ));
         }
@@ -204,10 +204,10 @@ impl OmbracClient {
 
         for handle in self.handles {
             if let Err(_err) = handle.await {
-                error!("A task failed to shut down cleanly: {:?}", _err);
+                error!("task failed to shut down cleanly: {:?}", _err);
             }
         }
-        warn!("Service shutdown complete");
+        warn!("service shutdown complete");
     }
 
     fn spawn_endpoint(
@@ -216,7 +216,7 @@ impl OmbracClient {
     ) -> JoinHandle<()> {
         tokio::spawn(async move {
             if let Err(_e) = task.await {
-                error!("The {_name} endpoint shut down due to an error: {_e}");
+                error!("the {_name} endpoint shut down due to an error: {_e}");
             }
         })
     }
@@ -231,14 +231,14 @@ impl OmbracClient {
         let bind_addr = require_config!(config.endpoint.http, "endpoint.http")?;
         let socket = tokio::net::TcpListener::bind(bind_addr).await?;
 
-        info!("Starting HTTP/HTTPS endpoint, listening on {bind_addr}");
+        info!("starting http/https endpoint, listening on {bind_addr}");
 
         HttpServer::new(ombrac)
             .accept_loop(socket, async {
                 let _ = shutdown_rx.recv().await;
             })
             .await
-            .map_err(|e| Error::Endpoint(format!("HTTP server failed to run: {}", e)))
+            .map_err(|e| Error::Endpoint(format!("http server failed to run: {}", e)))
     }
 
     #[cfg(feature = "endpoint-socks")]
@@ -254,7 +254,7 @@ impl OmbracClient {
         let bind_addr = require_config!(config.endpoint.socks, "endpoint.socks")?;
         let socket = tokio::net::TcpListener::bind(bind_addr).await?;
 
-        info!("Starting SOCKS5 endpoint, listening on {bind_addr}");
+        info!("starting socks endpoint, listening on {bind_addr}");
 
         let socks_config = Arc::new(SocksConfig::new(
             NoAuthentication,
@@ -264,7 +264,7 @@ impl OmbracClient {
             let _ = shutdown_rx.recv().await;
         })
         .await
-        .map_err(|e| Error::Endpoint(format!("SOCKS server failed to run: {}", e)))
+        .map_err(|e| Error::Endpoint(format!("socks server failed to run: {}", e)))
     }
 
     #[cfg(feature = "endpoint-tun")]
@@ -300,25 +300,25 @@ impl OmbracClient {
 
                         if let Some(ip_str) = &config.tun_ipv4 {
                             let ip = ipnet::Ipv4Net::from_str(ip_str).map_err(|e| {
-                                Error::Config(format!("Failed to parse IPv4 CIDR '{ip_str}': {e}"))
+                                Error::Config(format!("failed to parse ipv4 cidr '{ip_str}': {e}"))
                             })?;
                             builder = builder.ipv4(ip.addr(), ip.netmask(), None);
                         }
 
                         if let Some(ip_str) = &config.tun_ipv6 {
                             let ip = ipnet::Ipv6Net::from_str(ip_str).map_err(|e| {
-                                Error::Config(format!("Failed to parse IPv6 CIDR '{ip_str}': {e}"))
+                                Error::Config(format!("failed to parse ipv6 cidr '{ip_str}': {e}"))
                             })?;
                             builder = builder.ipv6(ip.addr(), ip.netmask());
                         }
 
                         builder.build_async().map_err(|e| {
-                            Error::Endpoint(format!("Failed to build TUN device: {e}"))
+                            Error::Endpoint(format!("failed to build tun device: {e}"))
                         })?
                     };
 
                     info!(
-                        "Starting TUN endpoint, Name: {:?}, MTU: {:?}, IP: {:?}",
+                        "starting tun endpoint, name: {:?}, mtu: {:?}, ip: {:?}",
                         device.name(),
                         device.mtu(),
                         device.addresses()
@@ -330,7 +330,7 @@ impl OmbracClient {
                 #[cfg(any(target_os = "android", target_os = "ios"))]
                 {
                     return Err(Error::Config(
-                        "Creating a new TUN device is not supported on this platform. A pre-configured 'tun_fd' must be provided.".to_string()
+                        "creating a new tun device is not supported on this platform. A pre-configured 'tun_fd' must be provided.".to_string()
                     ));
                 }
             }
@@ -339,7 +339,7 @@ impl OmbracClient {
         let mut tun_config = TunConfig::default();
         if let Some(value) = &config.fake_dns {
             tun_config.fakedns_cidr = value.parse().map_err(|e| {
-                Error::Config(format!("Failed to parse fake_dns CIDR '{value}': {e}"))
+                Error::Config(format!("failed to parse fake_dns cidr '{value}': {e}"))
             })?;
         };
 
@@ -350,7 +350,7 @@ impl OmbracClient {
 
         tun.accept_loop(device, shutdown_signal)
             .await
-            .map_err(|e| Error::Endpoint(format!("TUN device runtime error: {}", e)))
+            .map_err(|e| Error::Endpoint(format!("tun device runtime error: {}", e)))
     }
 }
 
@@ -364,7 +364,7 @@ async fn quic_client_from_config(config: &ServiceConfig) -> io::Result<QuicClien
             let pos = server.rfind(':').ok_or_else(|| {
                 io::Error::new(
                     io::ErrorKind::InvalidInput,
-                    format!("Invalid server address: {}", server),
+                    format!("invalid server address: {}", server),
                 )
             })?;
             server[..pos].to_string()
@@ -375,7 +375,7 @@ async fn quic_client_from_config(config: &ServiceConfig) -> io::Result<QuicClien
     let server_addr = addrs.into_iter().next().ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::NotFound,
-            format!("Failed to resolve server address: '{}'", server),
+            format!("failed to resolve server address: '{}'", server),
         )
     })?;
 
@@ -396,19 +396,19 @@ async fn quic_client_from_config(config: &ServiceConfig) -> io::Result<QuicClien
             quic_config.root_ca_path = Some(transport_cfg.ca_cert.clone().ok_or_else(|| {
                 io::Error::new(
                     io::ErrorKind::InvalidInput,
-                    "CA cert is required for mTLS mode",
+                    "ca cert is required for mutual tls mode",
                 )
             })?);
             let client_cert = transport_cfg.client_cert.clone().ok_or_else(|| {
                 io::Error::new(
                     io::ErrorKind::InvalidInput,
-                    "Client cert is required for mTLS mode",
+                    "client cert is required for mutual tls mode",
                 )
             })?;
             let client_key = transport_cfg.client_key.clone().ok_or_else(|| {
                 io::Error::new(
                     io::ErrorKind::InvalidInput,
-                    "Client key is required for mTLS mode",
+                    "client key is required for mutual tls mode",
                 )
             })?;
             quic_config.client_cert_key_paths = Some((client_cert, client_key));

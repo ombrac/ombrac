@@ -58,6 +58,7 @@ macro_rules! require_config {
 ///     listen: "0.0.0.0:8080".parse()?,
 ///     transport: Default::default(),
 ///     connection: Default::default(),
+///     logging: Default::default(),
 /// });
 ///
 /// let server = OmbracServer::build(config).await?;
@@ -134,6 +135,7 @@ impl OmbracServer {
     /// #     listen: "0.0.0.0:0".parse()?,
     /// #     transport: Default::default(),
     /// #     connection: Default::default(),
+    /// #     logging: Default::default(),
     /// # });
     /// # let server = OmbracServer::build(config).await?;
     /// server.shutdown().await;
@@ -145,10 +147,10 @@ impl OmbracServer {
         match self.handle.await {
             Ok(Ok(_)) => {}
             Ok(Err(e)) => {
-                error!("The main server task exited with an error: {e}");
+                error!("the main server task exited with an error: {e}");
             }
             Err(e) => {
-                error!("The main server task failed to shut down cleanly: {e}");
+                error!("the main server task failed to shut down cleanly: {e}");
             }
         }
     }
@@ -181,7 +183,7 @@ async fn quic_server_from_config(config: &ServiceConfig) -> Result<QuicServer> {
             )?);
         }
         TlsMode::Insecure => {
-            warn!("TLS is running in insecure mode. Self-signed certificates will be generated.");
+            warn!("tls is running in insecure mode, self-signed certificates will be generated");
             quic_config.enable_self_signed = true;
         }
     }
@@ -202,7 +204,7 @@ async fn quic_server_from_config(config: &ServiceConfig) -> Result<QuicServer> {
         .map_err(map_transport_err)?;
     quic_config.transport_config(transport_config);
 
-    info!("Binding UDP socket to {}", config.listen);
+    info!("binding udp socket to {}", config.listen);
     let socket = UdpSocket::bind(config.listen)?;
 
     QuicServer::new(socket, quic_config)
