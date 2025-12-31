@@ -76,8 +76,13 @@ impl UdpDispatcher {
 
                             dispatcher.dispatch(session_id, data, address).await;
                         }
-                        Err(_e) => {
-                            warn!("Error reading datagram: {}. Retrying in {:?}...", _e, current_delay);
+                        Err(e) => {
+                            warn!(
+                                error = %e,
+                                error_kind = ?e.kind(),
+                                retry_delay_ms = current_delay.as_millis(),
+                                "failed to read datagram, retrying"
+                            );
                             tokio::time::sleep(current_delay).await;
                             current_delay = (current_delay * 2).min(DATAGRAM_MAX_DELAY);
                         }
@@ -97,8 +102,8 @@ impl UdpDispatcher {
             }
         } else {
             warn!(
-                "[Session][{}] Received datagram for UNKNOWN or CLOSED",
-                session_id
+                session_id,
+                "received datagram for unknown or closed session"
             );
         }
     }
@@ -137,8 +142,12 @@ where
 
         let packet = match UdpPacket::decode(&packet_bytes) {
             Ok(packet) => packet,
-            Err(_e) => {
-                warn!("Failed to decode UDP packet: {}. Discarding.", _e);
+            Err(e) => {
+                warn!(
+                    error = %e,
+                    packet_size = packet_bytes.len(),
+                    "failed to decode UDP packet, discarding"
+                );
                 continue; // Skip malformed packets.
             }
         };
@@ -150,8 +159,11 @@ where
             Ok(None) => {
                 continue; // Fragment received, continue reading.
             }
-            Err(_e) => {
-                warn!("Reassembly error: {}. Discarding fragment.", _e);
+            Err(e) => {
+                warn!(
+                    error = %e,
+                    "reassembly error, discarding fragment"
+                );
                 continue; // Reassembly error, wait for the next valid packet.
             }
         }
@@ -197,11 +209,11 @@ where
     } else {
         // The packet is too large and must be fragmented.
         debug!(
-            "[Session][{}] Sending packet for {} is too large ({} > max {}), fragmenting...",
             session_id,
-            dest_addr,
-            data.len(),
-            max_payload_size
+            dest = %dest_addr,
+            packet_size = data.len(),
+            max_payload_size,
+            "packet too large, fragmenting"
         );
 
         let fragment_id = fragment_id_counter.fetch_add(1, Ordering::Relaxed);

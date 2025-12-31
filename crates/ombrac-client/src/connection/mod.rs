@@ -186,8 +186,9 @@ where
             Ok(result) => Ok(result),
             Err(e) if is_connection_error(&e) => {
                 warn!(
-                    "Connection error detected: {}. Attempting to reconnect...",
-                    e
+                    error = %e,
+                    error_kind = ?e.kind(),
+                    "connection error detected, attempting to reconnect"
                 );
                 self.reconnect(old_conn_id).await?;
                 let new_connection = self.connection.load();
@@ -214,8 +215,9 @@ where
             if elapsed < state.backoff {
                 let wait_time = state.backoff - elapsed;
                 warn!(
-                    "Too many reconnect attempts. Global throttling for {:?}...",
-                    wait_time
+                    wait_time_ms = wait_time.as_millis(),
+                    backoff_secs = state.backoff.as_secs(),
+                    "reconnect throttled, too many attempts"
                 );
 
                 drop(state);
@@ -224,12 +226,17 @@ where
             }
         }
 
-        info!("Attemping to reconnect...");
+        info!("attempting to reconnect to server");
 
         state.last_attempt = Some(Instant::now());
 
         if let Err(e) = self.transport.rebind().await {
             state.backoff = (state.backoff * 2).min(MAX_RECONNECT_BACKOFF);
+            warn!(
+                error = %e,
+                next_backoff_secs = state.backoff.as_secs(),
+                "transport rebind failed during reconnect"
+            );
             return Err(e);
         }
 
@@ -239,14 +246,16 @@ where
                 state.last_attempt = None;
 
                 self.connection.store(Arc::new(new_connection));
-                info!("Reconnection successful");
+                info!("reconnection successful");
                 Ok(())
             }
             Err(e) => {
                 state.backoff = (state.backoff * 2).min(MAX_RECONNECT_BACKOFF);
                 error!(
-                    "Reconnect failed: {}. Next retry backoff: {:?}",
-                    e, state.backoff
+                    error = %e,
+                    error_kind = ?e.kind(),
+                    next_backoff_secs = state.backoff.as_secs(),
+                    "reconnect handshake failed"
                 );
                 Err(e)
             }
@@ -280,37 +289,57 @@ where
                 let response: ServerHandshakeResponse = protocol::decode(&payload)?;
                 match response {
                     ServerHandshakeResponse::Ok => {
-                        info!("Handshake with server successful");
+                        info!("handshake with server successful");
                         stream.shutdown().await?;
                         Ok(connection)
                     }
                     ServerHandshakeResponse::Err(e) => {
-                        error!("Handshake failed: {:?}", e);
                         let err_kind = match e {
                             HandshakeError::InvalidSecret => io::ErrorKind::PermissionDenied,
                             _ => io::ErrorKind::InvalidData,
                         };
+                        error!(
+                            error = ?e,
+                            error_kind = ?err_kind,
+                            "handshake failed, server rejected"
+                        );
                         Err(io::Error::new(
                             err_kind,
-                            format!("Server rejected handshake: {:?}", e),
+                            format!("server rejected handshake: {:?}", e),
                         ))
                     }
                 }
             }
-            Some(Err(e)) => Err(e),
-            None => Err(io::Error::new(
-                io::ErrorKind::UnexpectedEof,
-                "Connection closed by server during handshake",
-            )),
+            Some(Err(e)) => {
+                error!(
+                    error = %e,
+                    error_kind = ?e.kind(),
+                    "connection error during handshake"
+                );
+                Err(e)
+            }
+            None => {
+                error!("connection closed by server during handshake");
+                Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "Connection closed by server during handshake",
+                ))
+            }
         }
     };
 
     match tokio::time::timeout(HANDSHAKE_TIMEOUT, do_handshake).await {
         Ok(result) => result,
-        Err(_) => Err(io::Error::new(
-            io::ErrorKind::TimedOut,
-            "Client hello timed out",
-        )),
+        Err(_) => {
+            error!(
+                timeout_secs = HANDSHAKE_TIMEOUT.as_secs(),
+                "handshake timed out"
+            );
+            Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "Client hello timed out",
+            ))
+        }
     }
 }
 
