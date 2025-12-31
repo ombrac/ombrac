@@ -5,6 +5,7 @@ use std::time::{Duration, Instant};
 use futures::{SinkExt, StreamExt};
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
+use tokio::sync::Semaphore;
 use tokio_util::codec::Framed;
 use tokio_util::sync::CancellationToken;
 #[cfg(feature = "tracing")]
@@ -18,15 +19,18 @@ use ombrac_transport::io::{CopyBidirectionalStats, copy_bidirectional};
 pub(crate) struct StreamTunnel<C: Connection> {
     connection: Arc<C>,
     shutdown: CancellationToken,
+    semaphore: Arc<Semaphore>,
 }
 
 impl<C: Connection> StreamTunnel<C> {
+    const DEFAULT_MAX_CONCURRENT_CONNECTIONS: usize = 4096;
     const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 
     pub(crate) fn new(connection: Arc<C>, shutdown: CancellationToken) -> Self {
         Self {
             connection,
             shutdown,
+            semaphore: Arc::new(Semaphore::new(Self::DEFAULT_MAX_CONCURRENT_CONNECTIONS)),
         }
     }
 
@@ -37,11 +41,24 @@ impl<C: Connection> StreamTunnel<C> {
                 _ = self.shutdown.cancelled() => break,
                 result = self.connection.accept_bidirectional() => {
                     let stream = result?;
+                    let semaphore = Arc::clone(&self.semaphore);
+                    let shutdown = self.shutdown.child_token();
+
                     let future = async move {
+                        // Acquire semaphore permit to limit concurrent connections
+                        let _permit = match semaphore.acquire().await {
+                            Ok(permit) => permit,
+                            Err(_) => {
+                                // Semaphore is closed, skip this connection
+                                return;
+                            }
+                        };
+
                         let mut guard = StreamGuard::default();
-                        if let Err(e) = Self::handle_connect(stream, &mut guard).await {
+                        if let Err(e) = Self::handle_connect(stream, &mut guard, shutdown).await {
                             guard.reason = Some(e);
                         }
+                        // Permit is automatically released when dropped
                     };
 
                     #[cfg(not(feature = "tracing"))]
@@ -58,6 +75,7 @@ impl<C: Connection> StreamTunnel<C> {
     pub(crate) async fn handle_connect(
         mut stream: C::Stream,
         guard: &mut StreamGuard,
+        shutdown: CancellationToken,
     ) -> io::Result<()> {
         let mut framed = Framed::new(&mut stream, codec::length_codec());
 
@@ -77,7 +95,8 @@ impl<C: Connection> StreamTunnel<C> {
         // Step 5: Exchange data between client and destination
         // Note: This phase has no timeout as it's the normal data transfer phase
         // that can last for the entire lifetime of the TCP connection.
-        Self::exchange_data(framed, &mut tcp_stream, guard).await
+        // Now with graceful shutdown support via tokio::select!
+        Self::exchange_data(framed, &mut tcp_stream, guard, shutdown).await
     }
 
     /// Reads the connect message from the client.
@@ -86,46 +105,33 @@ impl<C: Connection> StreamTunnel<C> {
     async fn read_connect_message(
         framed: &mut Framed<&mut C::Stream, codec::LengthDelimitedCodec>,
     ) -> io::Result<protocol::Address> {
-        match tokio::time::timeout(Self::DEFAULT_CONNECT_TIMEOUT, framed.next()).await {
-            Ok(Some(Ok(payload))) => {
-                let message = protocol::decode(&payload)?;
-                match message {
-                    codec::UpstreamMessage::Connect(connect) => Ok(connect.address),
-                    _ => Err(io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        "Expected connect message",
-                    )),
-                }
-            }
-            Ok(Some(Err(e))) => Err(e),
-            Ok(None) => Err(io::Error::new(
-                io::ErrorKind::UnexpectedEof,
-                "Failed to read connect message on stream",
-            )),
-            Err(_) => Err(io::Error::new(
-                io::ErrorKind::TimedOut,
-                "Timeout reading connect message",
+        let payload = tokio::time::timeout(Self::DEFAULT_CONNECT_TIMEOUT, framed.next())
+            .await
+            .map_err(|_| {
+                io::Error::new(io::ErrorKind::TimedOut, "Timeout reading connect message")
+            })?
+            .ok_or_else(|| {
+                io::Error::new(io::ErrorKind::UnexpectedEof, "Stream closed unexpectedly")
+            })??;
+
+        match protocol::decode(&payload)? {
+            codec::UpstreamMessage::Connect(connect) => Ok(connect.address),
+            _ => Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Expected connect message",
             )),
         }
     }
 
     /// Attempts to connect to the destination address with a timeout.
     async fn connect_to_destination(destination: &protocol::Address) -> io::Result<TcpStream> {
-        let destination_socket_addr = destination.to_socket_addr().await?;
+        // TOOD: use trust-dns-resolver
+        let addr = destination.to_socket_addr().await?;
 
-        match tokio::time::timeout(
-            Self::DEFAULT_CONNECT_TIMEOUT,
-            TcpStream::connect(destination_socket_addr),
-        )
-        .await
-        {
-            Ok(Ok(stream)) => Ok(stream),
-            Ok(Err(e)) => Err(e),
-            Err(_) => Err(io::Error::new(
-                io::ErrorKind::TimedOut,
-                "Connection timeout",
-            )),
-        }
+        tokio::time::timeout(Self::DEFAULT_CONNECT_TIMEOUT, TcpStream::connect(addr))
+            .await
+            .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "Connection timeout"))?
+            .map_err(Into::into)
     }
 
     /// Sends the connection response to the client.
@@ -160,10 +166,14 @@ impl<C: Connection> StreamTunnel<C> {
     }
 
     /// Exchanges data between the client stream and the destination TCP stream.
+    ///
+    /// This function uses tokio::select! to listen for shutdown signals during
+    /// data exchange, allowing graceful shutdown of active connections.
     async fn exchange_data(
         framed: Framed<&mut C::Stream, codec::LengthDelimitedCodec>,
         tcp_stream: &mut TcpStream,
         guard: &mut StreamGuard,
+        shutdown: CancellationToken,
     ) -> io::Result<()> {
         // Extract any buffered data from the framed stream
         let parts = framed.into_parts();
@@ -174,16 +184,31 @@ impl<C: Connection> StreamTunnel<C> {
             tcp_stream.write_all(&parts.read_buf).await?;
         }
 
-        // Perform bidirectional data copying
+        // Perform bidirectional data copying with graceful shutdown support
         let mut stream_inner = parts.io;
-        match copy_bidirectional(&mut stream_inner, tcp_stream).await {
-            Ok(stats) => {
-                guard.stats = Some(stats);
-                Ok(())
+
+        // Use tokio::select! to listen for shutdown signal during data exchange
+        tokio::select! {
+            biased;
+            _ = shutdown.cancelled() => {
+                // Shutdown signal received, gracefully close the connection
+                // Return a clean error to indicate shutdown
+                Err(io::Error::new(
+                    io::ErrorKind::Interrupted,
+                    "Connection closed due to active closure"
+                ))
             }
-            Err((e, stats)) => {
-                guard.stats = Some(stats);
-                Err(e)
+            result = copy_bidirectional(&mut stream_inner, tcp_stream) => {
+                match result {
+                    Ok(stats) => {
+                        guard.stats = Some(stats);
+                        Ok(())
+                    }
+                    Err((e, stats)) => {
+                        guard.stats = Some(stats);
+                        Err(e)
+                    }
+                }
             }
         }
     }
