@@ -15,47 +15,6 @@ use ombrac_macros::info;
 use ombrac_transport::Connection;
 use ombrac_transport::io::{CopyBidirectionalStats, copy_bidirectional};
 
-pub(crate) struct StreamGuard {
-    created_at: Instant,
-    initial_upstream_bytes: u64,
-    destination: Option<protocol::Address>,
-    reason: Option<io::Error>,
-    stats: Option<CopyBidirectionalStats>,
-}
-
-impl Default for StreamGuard {
-    fn default() -> Self {
-        Self {
-            created_at: Instant::now(),
-            initial_upstream_bytes: 0,
-            destination: None,
-            reason: None,
-            stats: None,
-        }
-    }
-}
-
-impl Drop for StreamGuard {
-    fn drop(&mut self) {
-        #[cfg(feature = "tracing")]
-        {
-            let (up, down) = self
-                .stats
-                .as_ref()
-                .map(|s| (s.a_to_b_bytes, s.b_to_a_bytes))
-                .unwrap_or_default();
-
-            info!(
-                dest = %self.destination.as_ref().map(|a| a.to_string()).unwrap_or_else(|| "unknown".to_string()),
-                up = up + self.initial_upstream_bytes,
-                down,
-                duration = self.created_at.elapsed().as_millis(),
-                reason = %DisconnectReason(&self.reason),
-            );
-        }
-    }
-}
-
 pub(crate) struct StreamTunnel<C: Connection> {
     connection: Arc<C>,
     shutdown: CancellationToken,
@@ -226,6 +185,47 @@ impl<C: Connection> StreamTunnel<C> {
                 guard.stats = Some(stats);
                 Err(e)
             }
+        }
+    }
+}
+
+pub(crate) struct StreamGuard {
+    created_at: Instant,
+    initial_upstream_bytes: u64,
+    destination: Option<protocol::Address>,
+    reason: Option<io::Error>,
+    stats: Option<CopyBidirectionalStats>,
+}
+
+impl Default for StreamGuard {
+    fn default() -> Self {
+        Self {
+            created_at: Instant::now(),
+            initial_upstream_bytes: 0,
+            destination: None,
+            reason: None,
+            stats: None,
+        }
+    }
+}
+
+impl Drop for StreamGuard {
+    fn drop(&mut self) {
+        #[cfg(feature = "tracing")]
+        {
+            let (up, down) = self
+                .stats
+                .as_ref()
+                .map(|s| (s.a_to_b_bytes, s.b_to_a_bytes))
+                .unwrap_or_default();
+
+            info!(
+                dest = %self.destination.as_ref().map(|a| a.to_string()).unwrap_or_else(|| "unknown".to_string()),
+                up = up + self.initial_upstream_bytes,
+                down,
+                duration = self.created_at.elapsed().as_millis(),
+                reason = %DisconnectReason(&self.reason),
+            );
         }
     }
 }

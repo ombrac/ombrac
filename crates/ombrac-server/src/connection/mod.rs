@@ -1,6 +1,6 @@
+mod stream;
 #[cfg(feature = "datagram")]
 mod datagram;
-mod stream;
 
 use std::future::Future;
 use std::io;
