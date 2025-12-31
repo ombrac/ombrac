@@ -17,7 +17,7 @@ use ombrac_transport::Connection;
 use ombrac_transport::io::{CopyBidirectionalStats, copy_bidirectional};
 
 const MAX_CONCURRENT_CONNECTIONS: usize = 4096;
-const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
+const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(15);
 const UPSTREAM_CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 
 pub(crate) struct StreamTunnel<C: Connection> {
@@ -88,15 +88,16 @@ impl<C: Connection> StreamTunnel<C> {
         let connect_result = Self::connect_to_destination(&destination).await;
 
         // Step 3: Send connection response to client
+        // This must happen before we proceed, so the client knows the connection status
         Self::send_connect_response(&mut framed, &connect_result).await?;
 
-        // Step 4: If connection failed, return error
+        // Step 4: If connection failed, return error (client has already been notified)
         let mut tcp_stream = connect_result?;
 
         // Step 5: Exchange data between client and destination
         // Note: This phase has no timeout as it's the normal data transfer phase
         // that can last for the entire lifetime of the TCP connection.
-        // Now with graceful shutdown support via tokio::select!
+        // Graceful shutdown is supported via tokio::select!
         Self::exchange_data(framed, &mut tcp_stream, guard, shutdown).await
     }
 
@@ -109,29 +110,33 @@ impl<C: Connection> StreamTunnel<C> {
         let payload = tokio::time::timeout(HANDSHAKE_TIMEOUT, framed.next())
             .await
             .map_err(|_| {
-                io::Error::new(io::ErrorKind::TimedOut, "Timeout reading connect message")
+                io::Error::new(io::ErrorKind::TimedOut, "timeout reading connect message")
             })?
             .ok_or_else(|| {
-                io::Error::new(io::ErrorKind::UnexpectedEof, "Stream closed unexpectedly")
+                io::Error::new(io::ErrorKind::UnexpectedEof, "stream closed unexpectedly")
             })??;
 
         match protocol::decode(&payload)? {
-            codec::UpstreamMessage::Connect(connect) => Ok(connect.address),
+            codec::ClientMessage::Connect(connect) => Ok(connect.address),
             _ => Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                "Expected connect message",
+                "expected connect message",
             )),
         }
     }
 
     /// Attempts to connect to the destination address with a timeout.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if DNS resolution fails or the connection times out.
     async fn connect_to_destination(destination: &protocol::Address) -> io::Result<TcpStream> {
-        // TOOD: use trust-dns-resolver
+        // TODO: use trust-dns-resolver for better DNS handling
         let addr = destination.to_socket_addr().await?;
 
         tokio::time::timeout(UPSTREAM_CONNECT_TIMEOUT, TcpStream::connect(addr))
             .await
-            .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "Connection timeout"))?
+            .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "connection timeout"))?
             .map_err(Into::into)
     }
 
@@ -159,7 +164,7 @@ impl<C: Connection> StreamTunnel<C> {
             }
         };
 
-        let response_message = codec::DownstreamMessage::ConnectResponse(response);
+        let response_message = codec::ServerMessage::ConnectResponse(response);
         let encoded_response = protocol::encode(&response_message)?;
         framed.send(encoded_response).await?;
 
@@ -196,7 +201,7 @@ impl<C: Connection> StreamTunnel<C> {
                 // Return a clean error to indicate shutdown
                 Err(io::Error::new(
                     io::ErrorKind::Interrupted,
-                    "Connection closed due to active closure"
+                    "connection closed due to active closure"
                 ))
             }
             result = copy_bidirectional(&mut stream_inner, tcp_stream) => {

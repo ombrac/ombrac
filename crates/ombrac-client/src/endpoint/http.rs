@@ -15,6 +15,7 @@ use ombrac_transport::quic::Connection as QuicConnection;
 use ombrac_transport::quic::client::Client as QuicClient;
 
 use crate::client::Client;
+use crate::connection::BufferedStream;
 
 type HttpResult = Result<Response<BoxBody<Bytes, hyper::Error>>, hyper::Error>;
 type HyperClientBuilder = hyper::client::conn::http1::Builder;
@@ -103,7 +104,7 @@ impl Server {
 
     async fn handle_connect(
         req: Request<hyper::body::Incoming>,
-        mut dest_stream: <QuicConnection as ombrac_transport::Connection>::Stream,
+        mut dest_stream: BufferedStream<<QuicConnection as ombrac_transport::Connection>::Stream>,
         remote_addr: SocketAddr,
         target_addr: Address,
     ) -> HttpResult {
@@ -153,7 +154,7 @@ impl Server {
 
     async fn handle_http(
         req: Request<hyper::body::Incoming>,
-        outbound_conn: <QuicConnection as ombrac_transport::Connection>::Stream,
+        outbound_conn: BufferedStream<<QuicConnection as ombrac_transport::Connection>::Stream>,
         remote_addr: SocketAddr,
         target_addr: Address,
     ) -> HttpResult {

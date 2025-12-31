@@ -13,6 +13,7 @@ use ombrac_transport::quic::Connection as QuicConnection;
 use ombrac_transport::quic::client::Client as QuicClient;
 
 use crate::client::Client;
+use crate::connection::BufferedStream;
 #[cfg(feature = "datagram")]
 use crate::connection::UdpSession;
 
@@ -30,7 +31,7 @@ impl CommandHandler {
     async fn handle_connect_data_forwarding(
         &self,
         stream: &mut Stream<impl AsyncRead + AsyncWrite + Unpin>,
-        dest_stream: &mut <QuicConnection as ombrac_transport::Connection>::Stream,
+        dest_stream: &mut BufferedStream<<QuicConnection as ombrac_transport::Connection>::Stream>,
     ) -> io::Result<()> {
         let src_addr = stream.local_addr();
         match ombrac_transport::io::copy_bidirectional(stream, dest_stream).await {
@@ -162,12 +163,15 @@ impl Handler for CommandHandler {
                         return Err(err);
                     }
                 };
-                
+
                 // Connection successful, send success response
                 stream.write_response(&Response::Success(&address)).await?;
-                
+
                 // Now handle the data forwarding
-                if let Err(err) = self.handle_connect_data_forwarding(stream, &mut dest_stream).await {
+                if let Err(err) = self
+                    .handle_connect_data_forwarding(stream, &mut dest_stream)
+                    .await
+                {
                     if err.kind() != io::ErrorKind::BrokenPipe
                         && err.kind() != io::ErrorKind::ConnectionReset
                     {

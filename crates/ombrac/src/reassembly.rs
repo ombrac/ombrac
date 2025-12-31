@@ -8,19 +8,35 @@ use tokio::sync::Mutex;
 
 use crate::protocol::{Address, UdpPacket};
 
+/// Default timeout for fragment reassembly [10 seconds]
 const DEFAULT_REASSEMBLY_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Default maximum number of concurrent reassembly operations [8192]
 const DEFAULT_MAX_CONCURRENT_REASSEMBLIES: u64 = 8192;
 
-// The key for the cache is a combination of the session and fragment IDs
-// to ensure fragments from different sessions don't collide.
+/// Cache key type: (session_id, fragment_id)
+///
+/// The combination ensures fragments from different sessions don't collide,
+/// and different fragmentation operations within the same session are handled separately.
 type CacheKey = (u64, u32);
+
+/// Session identifier type
 type SessionID = u64;
 
+/// Buffer for reassembling fragmented UDP packets.
+///
+/// Tracks received fragments and assembles them into a complete packet
+/// when all fragments have been received.
 struct ReassemblyBuffer {
+    /// Fragment storage (None = not received yet)
     fragments: Vec<Option<Bytes>>,
+    /// Number of fragments received so far
     received_count: u16,
+    /// Total number of fragments expected
     total_count: u16,
+    /// Destination address (only in first fragment)
     address: Option<Address>,
+    /// Session identifier
     session_id: SessionID,
 }
 
@@ -35,63 +51,102 @@ impl ReassemblyBuffer {
         }
     }
 
+    /// Adds a fragment to the buffer.
+    ///
+    /// # Returns
+    ///
+    /// `true` if the fragment was successfully added, `false` if it was invalid
+    /// or a duplicate.
     fn add_fragment(&mut self, fragment: UdpPacket) -> bool {
-        if let UdpPacket::Fragmented {
+        let UdpPacket::Fragmented {
             fragment_index,
             fragment_count,
             address,
             data,
             ..
         } = fragment
-        {
-            // Initialize the buffer with the fragment_count from the first fragment we see.
-            if self.total_count == 0 {
-                if fragment_count == 0 {
-                    return false; // Invalid fragment
-                }
-                self.total_count = fragment_count;
-                self.fragments = vec![None; fragment_count as usize];
-            } else if self.total_count != fragment_count {
-                // Mismatch in fragment count, likely a corrupted or malicious packet.
-                return false;
-            }
+        else {
+            return false;
+        };
 
-            // The address is only present in the first fragment.
-            if fragment_index == 0 {
-                if self.address.is_none() {
+        // Validate fragment_count
+        if fragment_count == 0 {
+            return false; // Invalid fragment
+        }
+
+        // Initialize the buffer with the fragment_count from the first fragment we see.
+        if self.total_count == 0 {
+            self.total_count = fragment_count;
+            self.fragments = vec![None; fragment_count as usize];
+        } else if self.total_count != fragment_count {
+            // Mismatch in fragment count, likely a corrupted or malicious packet.
+            return false;
+        }
+
+        // The address is only present in the first fragment.
+        if fragment_index == 0 {
+            match &self.address {
+                None => {
+                    // First time seeing address, store it
                     self.address = address;
-                } else if self.address != address {
-                    // Address mismatch, could be an attack or a hash collision.
-                    return false;
                 }
-            }
-
-            let index = fragment_index as usize;
-            if index < self.fragments.len() && self.fragments[index].is_none() {
-                self.fragments[index] = Some(data);
-                self.received_count += 1;
-                return true;
+                Some(existing) => {
+                    // Check if the address matches
+                    if let Some(new_addr) = &address {
+                        if existing != new_addr {
+                            // Address mismatch, could be an attack or a hash collision.
+                            return false;
+                        }
+                    } else {
+                        // First fragment should always have an address
+                        return false;
+                    }
+                }
             }
         }
+
+        // Validate fragment_index and check if we already have this fragment
+        let index = fragment_index as usize;
+        if index < self.fragments.len() && self.fragments[index].is_none() {
+            self.fragments[index] = Some(data);
+            self.received_count += 1;
+            return true;
+        }
+
         false
     }
 
+    /// Checks if all fragments have been received and the buffer is complete.
     fn is_complete(&self) -> bool {
         self.total_count > 0 && self.received_count == self.total_count && self.address.is_some()
     }
 
+    /// Assembles the fragments into a complete packet and takes ownership.
+    ///
+    /// # Returns
+    ///
+    /// `Some((session_id, address, data))` if the buffer is complete, `None` otherwise.
     fn assemble_and_take(&mut self) -> Option<(SessionID, Address, Bytes)> {
         if !self.is_complete() {
             return None;
         }
 
-        let mut combined = BytesMut::new();
+        // Pre-allocate capacity for better performance
+        let mut combined = BytesMut::with_capacity(
+            self.fragments
+                .iter()
+                .map(|f| f.as_ref().map(|b| b.len()).unwrap_or(0))
+                .sum(),
+        );
+
+        // Assemble fragments in order
         for fragment in self.fragments.iter_mut() {
-            if let Some(data) = fragment.take() {
-                combined.put(data);
-            } else {
-                // Should not happen if is_complete is true
-                return None;
+            match fragment.take() {
+                Some(data) => combined.put(data),
+                None => {
+                    // Should not happen if is_complete is true
+                    return None;
+                }
             }
         }
 
@@ -124,13 +179,23 @@ impl UdpReassembler {
         Self { cache }
     }
 
+    /// Processes a UDP packet, handling reassembly if fragmented.
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(Some((session_id, address, data)))` - Complete packet ready
+    /// - `Ok(None)` - Fragment received, waiting for more
+    /// - `Err(e)` - Reassembly error
     pub async fn process(&self, packet: UdpPacket) -> io::Result<Option<(u64, Address, Bytes)>> {
         match packet {
             UdpPacket::Unfragmented {
                 session_id,
                 address,
                 data,
-            } => Ok(Some((session_id, address, data))),
+            } => {
+                // Unfragmented packet, return immediately
+                Ok(Some((session_id, address, data)))
+            }
             UdpPacket::Fragmented {
                 session_id,
                 fragment_id,
@@ -138,11 +203,11 @@ impl UdpReassembler {
             } => {
                 let cache_key = (session_id, fragment_id);
 
-                // Get or insert a new buffer. This is atomic.
+                // Get or insert a new buffer. This is atomic and prevents race conditions.
                 let buffer_lock = self
                     .cache
                     .get_with(cache_key, async {
-                        // For now, create a buffer with unknown total_count and address.
+                        // Create a buffer with unknown total_count and address.
                         // These will be filled in when the relevant fragment arrives.
                         Arc::new(Mutex::new(ReassemblyBuffer::new(session_id, 0, None)))
                     })
@@ -150,15 +215,21 @@ impl UdpReassembler {
 
                 let mut buffer = buffer_lock.lock().await;
 
-                // Add the fragment. If it's a duplicate, this will do nothing.
-                buffer.add_fragment(packet);
+                // Add the fragment. If it's a duplicate or invalid, this returns false.
+                if !buffer.add_fragment(packet) {
+                    // Invalid or duplicate fragment, ignore it
+                    return Ok(None);
+                }
 
+                // Check if we have all fragments
                 if buffer.is_complete() {
                     let assembled_data = buffer.assemble_and_take();
+                    // Remove from cache to free memory
                     self.cache.invalidate(&cache_key).await;
                     return Ok(assembled_data);
                 }
 
+                // Still waiting for more fragments
                 Ok(None)
             }
         }

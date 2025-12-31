@@ -56,7 +56,7 @@ pub trait Authenticator<T>: Send + Sync {
     fn verify(
         &self,
         hello: &protocol::ClientHello,
-    ) -> impl Future<Output = Result<Self::AuthContext, protocol::HandshakeError>> + Send;
+    ) -> impl Future<Output = Result<Self::AuthContext, protocol::ConnectionAuthError>> + Send;
 
     /// Called after successful authentication to handle the accepted connection.
     ///
@@ -73,11 +73,14 @@ pub trait Authenticator<T>: Send + Sync {
 impl<T: Send + Sync> Authenticator<T> for ombrac::protocol::Secret {
     type AuthContext = ();
 
-    async fn verify(&self, hello: &protocol::ClientHello) -> Result<(), protocol::HandshakeError> {
+    async fn verify(
+        &self,
+        hello: &protocol::ClientHello,
+    ) -> Result<(), protocol::ConnectionAuthError> {
         if &hello.secret == self {
             Ok(())
         } else {
-            Err(protocol::HandshakeError::InvalidSecret)
+            Err(protocol::ConnectionAuthError::InvalidSecret)
         }
     }
 
@@ -164,10 +167,10 @@ impl<C: Connection> ClientConnectionProcessor<C> {
                 io::Error::new(io::ErrorKind::UnexpectedEof, "Stream closed before hello")
             })??;
 
-        let message: codec::UpstreamMessage = protocol::decode(&payload)?;
+        let message: codec::ClientMessage = protocol::decode(&payload)?;
 
         let hello = match message {
-            codec::UpstreamMessage::Hello(h) => h,
+            codec::ClientMessage::Hello(h) => h,
             _ => {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
@@ -180,12 +183,12 @@ impl<C: Connection> ClientConnectionProcessor<C> {
         Self::trace_handshake(&hello);
 
         // Verify with timeout
-        let auth_result = if hello.version != protocol::PROTOCOLS_VERSION {
-            Err(protocol::HandshakeError::UnsupportedVersion)
+        let auth_result = if hello.version != protocol::PROTOCOL_VERSION {
+            Err(protocol::ConnectionAuthError::IncompatibleVersion)
         } else {
             match tokio::time::timeout(handshake_timeout, authenticator.verify(&hello)).await {
                 Ok(result) => result,
-                Err(_) => Err(protocol::HandshakeError::InternalServerError),
+                Err(_) => Err(protocol::ConnectionAuthError::ServerError),
             }
         };
 

@@ -6,15 +6,15 @@ use std::time::Duration;
 use arc_swap::{ArcSwap, Guard};
 use bytes::Bytes;
 use futures::{SinkExt, StreamExt};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::AsyncWriteExt;
 use tokio::sync::Mutex;
 use tokio::time::Instant;
 use tokio_util::codec::Framed;
 
-use ombrac::codec::{DownstreamMessage, UpstreamMessage, length_codec};
+use ombrac::codec::{ClientMessage, ServerMessage, length_codec};
 use ombrac::protocol::{
-    self, Address, ClientConnect, ClientHello, ConnectErrorKind, HandshakeError, PROTOCOLS_VERSION,
-    Secret, ServerConnectResponse, ServerHandshakeResponse,
+    self, Address, ClientConnect, ClientHello, ConnectErrorKind, ConnectionAuthError,
+    PROTOCOL_VERSION, Secret, ServerConnectResponse, ServerHandshakeResponse,
 };
 use ombrac_macros::{error, info, warn};
 use ombrac_transport::{Connection, Initiator};
@@ -23,12 +23,11 @@ use ombrac_transport::{Connection, Initiator};
 mod datagram;
 mod stream;
 
+pub use stream::BufferedStream;
+
 // --- Handshake & Connection ---
 /// Timeout for the initial handshake with the server [default: 10 seconds]
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
-
-/// Maximum size for response messages [default: 8MB]
-const MAX_RESPONSE_MESSAGE_SIZE: usize = 8 * 1024 * 1024;
 
 // --- Reconnection Strategy ---
 /// Initial backoff duration for reconnection attempts [default: 1 second]
@@ -96,36 +95,48 @@ where
     /// This method negotiates a new stream with the server, which will then
     /// connect to the specified destination address. It waits for the server's
     /// connection response before returning, ensuring proper TCP state handling.
-    pub async fn open_bidirectional(&self, dest_addr: Address) -> io::Result<C::Stream> {
+    ///
+    /// The returned stream is wrapped in a `BufferedStream` to ensure that any
+    /// data remaining in the protocol framing buffer is read first, preventing
+    /// data loss when transitioning from message-based to raw stream communication.
+    pub async fn open_bidirectional(
+        &self,
+        dest_addr: Address,
+    ) -> io::Result<BufferedStream<C::Stream>> {
         let mut stream = self
             .with_retry(|conn| async move { conn.open_bidirectional().await })
             .await?;
 
-        let connect_message = UpstreamMessage::Connect(ClientConnect {
+        // Use Framed codec for consistent message framing
+        let mut framed = Framed::new(&mut stream, length_codec());
+
+        // Send connection request
+        let connect_message = ClientMessage::Connect(ClientConnect {
             address: dest_addr.clone(),
         });
-        let encoded_bytes = protocol::encode(&connect_message)?;
-
-        // The protocol requires a length-prefixed message.
-        stream.write_u32(encoded_bytes.len() as u32).await?;
-        stream.write_all(&encoded_bytes).await?;
+        framed.send(protocol::encode(&connect_message)?).await?;
 
         // Wait for the server's connection response
-        // Read the length prefix manually to avoid borrowing issues
-        let response_length = stream.read_u32().await?;
-        if response_length > MAX_RESPONSE_MESSAGE_SIZE as u32 {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("response message too large: {} bytes", response_length),
-            ));
-        }
+        // Framed automatically reads the length prefix and validates frame size
+        let payload = match framed.next().await {
+            Some(Ok(payload)) => payload,
+            Some(Err(e)) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("failed to read server response: {}", e),
+                ));
+            }
+            None => {
+                return Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "stream closed before receiving server response",
+                ));
+            }
+        };
 
-        let mut response_buffer = vec![0u8; response_length as usize];
-        stream.read_exact(&mut response_buffer).await?;
-
-        let message: DownstreamMessage = protocol::decode(&response_buffer)?;
+        let message: ServerMessage = protocol::decode(&payload)?;
         let response = match message {
-            DownstreamMessage::ConnectResponse(response) => response,
+            ServerMessage::ConnectResponse(response) => response,
             #[allow(unreachable_patterns)]
             _ => {
                 return Err(io::Error::new(
@@ -135,19 +146,51 @@ where
             }
         };
 
-        // Handle the connection response
+        // Extract any buffered data from Framed before dropping it
+        // This ensures we don't lose any data that might be in the read/write buffers.
+        // In this request-response protocol, we expect:
+        // - read_buf to be empty (we've read the complete response)
+        // - write_buf to be empty (send() should have flushed the request)
+        let parts = framed.into_parts();
+
+        // Verify write buffer is empty (send() should have flushed, but verify for safety)
+        if !parts.write_buf.is_empty() {
+            // This indicates send() didn't complete properly - this is a serious error
+            return Err(io::Error::new(
+                io::ErrorKind::Other,
+                format!(
+                    "write buffer not empty after send: {} bytes remaining - data may be lost",
+                    parts.write_buf.len()
+                ),
+            ));
+        }
+
+        // Extract any remaining buffered read data
+        // This data may be present if the server sent additional data immediately after
+        // the connection response. We preserve it by wrapping the stream in BufferedStream.
+        let buffered_data = if !parts.read_buf.is_empty() {
+            info!(
+                buffered_bytes = parts.read_buf.len(),
+                "preserving buffered data from protocol framing buffer"
+            );
+            Bytes::copy_from_slice(&parts.read_buf)
+        } else {
+            Bytes::new()
+        };
+
         match response {
             ServerConnectResponse::Ok => {
-                // Connection successful - return the stream for data exchange
-                Ok(stream)
+                // Connection successful - return the stream wrapped in BufferedStream
+                // to ensure any buffered data is read first
+                Ok(BufferedStream::new(stream, buffered_data))
             }
             ServerConnectResponse::Err { kind, message } => {
                 // Connection failed - return appropriate error
                 let error_kind = match kind {
                     ConnectErrorKind::ConnectionRefused => io::ErrorKind::ConnectionRefused,
-                    ConnectErrorKind::TimedOut => io::ErrorKind::TimedOut,
                     ConnectErrorKind::NetworkUnreachable => io::ErrorKind::NetworkUnreachable,
                     ConnectErrorKind::HostUnreachable => io::ErrorKind::HostUnreachable,
+                    ConnectErrorKind::TimedOut => io::ErrorKind::TimedOut,
                     ConnectErrorKind::Other => io::ErrorKind::Other,
                 };
                 Err(io::Error::new(
@@ -173,6 +216,11 @@ where
     /// It executes the provided `operation`. If the operation fails with a
     /// connection-related error, it attempts to reconnect and retries the
     /// operation once.
+    ///
+    /// # Errors
+    ///
+    /// Returns the original error if it's not a connection error, or the error
+    /// from the retry attempt if reconnection fails.
     pub(crate) async fn with_retry<F, Fut, R>(&self, operation: F) -> io::Result<R>
     where
         F: Fn(Guard<Arc<C>>) -> Fut,
@@ -190,7 +238,9 @@ where
                     error_kind = ?e.kind(),
                     "connection error detected, attempting to reconnect"
                 );
+                // Attempt reconnection - if it fails, return the reconnection error
                 self.reconnect(old_conn_id).await?;
+                // Retry the operation with the new connection
                 let new_connection = self.connection.load();
                 operation(new_connection).await
             }
@@ -198,18 +248,29 @@ where
         }
     }
 
-    /// Handles the reconnection logic.
+    /// Handles the reconnection logic with exponential backoff.
     ///
     /// It uses a mutex to prevent multiple tasks from trying to reconnect simultaneously.
+    /// If another task has already reconnected, this function returns immediately.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - Reconnection is throttled (too many attempts)
+    /// - Transport rebind fails
+    /// - Handshake fails
     async fn reconnect(&self, old_conn_id: usize) -> io::Result<()> {
         let mut state = self.reconnect_lock.lock().await;
 
+        // Check if another task has already reconnected
         let current_conn = self.connection.load();
         let current_conn_id = Arc::as_ptr(&current_conn) as usize;
         if current_conn_id != old_conn_id {
+            // Another task already reconnected, we're done
             return Ok(());
         }
 
+        // Apply exponential backoff if we've attempted recently
         if let Some(last) = state.last_attempt {
             let elapsed = last.elapsed();
             if elapsed < state.backoff {
@@ -273,8 +334,8 @@ where
         let connection = transport.connect().await?;
         let mut stream = connection.open_bidirectional().await?;
 
-        let hello_message = UpstreamMessage::Hello(ClientHello {
-            version: PROTOCOLS_VERSION,
+        let hello_message = ClientMessage::Hello(ClientHello {
+            version: PROTOCOL_VERSION,
             secret,
             options,
         });
@@ -295,7 +356,7 @@ where
                     }
                     ServerHandshakeResponse::Err(e) => {
                         let err_kind = match e {
-                            HandshakeError::InvalidSecret => io::ErrorKind::PermissionDenied,
+                            ConnectionAuthError::InvalidSecret => io::ErrorKind::PermissionDenied,
                             _ => io::ErrorKind::InvalidData,
                         };
                         error!(
@@ -322,7 +383,7 @@ where
                 error!("connection closed by server during handshake");
                 Err(io::Error::new(
                     io::ErrorKind::UnexpectedEof,
-                    "Connection closed by server during handshake",
+                    "connection closed by server during handshake",
                 ))
             }
         }

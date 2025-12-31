@@ -11,7 +11,7 @@ use ombrac::protocol::{Address, Secret};
 use ombrac_macros::info;
 use ombrac_transport::{Connection, Initiator};
 
-use crate::connection::{ClientConnection, UdpDispatcher, UdpSession};
+use crate::connection::{BufferedStream, ClientConnection, UdpDispatcher, UdpSession};
 
 /// The central client responsible for managing the connection to the server.
 ///
@@ -107,7 +107,14 @@ where
     /// This method negotiates a new stream with the server, which will then
     /// connect to the specified destination address. It waits for the server's
     /// connection response before returning, ensuring proper TCP state handling.
-    pub async fn open_bidirectional(&self, dest_addr: Address) -> io::Result<C::Stream> {
+    ///
+    /// The returned stream is wrapped in a `BufferedStream` to ensure that any
+    /// data remaining in the protocol framing buffer is read first, preventing
+    /// data loss when transitioning from message-based to raw stream communication.
+    pub async fn open_bidirectional(
+        &self,
+        dest_addr: Address,
+    ) -> io::Result<BufferedStream<C::Stream>> {
         self.connection.open_bidirectional(dest_addr).await
     }
 
