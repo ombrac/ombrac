@@ -9,44 +9,35 @@ use socks_lib::v5::{Address as Socks5Address, Request, Response, Stream, UdpPack
 use tokio::net::UdpSocket;
 
 use ombrac_macros::{debug, error, info, warn};
-use ombrac_transport::{Connection, Initiator};
+use ombrac_transport::quic::Connection as QuicConnection;
+use ombrac_transport::quic::client::Client as QuicClient;
 
 use crate::client::Client;
 #[cfg(feature = "datagram")]
 use crate::connection::UdpSession;
 
-pub struct CommandHandler<T, C>
-where
-    T: Initiator<Connection = C> + Send + Sync + 'static,
-    C: Connection + Send + Sync + 'static,
-{
-    client: Arc<Client<T, C>>,
+pub struct CommandHandler {
+    client: Arc<Client<QuicClient, QuicConnection>>,
 }
 
-impl<T, C> CommandHandler<T, C>
-where
-    T: Initiator<Connection = C> + Send + Sync + 'static,
-    C: Connection + Send + Sync + 'static,
-{
-    pub fn new(client: Arc<Client<T, C>>) -> Self {
+impl CommandHandler {
+    pub fn new(client: Arc<Client<QuicClient, QuicConnection>>) -> Self {
         Self { client }
     }
 
-    async fn handle_connect(
+    /// Handles data forwarding after a successful connection.
+    /// This method is called after the connection is established and response is sent.
+    async fn handle_connect_data_forwarding(
         &self,
-        address: Socks5Address,
-        mut stream: &mut Stream<impl AsyncRead + AsyncWrite + Unpin>,
+        stream: &mut Stream<impl AsyncRead + AsyncWrite + Unpin>,
+        dest_stream: &mut <QuicConnection as ombrac_transport::Connection>::Stream,
     ) -> io::Result<()> {
-        let dst_addr = util::socks_to_ombrac_addr(address)?;
-        // open_bidirectional now waits for server connection response
-        // If connection fails, it returns an error which will be propagated to the SOCKS client
-        let mut dest_stream = self.client.open_bidirectional(dst_addr.clone()).await?;
-        match ombrac_transport::io::copy_bidirectional(&mut stream, &mut dest_stream).await {
+        let src_addr = stream.local_addr();
+        match ombrac_transport::io::copy_bidirectional(stream, dest_stream).await {
             Ok(stats) => {
                 #[cfg(feature = "tracing")]
                 tracing::info!(
-                    src_addr = stream.local_addr().to_string(),
-                    dst_addr = dst_addr.to_string(),
+                    src_addr = src_addr.to_string(),
                     send = stats.a_to_b_bytes,
                     recv = stats.b_to_a_bytes,
                     status = "ok",
@@ -56,8 +47,7 @@ where
             Err((err, stats)) => {
                 #[cfg(feature = "tracing")]
                 tracing::error!(
-                    src_addr = stream.local_addr().to_string(),
-                    dst_addr = dst_addr.to_string(),
+                    src_addr = src_addr.to_string(),
                     send = stats.a_to_b_bytes,
                     recv = stats.b_to_a_bytes,
                     status = "err",
@@ -93,7 +83,6 @@ where
             .write_response(&Response::Success(&response_addr))
             .await?;
 
-        // 进入转发循环
         self.udp_relay_loop(stream, relay_socket, udp_session).await
     }
 
@@ -107,18 +96,14 @@ where
         &self,
         stream: &mut Stream<impl AsyncRead + AsyncWrite + Unpin>,
         relay_socket: UdpSocket,
-        mut udp_session: UdpSession<T, C>,
+        mut udp_session: UdpSession<QuicClient, QuicConnection>,
     ) -> io::Result<()> {
         let mut client_udp_src: Option<SocketAddr> = None;
         let mut buf = vec![0u8; 65535]; // Max UDP packet size
 
         loop {
             tokio::select! {
-                // biased; 优先检查控制连接是否关闭
                 biased;
-
-                // 1. 检查 TCP 控制连接是否已关闭。
-                // 如果是，则关联结束，我们应该退出循环。
                 result = stream.read_u8() => {
                     match result {
                         Ok(0) | Err(_) => {
@@ -157,11 +142,7 @@ where
     }
 }
 
-impl<T, C> Handler for CommandHandler<T, C>
-where
-    T: Initiator<Connection = C> + Send + Sync + 'static,
-    C: Connection + Send + Sync + 'static,
-{
+impl Handler for CommandHandler {
     async fn handle<S>(&self, stream: &mut Stream<S>, request: Request) -> io::Result<()>
     where
         S: AsyncRead + AsyncWrite + Unpin + Send + Sync,
@@ -170,15 +151,27 @@ where
 
         match request {
             Request::Connect(address) => {
-                // Note: write_response_unspecified() sends a response indicating connection attempt
-                // The actual connection status is determined by handle_connect()
-                stream.write_response_unspecified().await?;
-
-                if let Err(err) = self.handle_connect(address.clone(), stream).await {
+                // Try to connect first, then send appropriate response
+                // This ensures proper TCP state handling according to SOCKS5 protocol
+                let dst_addr = util::socks_to_ombrac_addr(address.clone())?;
+                let mut dest_stream = match self.client.open_bidirectional(dst_addr.clone()).await {
+                    Ok(stream) => stream,
+                    Err(err) => {
+                        // Connection failed - return error to let Handler trait handle the response
+                        error!("SOCKS: Connect to {} failed: {}", address, err);
+                        return Err(err);
+                    }
+                };
+                
+                // Connection successful, send success response
+                stream.write_response(&Response::Success(&address)).await?;
+                
+                // Now handle the data forwarding
+                if let Err(err) = self.handle_connect_data_forwarding(stream, &mut dest_stream).await {
                     if err.kind() != io::ErrorKind::BrokenPipe
                         && err.kind() != io::ErrorKind::ConnectionReset
                     {
-                        error!("SOCKS: Connect to {} failed: {}", address, err);
+                        error!("SOCKS: Data forwarding failed for {}: {}", address, err);
                     }
                     return Err(err);
                 }

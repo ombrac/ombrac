@@ -10,8 +10,9 @@ use hyper_util::rt::TokioIo;
 use tokio::net::TcpListener;
 
 use ombrac::protocol::Address;
-use ombrac_macros::{error, info};
-use ombrac_transport::{Connection, Initiator};
+use ombrac_macros::error;
+use ombrac_transport::quic::Connection as QuicConnection;
+use ombrac_transport::quic::client::Client as QuicClient;
 
 use crate::client::Client;
 
@@ -19,20 +20,12 @@ type HttpResult = Result<Response<BoxBody<Bytes, hyper::Error>>, hyper::Error>;
 type HyperClientBuilder = hyper::client::conn::http1::Builder;
 type HyperServerBuilder = hyper::server::conn::http1::Builder;
 
-pub struct Server<T, C>
-where
-    T: Initiator<Connection = C>,
-    C: Connection,
-{
-    client: Arc<Client<T, C>>,
+pub struct Server {
+    client: Arc<Client<QuicClient, QuicConnection>>,
 }
 
-impl<T, C> Server<T, C>
-where
-    T: Initiator<Connection = C>,
-    C: Connection,
-{
-    pub fn new(client: Arc<Client<T, C>>) -> Self {
+impl Server {
+    pub fn new(client: Arc<Client<QuicClient, QuicConnection>>) -> Self {
         Self { client }
     }
 
@@ -47,14 +40,13 @@ where
             tokio::select! {
                 biased;
                 _ = &mut shutdown_signal => {
-                    info!("Shutdown signal received, exiting accept loop.");
                     return Ok(());
                 },
                 result = listener.accept() => {
                     let (stream, remote_addr) = match result {
                         Ok(res) => res,
                         Err(e) => {
-                            error!("Failed to accept connection: {}", e);
+                            error!("failed to accept connection: {}", e);
                             continue;
                         }
                     };
@@ -73,7 +65,7 @@ where
                             .with_upgrades()
                             .await
                             && !is_connection_closed_error(&e) {
-                                error!("Failed to serve connection from {}: {}", remote_addr, e);
+                                error!("failed to serve connection from {}: {}", remote_addr, e);
                             }
                     });
                 }
@@ -83,7 +75,7 @@ where
 
     async fn proxy_handler(
         req: Request<hyper::body::Incoming>,
-        client: Arc<Client<T, C>>,
+        client: Arc<Client<QuicClient, QuicConnection>>,
         remote_addr: SocketAddr,
     ) -> HttpResult {
         let target_addr = match Self::extract_target_address(&req) {
@@ -95,7 +87,7 @@ where
             Ok(conn) => conn,
             Err(e) => {
                 error!(
-                    "Failed to open outbound connection to {}: {}",
+                    "failed to open outbound connection to {}: {}",
                     target_addr, e
                 );
                 return Ok(Self::create_error_response(StatusCode::SERVICE_UNAVAILABLE));
@@ -111,7 +103,7 @@ where
 
     async fn handle_connect(
         req: Request<hyper::body::Incoming>,
-        mut dest_stream: C::Stream,
+        mut dest_stream: <QuicConnection as ombrac_transport::Connection>::Stream,
         remote_addr: SocketAddr,
         target_addr: Address,
     ) -> HttpResult {
@@ -161,7 +153,7 @@ where
 
     async fn handle_http(
         req: Request<hyper::body::Incoming>,
-        outbound_conn: C::Stream,
+        outbound_conn: <QuicConnection as ombrac_transport::Connection>::Stream,
         remote_addr: SocketAddr,
         target_addr: Address,
     ) -> HttpResult {

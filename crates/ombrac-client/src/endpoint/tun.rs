@@ -20,7 +20,8 @@ use ombrac_netstack::{
     tcp::{TcpConnection, TcpStream},
     udp::{SplitWrite, UdpPacket, UdpTunnel},
 };
-use ombrac_transport::{Connection, Initiator};
+use ombrac_transport::quic::Connection as QuicConnection;
+use ombrac_transport::quic::client::Client as QuicClient;
 
 pub use tun_rs::AsyncDevice;
 
@@ -158,21 +159,13 @@ impl Default for TunConfig {
     }
 }
 
-pub struct Tun<T, C>
-where
-    T: Initiator<Connection = C>,
-    C: Connection,
-{
+pub struct Tun {
     config: Arc<TunConfig>,
-    client: Arc<Client<T, C>>,
+    client: Arc<Client<QuicClient, QuicConnection>>,
     fakedns: Arc<FakeDns>,
 }
 
-impl<T, C> Clone for Tun<T, C>
-where
-    T: Initiator<Connection = C>,
-    C: Connection,
-{
+impl Clone for Tun {
     fn clone(&self) -> Self {
         Self {
             config: self.config.clone(),
@@ -182,12 +175,8 @@ where
     }
 }
 
-impl<T, C> Tun<T, C>
-where
-    T: Initiator<Connection = C>,
-    C: Connection,
-{
-    pub fn new(config: Arc<TunConfig>, client: Arc<Client<T, C>>) -> Self {
+impl Tun {
+    pub fn new(config: Arc<TunConfig>, client: Arc<Client<QuicClient, QuicConnection>>) -> Self {
         Self {
             fakedns: Arc::new(FakeDns::new(config.fakedns_cidr)),
             config,

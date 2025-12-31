@@ -146,7 +146,7 @@ where
                 warn!(
                     error = %e,
                     packet_size = packet_bytes.len(),
-                    "failed to decode UDP packet, discarding"
+                    "failed to decode udp packet, discarding"
                 );
                 continue; // Skip malformed packets.
             }

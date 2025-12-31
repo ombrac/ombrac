@@ -116,7 +116,7 @@ where
         if response_length > MAX_RESPONSE_MESSAGE_SIZE as u32 {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                format!("Response message too large: {} bytes", response_length),
+                format!("response message too large: {} bytes", response_length),
             ));
         }
 
@@ -152,7 +152,7 @@ where
                 };
                 Err(io::Error::new(
                     error_kind,
-                    format!("Failed to connect to {}: {}", dest_addr, message),
+                    format!("failed to connect to {}: {}", dest_addr, message),
                 ))
             }
         }
@@ -222,7 +222,7 @@ where
 
                 drop(state);
                 tokio::time::sleep(wait_time).await;
-                return Err(io::Error::new(io::ErrorKind::Other, "Reconnect throttled"));
+                return Err(io::Error::new(io::ErrorKind::Other, "reconnect throttled"));
             }
         }
 
@@ -337,7 +337,7 @@ where
             );
             Err(io::Error::new(
                 io::ErrorKind::TimedOut,
-                "Client hello timed out",
+                "client hello timed out",
             ))
         }
     }
