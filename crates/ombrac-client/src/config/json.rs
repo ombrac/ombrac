@@ -16,8 +16,9 @@ pub struct JsonConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub server: Option<String>,
 
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub handshake_option: Option<String>,
+    /// Authentication option for protocol extensions
+    #[serde(skip_serializing_if = "Option::is_none", alias = "handshake_option")]
+    pub auth_option: Option<String>,
 
     pub endpoint: Option<EndpointConfig>,
 

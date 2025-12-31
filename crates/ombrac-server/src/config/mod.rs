@@ -112,9 +112,9 @@ pub struct ConnectionConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_connections: Option<usize>,
 
-    /// Handshake timeout in seconds [default: 10]
+    /// Authentication timeout in seconds [default: 10]
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub handshake_timeout_secs: Option<u64>,
+    pub auth_timeout_secs: Option<u64>,
 
     /// Maximum concurrent stream connections per client connection [default: 4096]
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -131,9 +131,17 @@ impl ConnectionConfig {
         self.max_connections.unwrap_or(10000)
     }
 
+    /// Get authentication timeout with default (in seconds)
+    pub fn auth_timeout_secs(&self) -> u64 {
+        self.auth_timeout_secs.unwrap_or(10)
+    }
+
     /// Get handshake timeout with default (in seconds)
+    ///
+    /// Deprecated: Use `auth_timeout_secs` instead
+    #[deprecated(note = "Use auth_timeout_secs instead")]
     pub fn handshake_timeout_secs(&self) -> u64 {
-        self.handshake_timeout_secs.unwrap_or(10)
+        self.auth_timeout_secs()
     }
 
     /// Get max concurrent streams with default
@@ -151,7 +159,7 @@ impl Default for ConnectionConfig {
     fn default() -> Self {
         Self {
             max_connections: Some(10000),
-            handshake_timeout_secs: Some(10),
+            auth_timeout_secs: Some(10),
             max_concurrent_streams: Some(4096),
             max_concurrent_datagrams: Some(4096),
         }
@@ -309,9 +317,7 @@ impl ConfigBuilder {
     ) -> ConnectionConfig {
         ConnectionConfig {
             max_connections: override_config.max_connections.or(base.max_connections),
-            handshake_timeout_secs: override_config
-                .handshake_timeout_secs
-                .or(base.handshake_timeout_secs),
+            auth_timeout_secs: override_config.auth_timeout_secs.or(base.auth_timeout_secs),
             max_concurrent_streams: override_config
                 .max_concurrent_streams
                 .or(base.max_concurrent_streams),

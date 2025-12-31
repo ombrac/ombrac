@@ -25,71 +25,7 @@ use ombrac_transport::{Acceptor, Connection};
 
 use crate::config::ConnectionConfig;
 
-pub struct ConnectionHandle<C> {
-    inner: Arc<C>,
-}
-
-impl<C: Connection> ConnectionHandle<C> {
-    pub fn downgrade_inner(&self) -> Weak<C> {
-        Arc::downgrade(&self.inner)
-    }
-
-    pub fn close(&self, error_code: u32, reason: &[u8]) {
-        self.inner.close(error_code, reason);
-    }
-}
-
-/// Authenticator trait for verifying and accepting client connections.
-///
-/// This trait provides authentication logic for incoming connections.
-/// Implementations should verify the client's credentials and optionally
-/// perform any setup needed when a connection is accepted.
-pub trait Authenticator<T>: Send + Sync {
-    /// Context type that can be passed from verification to acceptance.
-    type AuthContext: Send;
-
-    /// Verifies the client's hello message and returns an authentication context.
-    ///
-    /// This method is called during the handshake phase to verify the client's
-    /// credentials. If verification succeeds, it returns a context that will
-    /// be passed to `accept`.
-    fn verify(
-        &self,
-        hello: &protocol::ClientHello,
-    ) -> impl Future<Output = Result<Self::AuthContext, protocol::ConnectionAuthError>> + Send;
-
-    /// Called after successful authentication to handle the accepted connection.
-    ///
-    /// This method is called with the authentication context from `verify` and
-    /// a handle to the connection. Implementations can use this to perform any
-    /// additional setup or logging.
-    fn accept(
-        &self,
-        auth_context: Self::AuthContext,
-        connection: ConnectionHandle<T>,
-    ) -> impl Future<Output = ()> + Send;
-}
-
-impl<T: Send + Sync> Authenticator<T> for ombrac::protocol::Secret {
-    type AuthContext = ();
-
-    async fn verify(
-        &self,
-        hello: &protocol::ClientHello,
-    ) -> Result<(), protocol::ConnectionAuthError> {
-        if &hello.secret == self {
-            Ok(())
-        } else {
-            Err(protocol::ConnectionAuthError::InvalidSecret)
-        }
-    }
-
-    async fn accept(&self, _auth_context: Self::AuthContext, _connection: ConnectionHandle<T>) {
-        ()
-    }
-}
-
-/// Processes a single client connection, handling handshake and tunnel management.
+/// Processes a single client connection, handling authentication and tunnel management.
 ///
 /// This struct manages the lifecycle of a client connection after it has been
 /// accepted by the server. It performs authentication, sets up tunnel handlers
@@ -100,10 +36,10 @@ pub struct ClientConnectionProcessor<C: Connection> {
 }
 
 impl<C: Connection> ClientConnectionProcessor<C> {
-    /// Handles a new client connection from handshake through tunnel setup.
+    /// Handles a new client connection from authentication through tunnel setup.
     ///
     /// This method:
-    /// 1. Performs the handshake and authentication
+    /// 1. Performs the authentication
     /// 2. Notifies the authenticator that the connection is accepted
     /// 3. Sets up and runs tunnel loops for streams and datagrams
     pub async fn handle<A>(
@@ -115,7 +51,12 @@ impl<C: Connection> ClientConnectionProcessor<C> {
         A: Authenticator<C>,
     {
         let (auth_context, connection) =
-            Self::perform_handshake(connection, authenticator, &config).await?;
+            Self::perform_authentication(connection, authenticator, &config)
+                .await
+                .map_err(|e| {
+                    error!("authentication failed: {}", e);
+                    e
+                })?;
 
         let transport_connection = Arc::new(connection);
 
@@ -138,88 +79,175 @@ impl<C: Connection> ClientConnectionProcessor<C> {
         Ok(())
     }
 
-    async fn perform_handshake<A>(
+    async fn perform_authentication<A: Authenticator<C>>(
         connection: C,
         authenticator: &A,
         config: &ConnectionConfig,
-    ) -> io::Result<(A::AuthContext, C)>
-    where
-        A: Authenticator<C>,
-    {
-        let handshake_timeout = Duration::from_secs(config.handshake_timeout_secs());
+    ) -> io::Result<(A::AuthContext, C)> {
+        let auth_timeout = Duration::from_secs(config.auth_timeout_secs());
 
-        let mut control_stream = connection.accept_bidirectional().await?;
+        // Accept control stream
+        let mut control_stream = connection.accept_bidirectional().await.map_err(|e| {
+            io::Error::new(
+                io::ErrorKind::Other,
+                format!("failed to accept bidirectional stream: {}", e),
+            )
+        })?;
         let mut control_frame = Framed::new(&mut control_stream, codec::length_codec());
 
-        // Read hello message with timeout
-        let payload = tokio::time::timeout(handshake_timeout, control_frame.next())
+        // Read and parse hello message
+        let hello = Self::read_hello_message(&mut control_frame, auth_timeout).await?;
+
+        #[cfg(feature = "tracing")]
+        Self::trace_auth(&hello);
+
+        // Verify authentication
+        let auth_context =
+            Self::verify_authentication(&hello, authenticator, auth_timeout, &mut control_frame)
+                .await?;
+
+        Ok((auth_context, connection))
+    }
+
+    /// Reads and parses the hello message from the client.
+    async fn read_hello_message(
+        control_frame: &mut Framed<&mut <C as Connection>::Stream, codec::LengthDelimitedCodec>,
+        timeout: Duration,
+    ) -> io::Result<protocol::ClientHello>
+    where
+        C: Connection,
+    {
+        // Read payload with timeout
+        let payload = tokio::time::timeout(timeout, control_frame.next())
             .await
             .map_err(|_| {
                 io::Error::new(
                     io::ErrorKind::TimedOut,
                     format!(
-                        "Handshake timeout: failed to receive hello message within {:?}",
-                        handshake_timeout
+                        "authentication timeout: failed to receive hello message within {:?}",
+                        timeout
                     ),
                 )
             })?
             .ok_or_else(|| {
-                io::Error::new(io::ErrorKind::UnexpectedEof, "Stream closed before hello")
+                io::Error::new(io::ErrorKind::UnexpectedEof, "stream closed before hello")
             })??;
 
-        let message: codec::ClientMessage = protocol::decode(&payload)?;
-
-        let hello = match message {
-            codec::ClientMessage::Hello(h) => h,
-            _ => {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "Expected Hello message",
-                ));
-            }
-        };
-
-        #[cfg(feature = "tracing")]
-        Self::trace_handshake(&hello);
-
-        // Verify with timeout
-        let auth_result = if hello.version != protocol::PROTOCOL_VERSION {
-            Err(protocol::ConnectionAuthError::IncompatibleVersion)
-        } else {
-            match tokio::time::timeout(handshake_timeout, authenticator.verify(&hello)).await {
-                Ok(result) => result,
-                Err(_) => Err(protocol::ConnectionAuthError::ServerError),
-            }
-        };
-
-        // Send response with timeout
-        let response = match &auth_result {
-            Ok(_) => protocol::ServerHandshakeResponse::Ok,
-            Err(e) => protocol::ServerHandshakeResponse::Err(e.clone()),
-        };
-
-        tokio::time::timeout(
-            handshake_timeout,
-            control_frame.send(protocol::encode(&response)?),
-        )
-        .await
-        .map_err(|_| {
+        // Decode message
+        let message: codec::ClientMessage = protocol::decode(&payload).map_err(|e| {
             io::Error::new(
-                io::ErrorKind::TimedOut,
-                format!(
-                    "Handshake timeout: failed to send response within {:?}",
-                    handshake_timeout
-                ),
+                io::ErrorKind::InvalidData,
+                format!("failed to decode client message: {}", e),
             )
-        })??;
+        })?;
+
+        // Extract hello message
+        match message {
+            codec::ClientMessage::Hello(hello) => Ok(hello),
+            _ => {
+                // Invalid message type - disconnect with random delay
+                let stream = control_frame.get_mut();
+                Self::disconnect_with_random_delay(*stream).await;
+                Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "authentication failed: invalid message type (expected Hello)",
+                ))
+            }
+        }
+    }
+
+    /// Verifies authentication and sends response.
+    async fn verify_authentication<A: Authenticator<C>>(
+        hello: &protocol::ClientHello,
+        authenticator: &A,
+        timeout: Duration,
+        control_frame: &mut Framed<&mut <C as Connection>::Stream, codec::LengthDelimitedCodec>,
+    ) -> io::Result<A::AuthContext>
+    where
+        C: Connection,
+    {
+        // Check protocol version
+        if hello.version != protocol::PROTOCOL_VERSION {
+            Self::handle_auth_failure(control_frame).await;
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "authentication failed: incompatible version",
+            ));
+        }
+
+        // Perform authentication with timeout
+        let auth_result = tokio::time::timeout(timeout, authenticator.verify(hello))
+            .await
+            .unwrap_or(Err(ConnectionAuthError::ServerError));
 
         match auth_result {
-            Ok(auth_context) => Ok((auth_context, connection)),
-            Err(e) => Err(io::Error::new(
-                io::ErrorKind::PermissionDenied,
-                format!("Handshake failed: {:?}", e),
-            )),
+            Ok(auth_context) => {
+                // Send success response
+                Self::send_auth_response(control_frame, timeout, protocol::ServerAuthResponse::Ok)
+                    .await?;
+                Ok(auth_context)
+            }
+            Err(_) => {
+                // Authentication failed - disconnect without sending error response
+                // to prevent information leakage
+                Self::handle_auth_failure(control_frame).await;
+                Err(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    "authentication failed",
+                ))
+            }
         }
+    }
+
+    /// Sends authentication response with timeout.
+    async fn send_auth_response(
+        control_frame: &mut Framed<&mut <C as Connection>::Stream, codec::LengthDelimitedCodec>,
+        timeout: Duration,
+        response: protocol::ServerAuthResponse,
+    ) -> io::Result<()>
+    where
+        C: Connection,
+    {
+        tokio::time::timeout(timeout, control_frame.send(protocol::encode(&response)?))
+            .await
+            .map_err(|_| {
+                io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    format!(
+                        "authentication timeout: failed to send response within {:?}",
+                        timeout
+                    ),
+                )
+            })??;
+        Ok(())
+    }
+
+    /// Handles authentication failure by disconnecting with random delay.
+    async fn handle_auth_failure(
+        control_frame: &mut Framed<&mut <C as Connection>::Stream, codec::LengthDelimitedCodec>,
+    ) where
+        C: Connection,
+    {
+        // Get the underlying stream for disconnection
+        let stream = control_frame.get_mut();
+        Self::disconnect_with_random_delay(*stream).await;
+    }
+
+    /// Disconnects the stream with a random delay to prevent timing attacks.
+    ///
+    /// This function introduces a random delay (100-500ms) before closing the stream,
+    /// making it harder for attackers to distinguish between different failure modes
+    /// based on response timing.
+    async fn disconnect_with_random_delay(stream: &mut C::Stream) {
+        use rand::Rng;
+
+        let delay_ms = {
+            let mut rng = rand::rng();
+            rng.random_range(100..=500)
+        };
+
+        tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
+        let _ = tokio::io::AsyncWriteExt::shutdown(stream).await;
     }
 
     /// Runs the tunnel loops for streams and datagrams until the connection closes.
@@ -241,9 +269,9 @@ impl<C: Connection> ClientConnectionProcessor<C> {
         self.shutdown_token.cancel();
 
         match result {
-            Ok(Ok(_)) => debug!("Connection closed gracefully."),
-            Ok(Err(e)) => debug!("Connection closed with internal error: {}", e),
-            Err(e) => warn!("Tunnel handler task panicked or failed: {}", e),
+            Ok(Ok(_)) => debug!("connection closed gracefully"),
+            Ok(Err(e)) => debug!("connection closed with internal error: {}", e),
+            Err(e) => warn!("tunnel handler task panicked or failed: {}", e),
         }
     }
 
@@ -279,7 +307,7 @@ impl<C: Connection> ClientConnectionProcessor<C> {
     }
 
     #[cfg(feature = "tracing")]
-    fn trace_handshake(hello: &protocol::ClientHello) {
+    fn trace_auth(hello: &protocol::ClientHello) {
         let secret_hex = hello
             .secret
             .iter()
@@ -338,52 +366,61 @@ impl<T: Acceptor, A: Authenticator<T::Connection> + 'static> ConnectionAcceptor<
         loop {
             tokio::select! {
                 _ = shutdown_rx.recv() => {
-                    info!("Shutdown signal received, stopping accept loop");
                     break;
                 },
                 accepted = self.acceptor.accept() => {
-                    match accepted {
-                        Ok(connection) => {
-                            let authenticator = Arc::clone(&self.authenticator);
-                            let semaphore = Arc::clone(&self.connection_semaphore);
-                            let config = Arc::clone(&self.config);
-
-                            // Try to acquire an owned permit for this connection
-                            // If semaphore is exhausted, we log and drop the connection
-                            match semaphore.try_acquire_owned() {
-                                Ok(permit) => {
-                                    #[cfg(not(feature = "tracing"))]
-                                    tokio::spawn(Self::process_connection_with_permit(
-                                        connection,
-                                        authenticator,
-                                        permit,
-                                        config,
-                                    ));
-                                    #[cfg(feature = "tracing")]
-                                    tokio::spawn(Self::process_connection_with_permit(
-                                        connection,
-                                        authenticator,
-                                        permit,
-                                        config,
-                                    ).in_current_span());
-                                },
-                                Err(_) => {
-                                    warn!("Connection rejected: maximum concurrent connections ({}) reached",
-                                        self.config.max_connections());
-                                    // Connection is dropped here, which should trigger cleanup
-                                }
-                            }
-                        },
-                        Err(err) => {
-                            error!("failed to accept connection: {}", err);
-                            // Continue accepting even on errors
-                        }
-                    }
+                    Self::handle_incoming_connection(
+                        accepted,
+                        Arc::clone(&self.authenticator),
+                        Arc::clone(&self.connection_semaphore),
+                        Arc::clone(&self.config),
+                    );
                 },
             }
         }
 
         Ok(())
+    }
+
+    /// Handles an incoming connection, either spawning a processor or rejecting it.
+    fn handle_incoming_connection(
+        result: io::Result<<T as Acceptor>::Connection>,
+        authenticator: Arc<A>,
+        semaphore: Arc<Semaphore>,
+        config: Arc<ConnectionConfig>,
+    ) {
+        match result {
+            Ok(connection) => match semaphore.try_acquire_owned() {
+                Ok(permit) => {
+                    #[cfg(not(feature = "tracing"))]
+                    tokio::spawn(Self::process_connection_with_permit(
+                        connection,
+                        authenticator,
+                        permit,
+                        config,
+                    ));
+                    #[cfg(feature = "tracing")]
+                    tokio::spawn(
+                        Self::process_connection_with_permit(
+                            connection,
+                            authenticator,
+                            permit,
+                            config,
+                        )
+                        .in_current_span(),
+                    );
+                }
+                Err(_) => {
+                    warn!(
+                        "connection rejected: maximum concurrent connections ({}) reached",
+                        config.max_connections()
+                    );
+                }
+            },
+            Err(err) => {
+                error!("failed to accept connection: {}", err);
+            }
+        }
     }
 
     /// Processes a connection with a semaphore permit.
@@ -419,36 +456,17 @@ impl<T: Acceptor, A: Authenticator<T::Connection> + 'static> ConnectionAcceptor<
         #[cfg(feature = "tracing")]
         let created_at = Instant::now();
 
-        let peer_addr = match connection.remote_address() {
-            Ok(addr) => addr,
-            Err(_err) => {
-                return error!("failed to get remote address for incoming connection {_err}");
-            }
-        };
+        if let Ok(addr) = connection.remote_address() {
+            #[cfg(feature = "tracing")]
+            tracing::Span::current().record("from", tracing::field::display(addr));
+        }
 
-        #[cfg(feature = "tracing")]
-        tracing::Span::current().record("from", tracing::field::display(peer_addr));
+        let result =
+            ClientConnectionProcessor::handle(connection, authenticator.as_ref(), config).await;
 
-        let reason: std::borrow::Cow<'static, str> = {
-            match ClientConnectionProcessor::handle(connection, authenticator.as_ref(), config)
-                .await
-            {
-                Ok(_) => "ok".into(),
-                Err(e) => {
-                    if matches!(
-                        e.kind(),
-                        io::ErrorKind::ConnectionReset
-                            | io::ErrorKind::BrokenPipe
-                            | io::ErrorKind::UnexpectedEof
-                            | io::ErrorKind::TimedOut
-                    ) {
-                        format!("client disconnect: {}", e.kind()).into()
-                    } else {
-                        error!("connection processor failed: {e}");
-                        format!("error: {e}").into()
-                    }
-                }
-            }
+        let reason: std::borrow::Cow<'static, str> = match result {
+            Ok(_) => "ok".into(),
+            Err(e) => format!("{e}").into(),
         };
 
         #[cfg(feature = "tracing")]
@@ -461,5 +479,79 @@ impl<T: Acceptor, A: Authenticator<T::Connection> + 'static> ConnectionAcceptor<
 
     pub fn local_addr(&self) -> io::Result<SocketAddr> {
         self.acceptor.local_addr()
+    }
+}
+
+pub struct ConnectionHandle<C> {
+    inner: Arc<C>,
+}
+
+impl<C: Connection> ConnectionHandle<C> {
+    pub fn downgrade_inner(&self) -> Weak<C> {
+        Arc::downgrade(&self.inner)
+    }
+
+    pub fn close(&self, error_code: u32, reason: &[u8]) {
+        self.inner.close(error_code, reason);
+    }
+}
+
+/// Authentication error types returned by the server during authentication.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConnectionAuthError {
+    /// Client protocol version is not supported by the server.
+    IncompatibleVersion,
+    /// Authentication secret is invalid or incorrect.
+    InvalidSecret,
+    /// Internal server error during authentication processing.
+    ServerError,
+    /// Other error
+    Other(String),
+}
+
+/// Authenticator trait for verifying and accepting client connections.
+///
+/// This trait provides authentication logic for incoming connections.
+/// Implementations should verify the client's credentials and optionally
+/// perform any setup needed when a connection is accepted.
+pub trait Authenticator<T>: Send + Sync {
+    /// Context type that can be passed from verification to acceptance.
+    type AuthContext: Send;
+
+    /// Verifies the client's hello message and returns an authentication context.
+    ///
+    /// This method is called during the authentication phase to verify the client's
+    /// credentials. If verification succeeds, it returns a context that will
+    /// be passed to `accept`.
+    fn verify(
+        &self,
+        hello: &protocol::ClientHello,
+    ) -> impl Future<Output = Result<Self::AuthContext, ConnectionAuthError>> + Send;
+
+    /// Called after successful authentication to handle the accepted connection.
+    ///
+    /// This method is called with the authentication context from `verify` and
+    /// a handle to the connection. Implementations can use this to perform any
+    /// additional setup or logging.
+    fn accept(
+        &self,
+        auth_context: Self::AuthContext,
+        connection: ConnectionHandle<T>,
+    ) -> impl Future<Output = ()> + Send;
+}
+
+impl<T: Send + Sync> Authenticator<T> for ombrac::protocol::Secret {
+    type AuthContext = ();
+
+    async fn verify(&self, hello: &protocol::ClientHello) -> Result<(), ConnectionAuthError> {
+        if &hello.secret == self {
+            Ok(())
+        } else {
+            Err(ConnectionAuthError::InvalidSecret)
+        }
+    }
+
+    async fn accept(&self, _auth_context: Self::AuthContext, _connection: ConnectionHandle<T>) {
+        ()
     }
 }

@@ -39,9 +39,14 @@ pub struct Args {
     )]
     pub server: Option<String>,
 
-    /// Extended parameter of the protocol, used for handshake related information
-    #[clap(long, help_heading = "Protocol", value_name = "STR")]
-    pub handshake_option: Option<String>,
+    /// Extended parameter of the protocol, used for authentication related information
+    #[clap(
+        long,
+        help_heading = "Protocol",
+        value_name = "STR",
+        alias = "handshake-option"
+    )]
+    pub auth_option: Option<String>,
 
     #[clap(flatten)]
     pub endpoint: CliEndpointConfig,
@@ -197,7 +202,7 @@ impl CliLoggingConfig {
 pub struct CliConfig {
     pub secret: Option<String>,
     pub server: Option<String>,
-    pub handshake_option: Option<String>,
+    pub auth_option: Option<String>,
     pub endpoint: EndpointConfig,
     pub transport: TransportConfig,
     #[cfg(feature = "tracing")]
@@ -211,7 +216,7 @@ impl Args {
         CliConfig {
             secret: args.secret,
             server: args.server,
-            handshake_option: args.handshake_option,
+            auth_option: args.auth_option,
             endpoint: args.endpoint.into_endpoint_config(),
             transport: args.transport.into_transport_config(),
             #[cfg(feature = "tracing")]

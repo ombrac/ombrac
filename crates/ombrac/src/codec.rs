@@ -8,11 +8,11 @@ pub const MAX_FRAME_LENGTH: usize = 8 * 1024 * 1024;
 
 /// Messages sent from client to server.
 ///
-/// These messages are sent over the control stream during handshake
+/// These messages are sent over the control stream during authentication
 /// or over data streams for connection establishment.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ClientMessage {
-    /// Initial handshake message containing authentication credentials.
+    /// Initial authentication message containing credentials.
     Hello(ClientHello),
     /// Connection request to establish a tunnel to a destination address.
     Connect(ClientConnect),

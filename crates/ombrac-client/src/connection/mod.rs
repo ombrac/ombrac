@@ -13,8 +13,8 @@ use tokio_util::codec::Framed;
 
 use ombrac::codec::{ClientMessage, ServerMessage, length_codec};
 use ombrac::protocol::{
-    self, Address, ClientConnect, ClientHello, ConnectErrorKind, ConnectionAuthError,
-    PROTOCOL_VERSION, Secret, ServerConnectResponse, ServerHandshakeResponse,
+    self, Address, ClientConnect, ClientHello, ConnectErrorKind, PROTOCOL_VERSION, Secret,
+    ServerAuthResponse, ServerConnectResponse,
 };
 use ombrac_macros::{error, info, warn};
 use ombrac_transport::{Connection, Initiator};
@@ -25,9 +25,9 @@ mod stream;
 
 pub use stream::BufferedStream;
 
-// --- Handshake & Connection ---
-/// Timeout for the initial handshake with the server [default: 10 seconds]
-const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
+// --- Authentication & Connection ---
+/// Timeout for the initial authentication with the server [default: 10 seconds]
+const AUTH_TIMEOUT: Duration = Duration::from_secs(10);
 
 // --- Reconnection Strategy ---
 /// Initial backoff duration for reconnection attempts [default: 1 second]
@@ -53,10 +53,10 @@ impl Default for ReconnectState {
     }
 }
 
-/// Manages the connection to the server, including handshake and reconnection logic.
+/// Manages the connection to the server, including authentication and reconnection logic.
 ///
 /// This struct handles the lifecycle of a connection to the server, including
-/// initial handshake, automatic reconnection on failures, and connection state management.
+/// initial authentication, automatic reconnection on failures, and connection state management.
 pub struct ClientConnection<T, C>
 where
     T: Initiator<Connection = C>,
@@ -76,10 +76,10 @@ where
 {
     /// Creates a new `ClientConnection` and establishes a connection to the server.
     ///
-    /// This involves performing a handshake with the server.
+    /// This involves performing authentication with the server.
     pub async fn new(transport: T, secret: Secret, options: Option<Bytes>) -> io::Result<Self> {
         let options = options.unwrap_or_default();
-        let connection = handshake(&transport, secret, options.clone()).await?;
+        let connection = authenticate(&transport, secret, options.clone()).await?;
 
         Ok(Self {
             transport,
@@ -258,7 +258,7 @@ where
     /// Returns an error if:
     /// - Reconnection is throttled (too many attempts)
     /// - Transport rebind fails
-    /// - Handshake fails
+    /// - Authentication fails
     async fn reconnect(&self, old_conn_id: usize) -> io::Result<()> {
         let mut state = self.reconnect_lock.lock().await;
 
@@ -301,7 +301,7 @@ where
             return Err(e);
         }
 
-        match handshake(&self.transport, self.secret, self.options.clone()).await {
+        match authenticate(&self.transport, self.secret, self.options.clone()).await {
             Ok(new_connection) => {
                 state.backoff = INITIAL_RECONNECT_BACKOFF;
                 state.last_attempt = None;
@@ -316,7 +316,7 @@ where
                     error = %e,
                     error_kind = ?e.kind(),
                     next_backoff_secs = state.backoff.as_secs(),
-                    "reconnect handshake failed"
+                    "reconnect authentication failed"
                 );
                 Err(e)
             }
@@ -324,13 +324,13 @@ where
     }
 }
 
-/// Performs the initial handshake with the server.
-async fn handshake<T, C>(transport: &T, secret: Secret, options: Bytes) -> io::Result<C>
+/// Performs the initial authentication with the server.
+async fn authenticate<T, C>(transport: &T, secret: Secret, options: Bytes) -> io::Result<C>
 where
     T: Initiator<Connection = C>,
     C: Connection,
 {
-    let do_handshake = async {
+    let do_auth = async {
         let connection = transport.connect().await?;
         let mut stream = connection.open_bidirectional().await?;
 
@@ -347,27 +347,14 @@ where
 
         match framed.next().await {
             Some(Ok(payload)) => {
-                let response: ServerHandshakeResponse = protocol::decode(&payload)?;
+                let response: ServerAuthResponse = protocol::decode(&payload)?;
                 match response {
-                    ServerHandshakeResponse::Ok => {
-                        info!("handshake with server successful");
+                    ServerAuthResponse::Ok => {
                         stream.shutdown().await?;
                         Ok(connection)
                     }
-                    ServerHandshakeResponse::Err(e) => {
-                        let err_kind = match e {
-                            ConnectionAuthError::InvalidSecret => io::ErrorKind::PermissionDenied,
-                            _ => io::ErrorKind::InvalidData,
-                        };
-                        error!(
-                            error = ?e,
-                            error_kind = ?err_kind,
-                            "handshake failed, server rejected"
-                        );
-                        Err(io::Error::new(
-                            err_kind,
-                            format!("server rejected handshake: {:?}", e),
-                        ))
+                    ServerAuthResponse::Err => {
+                        Err(io::Error::other(format!("authentication failed")))
                     }
                 }
             }
@@ -375,30 +362,30 @@ where
                 error!(
                     error = %e,
                     error_kind = ?e.kind(),
-                    "connection error during handshake"
+                    "connection error during authentication"
                 );
                 Err(e)
             }
             None => {
-                error!("connection closed by server during handshake");
+                error!("connection closed by server during authentication");
                 Err(io::Error::new(
                     io::ErrorKind::UnexpectedEof,
-                    "connection closed by server during handshake",
+                    "connection closed by server during authentication",
                 ))
             }
         }
     };
 
-    match tokio::time::timeout(HANDSHAKE_TIMEOUT, do_handshake).await {
+    match tokio::time::timeout(AUTH_TIMEOUT, do_auth).await {
         Ok(result) => result,
         Err(_) => {
             error!(
-                timeout_secs = HANDSHAKE_TIMEOUT.as_secs(),
-                "handshake timed out"
+                timeout_secs = AUTH_TIMEOUT.as_secs(),
+                "authentication timed out"
             );
             Err(io::Error::new(
                 io::ErrorKind::TimedOut,
-                "client hello timed out",
+                "client authentication timed out",
             ))
         }
     }

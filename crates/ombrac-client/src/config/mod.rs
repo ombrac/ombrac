@@ -196,7 +196,7 @@ pub enum TlsMode {
 pub struct ServiceConfig {
     pub secret: String,
     pub server: String,
-    pub handshake_option: Option<String>,
+    pub auth_option: Option<String>,
     pub endpoint: EndpointConfig,
     pub transport: TransportConfig,
     #[cfg(feature = "tracing")]
@@ -208,7 +208,7 @@ pub struct ServiceConfig {
 pub struct ConfigBuilder {
     secret: Option<String>,
     server: Option<String>,
-    handshake_option: Option<String>,
+    auth_option: Option<String>,
     endpoint: EndpointConfig,
     transport: TransportConfig,
     #[cfg(feature = "tracing")]
@@ -221,7 +221,7 @@ impl ConfigBuilder {
         Self {
             secret: None,
             server: None,
-            handshake_option: None,
+            auth_option: None,
             endpoint: EndpointConfig::default(),
             transport: TransportConfig::default(),
             #[cfg(feature = "tracing")]
@@ -237,8 +237,8 @@ impl ConfigBuilder {
         if let Some(server) = json_config.server {
             self.server = Some(server);
         }
-        if let Some(handshake_option) = json_config.handshake_option {
-            self.handshake_option = Some(handshake_option);
+        if let Some(auth_option) = json_config.auth_option {
+            self.auth_option = Some(auth_option);
         }
         if let Some(endpoint) = json_config.endpoint {
             self.endpoint = Self::merge_endpoint(self.endpoint, endpoint);
@@ -263,8 +263,8 @@ impl ConfigBuilder {
         if let Some(server) = cli_config.server {
             self.server = Some(server);
         }
-        if let Some(handshake_option) = cli_config.handshake_option {
-            self.handshake_option = Some(handshake_option);
+        if let Some(auth_option) = cli_config.auth_option {
+            self.auth_option = Some(auth_option);
         }
         self.endpoint = Self::merge_endpoint(self.endpoint, cli_config.endpoint);
         self.transport = Self::merge_transport(self.transport, cli_config.transport);
@@ -287,7 +287,7 @@ impl ConfigBuilder {
         Ok(ServiceConfig {
             secret,
             server,
-            handshake_option: self.handshake_option,
+            auth_option: self.auth_option,
             endpoint: self.endpoint,
             transport: self.transport,
             #[cfg(feature = "tracing")]
@@ -364,7 +364,7 @@ pub fn load() -> Result<ServiceConfig, Box<dyn std::error::Error>> {
     let cli_config = cli::CliConfig {
         secret: cli_args.secret,
         server: cli_args.server,
-        handshake_option: cli_args.handshake_option,
+        auth_option: cli_args.auth_option,
         endpoint: cli_args.endpoint.into_endpoint_config(),
         transport: cli_args.transport.into_transport_config(),
         #[cfg(feature = "tracing")]

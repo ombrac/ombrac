@@ -40,11 +40,7 @@ pub fn decode<'a, T: Deserialize<'a>>(bytes: &'a [u8]) -> io::Result<T> {
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("decode error: {e}")))
 }
 
-// Backward compatibility
-#[deprecated(note = "Use PROTOCOL_VERSION instead")]
-pub const PROTOCOLS_VERSION: u8 = PROTOCOL_VERSION;
-
-/// Client handshake message containing authentication and configuration.
+/// Client authentication message containing credentials and configuration.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ClientHello {
     /// Protocol version the client supports.
@@ -64,9 +60,9 @@ pub struct ClientConnect {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ServerHandshakeResponse {
+pub enum ServerAuthResponse {
     Ok,
-    Err(ConnectionAuthError),
+    Err,
 }
 
 /// UDP packet representation with support for fragmentation.
@@ -168,19 +164,6 @@ impl UdpPacket {
             }
         })
     }
-}
-
-/// Handshake error types returned by the server during authentication.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-pub enum ConnectionAuthError {
-    /// Client protocol version is not supported by the server.
-    IncompatibleVersion,
-    /// Authentication secret is invalid or incorrect.
-    InvalidSecret,
-    /// Internal server error during handshake processing.
-    ServerError,
-    #[serde(other)]
-    Other,
 }
 
 /// Response to a client's connection request.

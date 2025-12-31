@@ -59,7 +59,7 @@ macro_rules! require_config {
 /// let config = Arc::new(ServiceConfig {
 ///     secret: "my-secret".to_string(),
 ///     server: "server.example.com:8080".to_string(),
-///     handshake_option: None,
+///     auth_option: None,
 ///     endpoint: Default::default(),
 ///     transport: Default::default(),
 ///     logging: Default::default(),
@@ -82,7 +82,7 @@ impl OmbracClient {
     ///
     /// This method:
     /// 1. Creates a QUIC client from the transport configuration
-    /// 2. Establishes connection with handshake
+    /// 2. Establishes connection with authentication
     /// 3. Spawns endpoint tasks if configured
     /// 4. Returns an OmbracClient handle for lifecycle management
     ///
@@ -102,7 +102,7 @@ impl OmbracClient {
             Client::new(
                 transport,
                 secret,
-                config.handshake_option.clone().map(Into::into),
+                config.auth_option.clone().map(Into::into),
             )
             .await
             .map_err(|e| Error::Io(e))?,
@@ -189,7 +189,7 @@ impl OmbracClient {
     /// # let config = Arc::new(ombrac_client::ServiceConfig {
     /// #     secret: "test".to_string(),
     /// #     server: "server:8080".to_string(),
-    /// #     handshake_option: None,
+    /// #     auth_option: None,
     /// #     endpoint: Default::default(),
     /// #     transport: Default::default(),
     /// #     logging: Default::default(),
