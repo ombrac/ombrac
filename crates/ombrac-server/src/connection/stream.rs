@@ -1,6 +1,6 @@
 use std::io;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use futures::StreamExt;
 use tokio::io::AsyncWriteExt;
@@ -10,6 +10,7 @@ use tokio_util::sync::CancellationToken;
 #[cfg(feature = "tracing")]
 use tracing::Instrument;
 
+use futures::SinkExt;
 use ombrac::{codec, protocol};
 use ombrac_macros::info;
 use ombrac_transport::Connection;
@@ -62,6 +63,8 @@ pub(crate) struct StreamTunnel<C: Connection> {
 }
 
 impl<C: Connection> StreamTunnel<C> {
+    const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
+
     pub(crate) fn new(connection: Arc<C>, shutdown: CancellationToken) -> Self {
         Self {
             connection,
@@ -100,11 +103,61 @@ impl<C: Connection> StreamTunnel<C> {
         let mut framed = Framed::new(&mut stream, codec::length_codec());
 
         let destination = Self::handle_connect_message(&mut framed).await?;
+        let destination_socket_addr = destination.to_socket_addr().await?;
         guard.destination = Some(destination.clone());
 
-        // TODO: use hickory-dns
-        let mut tcp_stream = TcpStream::connect(destination.to_socket_addr().await?).await?;
+        // Attempt to connect to the destination
+        let connect_result = match tokio::time::timeout(
+            Self::DEFAULT_CONNECT_TIMEOUT,
+            TcpStream::connect(destination_socket_addr),
+        )
+        .await
+        {
+            Ok(Ok(stream)) => Ok(stream),
+            Ok(Err(e)) => Err(e),
+            Err(_) => Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "Connection timeout",
+            )),
+        };
 
+        // Send connection response to client
+        let (response, tcp_stream_result) = match connect_result {
+            Ok(stream) => {
+                // Connection successful
+                (protocol::ServerConnectResponse::Ok, Ok(stream))
+            }
+            Err(e) => {
+                // Connection failed - send error response
+                let error_kind = Self::classify_error(&e);
+                let error_message = e.to_string();
+                (
+                    protocol::ServerConnectResponse::Err {
+                        kind: error_kind,
+                        message: error_message.clone(),
+                    },
+                    Err(e),
+                )
+            }
+        };
+
+        let response_message = codec::DownstreamMessage::ConnectResponse(response);
+        let encoded_response = protocol::encode(&response_message)?;
+        framed.send(encoded_response).await?;
+
+        // If connection failed, return error
+        let mut tcp_stream = match tcp_stream_result {
+            Ok(stream) => stream,
+            Err(e) => {
+                guard.reason = Some(e);
+                return Err(io::Error::new(
+                    io::ErrorKind::ConnectionRefused,
+                    "Failed to connect to destination",
+                ));
+            }
+        };
+
+        // Connection successful - continue with data exchange
         let parts = framed.into_parts();
         guard.initial_upstream_bytes = parts.read_buf.len() as u64;
 
@@ -121,6 +174,33 @@ impl<C: Connection> StreamTunnel<C> {
             Err((e, stats)) => {
                 guard.stats = Some(stats);
                 Err(e)
+            }
+        }
+    }
+
+    /// Classifies an IO error into a ConnectErrorKind for better error handling.
+    fn classify_error(error: &io::Error) -> protocol::ConnectErrorKind {
+        match error.kind() {
+            io::ErrorKind::TimedOut => protocol::ConnectErrorKind::TimedOut,
+            io::ErrorKind::ConnectionRefused => protocol::ConnectErrorKind::ConnectionRefused,
+            io::ErrorKind::NetworkUnreachable => protocol::ConnectErrorKind::NetworkUnreachable,
+            io::ErrorKind::HostUnreachable => protocol::ConnectErrorKind::HostUnreachable,
+            io::ErrorKind::NotFound => {
+                // DNS resolution failures often manifest as NotFound
+                if error.to_string().contains("could not be resolved") {
+                    protocol::ConnectErrorKind::DnsResolutionFailed
+                } else {
+                    protocol::ConnectErrorKind::Other
+                }
+            }
+            _ => {
+                // Check error message for DNS-related errors
+                let msg = error.to_string().to_lowercase();
+                if msg.contains("dns") || msg.contains("resolve") || msg.contains("lookup") {
+                    protocol::ConnectErrorKind::DnsResolutionFailed
+                } else {
+                    protocol::ConnectErrorKind::Other
+                }
             }
         }
     }

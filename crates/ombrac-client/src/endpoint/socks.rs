@@ -38,6 +38,8 @@ where
         mut stream: &mut Stream<impl AsyncRead + AsyncWrite + Unpin>,
     ) -> io::Result<()> {
         let dst_addr = util::socks_to_ombrac_addr(address)?;
+        // open_bidirectional now waits for server connection response
+        // If connection fails, it returns an error which will be propagated to the SOCKS client
         let mut dest_stream = self.client.open_bidirectional(dst_addr.clone()).await?;
         match ombrac_transport::io::copy_bidirectional(&mut stream, &mut dest_stream).await {
             Ok(stats) => {
@@ -168,6 +170,8 @@ where
 
         match request {
             Request::Connect(address) => {
+                // Note: write_response_unspecified() sends a response indicating connection attempt
+                // The actual connection status is determined by handle_connect()
                 stream.write_response_unspecified().await?;
 
                 if let Err(err) = self.handle_connect(address.clone(), stream).await {

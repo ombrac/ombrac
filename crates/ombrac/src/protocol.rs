@@ -109,6 +109,45 @@ pub enum HandshakeError {
     InternalServerError,
 }
 
+/// Response to a client's connection request.
+///
+/// This message is sent by the server after attempting to connect to the
+/// destination address. It indicates whether the connection was successful
+/// or failed, allowing the client to properly handle TCP state.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ServerConnectResponse {
+    /// Connection to the destination was successful.
+    Ok,
+    /// Connection to the destination failed.
+    ///
+    /// The error message provides details about why the connection failed,
+    /// which helps the client understand the failure context and avoid
+    /// retry storms in application-layer protocols.
+    Err {
+        /// Error kind that categorizes the failure
+        kind: ConnectErrorKind,
+        /// Human-readable error message
+        message: String,
+    },
+}
+
+/// Categorizes connection errors to help clients handle them appropriately.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ConnectErrorKind {
+    /// DNS resolution failed
+    DnsResolutionFailed,
+    /// Connection refused by the destination
+    ConnectionRefused,
+    /// Connection timed out
+    TimedOut,
+    /// Network unreachable
+    NetworkUnreachable,
+    /// Host unreachable
+    HostUnreachable,
+    /// Other connection error
+    Other,
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Address {
     SocketV4(SocketAddrV4),

@@ -8,17 +8,17 @@ use std::time::Duration;
 use arc_swap::{ArcSwap, Guard};
 use bytes::Bytes;
 use futures::{SinkExt, StreamExt};
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::Mutex;
 use tokio::time::Instant;
 use tokio_util::codec::Framed;
 #[cfg(feature = "datagram")]
 use tokio_util::sync::CancellationToken;
 
-use ombrac::codec::{UpstreamMessage, length_codec};
+use ombrac::codec::{DownstreamMessage, UpstreamMessage, length_codec};
 use ombrac::protocol::{
-    self, Address, ClientConnect, ClientHello, HandshakeError, PROTOCOLS_VERSION, Secret,
-    ServerHandshakeResponse,
+    self, Address, ClientConnect, ClientHello, ConnectErrorKind, HandshakeError, PROTOCOLS_VERSION,
+    Secret, ServerConnectResponse, ServerHandshakeResponse,
 };
 use ombrac_macros::{error, info, warn};
 use ombrac_transport::{Connection, Initiator};
@@ -132,21 +132,70 @@ where
     /// Opens a new bidirectional stream for TCP-like communication.
     ///
     /// This method negotiates a new stream with the server, which will then
-    /// connect to the specified destination address.
+    /// connect to the specified destination address. It waits for the server's
+    /// connection response before returning, ensuring proper TCP state handling.
     pub async fn open_bidirectional(&self, dest_addr: Address) -> io::Result<C::Stream> {
         let mut stream = self
             .inner
             .with_retry(|conn| async move { conn.open_bidirectional().await })
             .await?;
 
-        let connect_message = UpstreamMessage::Connect(ClientConnect { address: dest_addr });
+        let connect_message = UpstreamMessage::Connect(ClientConnect {
+            address: dest_addr.clone(),
+        });
         let encoded_bytes = protocol::encode(&connect_message)?;
 
         // The protocol requires a length-prefixed message.
         stream.write_u32(encoded_bytes.len() as u32).await?;
         stream.write_all(&encoded_bytes).await?;
 
-        Ok(stream)
+        // Wait for the server's connection response
+        // Read the length prefix manually to avoid borrowing issues
+        let response_length = stream.read_u32().await?;
+        if response_length > 8 * 1024 * 1024 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("Response message too large: {} bytes", response_length),
+            ));
+        }
+
+        let mut response_buffer = vec![0u8; response_length as usize];
+        stream.read_exact(&mut response_buffer).await?;
+
+        let message: DownstreamMessage = protocol::decode(&response_buffer)?;
+        let response = match message {
+            DownstreamMessage::ConnectResponse(response) => response,
+            #[allow(unreachable_patterns)]
+            _ => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "expected connect response message",
+                ));
+            }
+        };
+
+        // Handle the connection response
+        match response {
+            ServerConnectResponse::Ok => {
+                // Connection successful - return the stream for data exchange
+                Ok(stream)
+            }
+            ServerConnectResponse::Err { kind, message } => {
+                // Connection failed - return appropriate error
+                let error_kind = match kind {
+                    ConnectErrorKind::DnsResolutionFailed => io::ErrorKind::NotFound,
+                    ConnectErrorKind::ConnectionRefused => io::ErrorKind::ConnectionRefused,
+                    ConnectErrorKind::TimedOut => io::ErrorKind::TimedOut,
+                    ConnectErrorKind::NetworkUnreachable => io::ErrorKind::NetworkUnreachable,
+                    ConnectErrorKind::HostUnreachable => io::ErrorKind::HostUnreachable,
+                    ConnectErrorKind::Other => io::ErrorKind::Other,
+                };
+                Err(io::Error::new(
+                    error_kind,
+                    format!("Failed to connect to {}: {}", dest_addr, message),
+                ))
+            }
+        }
     }
 
     // Rebind the transport to a new socket to ensure a clean state for reconnection.

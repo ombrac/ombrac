@@ -1,12 +1,19 @@
 use serde::{Deserialize, Serialize};
 pub use tokio_util::codec::LengthDelimitedCodec;
 
-use crate::protocol::{ClientConnect, ClientHello};
+use crate::protocol::{ClientConnect, ClientHello, ServerConnectResponse};
 
+/// Messages sent from client to server (upstream).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum UpstreamMessage {
     Hello(ClientHello),
     Connect(ClientConnect),
+}
+
+/// Messages sent from server to client (downstream).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DownstreamMessage {
+    ConnectResponse(ServerConnectResponse),
 }
 
 pub fn length_codec() -> LengthDelimitedCodec {
