@@ -15,6 +15,19 @@ use ombrac_transport::{Connection, Initiator};
 
 use super::ClientConnection;
 
+// --- Datagram Configuration ---
+/// Initial delay for datagram retry [default: 1 second]
+const DATAGRAM_INITIAL_DELAY: Duration = Duration::from_secs(1);
+
+/// Maximum delay for datagram retry [default: 60 seconds]
+const DATAGRAM_MAX_DELAY: Duration = Duration::from_secs(60);
+
+/// Channel buffer size for UDP session dispatcher [default: 128]
+const UDP_SESSION_CHANNEL_BUFFER_SIZE: usize = 128;
+
+/// Default tunnel MTU if transport doesn't provide one [default: 1350 bytes]
+const DEFAULT_TUNNEL_MTU: usize = 1350;
+
 type UdpSessionSender = mpsc::Sender<(Bytes, Address)>;
 
 /// Manages all active UDP sessions and dispatches incoming datagrams.
@@ -45,9 +58,7 @@ impl UdpDispatcher {
         C: Connection,
     {
         let mut reassembler = UdpReassembler::default();
-        const INITIAL_DELAY: Duration = Duration::from_secs(1);
-        const MAX_DELAY: Duration = Duration::from_secs(60);
-        let mut current_delay = INITIAL_DELAY;
+        let mut current_delay = DATAGRAM_INITIAL_DELAY;
 
         loop {
             tokio::select! {
@@ -59,8 +70,8 @@ impl UdpDispatcher {
                 result = read_datagram(connection.as_ref(), &mut reassembler) => {
                     match result {
                         Ok((session_id, address, data)) => {
-                            if current_delay != INITIAL_DELAY {
-                                current_delay = INITIAL_DELAY;
+                            if current_delay != DATAGRAM_INITIAL_DELAY {
+                                current_delay = DATAGRAM_INITIAL_DELAY;
                             }
 
                             dispatcher.dispatch(session_id, data, address).await;
@@ -68,7 +79,7 @@ impl UdpDispatcher {
                         Err(_e) => {
                             warn!("Error reading datagram: {}. Retrying in {:?}...", _e, current_delay);
                             tokio::time::sleep(current_delay).await;
-                            current_delay = (current_delay * 2).min(MAX_DELAY);
+                            current_delay = (current_delay * 2).min(DATAGRAM_MAX_DELAY);
                         }
                     }
                 }
@@ -94,7 +105,7 @@ impl UdpDispatcher {
 
     /// Registers a new session and returns a receiver for it.
     pub fn register_session(&self, session_id: u64) -> mpsc::Receiver<(Bytes, Address)> {
-        let (tx, rx) = mpsc::channel(128); // Channel buffer size
+        let (tx, rx) = mpsc::channel(UDP_SESSION_CHANNEL_BUFFER_SIZE);
         self.dispatch_map.insert(session_id, tx);
         rx
     }
@@ -165,7 +176,7 @@ where
 
     let conn = connection.connection();
     // Use a conservative default MTU if the transport doesn't provide one.
-    let max_datagram_size = conn.max_datagram_size().unwrap_or(1350);
+    let max_datagram_size = conn.max_datagram_size().unwrap_or(DEFAULT_TUNNEL_MTU);
     // Leave a reasonable margin for headers.
     let overhead = UdpPacket::fragmented_overhead();
     let max_payload_size = max_datagram_size.saturating_sub(overhead).max(1);

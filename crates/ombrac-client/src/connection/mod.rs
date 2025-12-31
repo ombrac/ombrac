@@ -23,6 +23,20 @@ use ombrac_transport::{Connection, Initiator};
 mod datagram;
 mod stream;
 
+// --- Handshake & Connection ---
+/// Timeout for the initial handshake with the server [default: 10 seconds]
+const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Maximum size for response messages [default: 8MB]
+const MAX_RESPONSE_MESSAGE_SIZE: usize = 8 * 1024 * 1024;
+
+// --- Reconnection Strategy ---
+/// Initial backoff duration for reconnection attempts [default: 1 second]
+const INITIAL_RECONNECT_BACKOFF: Duration = Duration::from_secs(1);
+
+/// Maximum backoff duration for reconnection attempts [default: 60 seconds]
+const MAX_RECONNECT_BACKOFF: Duration = Duration::from_secs(60);
+
 #[cfg(feature = "datagram")]
 pub use datagram::{UdpDispatcher, UdpSession};
 
@@ -35,7 +49,7 @@ impl Default for ReconnectState {
     fn default() -> Self {
         Self {
             last_attempt: None,
-            backoff: Duration::from_secs(1),
+            backoff: INITIAL_RECONNECT_BACKOFF,
         }
     }
 }
@@ -99,7 +113,7 @@ where
         // Wait for the server's connection response
         // Read the length prefix manually to avoid borrowing issues
         let response_length = stream.read_u32().await?;
-        if response_length > 8 * 1024 * 1024 {
+        if response_length > MAX_RESPONSE_MESSAGE_SIZE as u32 {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 format!("Response message too large: {} bytes", response_length),
@@ -215,13 +229,13 @@ where
         state.last_attempt = Some(Instant::now());
 
         if let Err(e) = self.transport.rebind().await {
-            state.backoff = (state.backoff * 2).min(Duration::from_secs(60));
+            state.backoff = (state.backoff * 2).min(MAX_RECONNECT_BACKOFF);
             return Err(e);
         }
 
         match handshake(&self.transport, self.secret, self.options.clone()).await {
             Ok(new_connection) => {
-                state.backoff = Duration::from_secs(1);
+                state.backoff = INITIAL_RECONNECT_BACKOFF;
                 state.last_attempt = None;
 
                 self.connection.store(Arc::new(new_connection));
@@ -229,7 +243,7 @@ where
                 Ok(())
             }
             Err(e) => {
-                state.backoff = (state.backoff * 2).min(Duration::from_secs(60));
+                state.backoff = (state.backoff * 2).min(MAX_RECONNECT_BACKOFF);
                 error!(
                     "Reconnect failed: {}. Next retry backoff: {:?}",
                     e, state.backoff
@@ -246,8 +260,6 @@ where
     T: Initiator<Connection = C>,
     C: Connection,
 {
-    const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
-
     let do_handshake = async {
         let connection = transport.connect().await?;
         let mut stream = connection.open_bidirectional().await?;
