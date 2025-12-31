@@ -19,7 +19,11 @@ type HttpResult = Result<Response<BoxBody<Bytes, hyper::Error>>, hyper::Error>;
 type HyperClientBuilder = hyper::client::conn::http1::Builder;
 type HyperServerBuilder = hyper::server::conn::http1::Builder;
 
-pub struct Server<T, C> {
+pub struct Server<T, C>
+where
+    T: Initiator<Connection = C>,
+    C: Connection,
+{
     client: Arc<Client<T, C>>,
 }
 

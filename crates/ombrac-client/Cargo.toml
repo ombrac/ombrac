@@ -23,15 +23,25 @@ default = [
     "tracing",
     "datagram",
     "endpoint-default",
-    "transport-default",
+    "binary",
+    "ffi"
 ]
 
 binary = [
     "tracing",
-    "transport-quic",
+    "datagram",
     "endpoint-socks",
     "endpoint-http",
-    "endpoint-tun"
+    "endpoint-tun",
+    "dep:tracing-appender",
+    "dep:tracing-subscriber"
+]
+
+ffi = [
+    "tracing",
+    "datagram",
+    "dep:tracing-appender",
+    "dep:tracing-subscriber"
 ]
 
 datagram = [
@@ -41,8 +51,6 @@ datagram = [
 
 tracing = [
     "dep:tracing",
-    "dep:tracing-appender",
-    "dep:tracing-subscriber",
     "ombrac-netstack/tracing",
     "ombrac-macros/tracing",
     "ombrac-transport/tracing"
@@ -64,14 +72,10 @@ endpoint-http = [
     "http-body-util"
 ]
 
-
-transport-default = ["transport-quic"]
-transport-quic = ["ombrac-transport/quic"]
-
 [dependencies]
 ombrac = { workspace = true }
 ombrac-macros = { workspace = true }
-ombrac-transport = { workspace = true }
+ombrac-transport = { workspace = true, features = ["quic"] }
 ombrac-netstack = { workspace = true, optional = true }
 
 bytes = { workspace = true }
@@ -81,6 +85,7 @@ futures = { workspace = true }
 arc-swap = { workspace = true }
 thiserror = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
 figment = { workspace = true, features = ["json"] }
 clap = { workspace = true, features = ["std", "derive", "color", "help", "usage", "error-context", "suggestions"] }
 tokio = { workspace = true, features = ["rt-multi-thread", "net", "macros", "signal", "sync"] }

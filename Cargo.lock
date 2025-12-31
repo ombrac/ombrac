@@ -1803,6 +1803,7 @@ dependencies = [
  "ombrac-netstack",
  "ombrac-transport",
  "serde",
+ "serde_json",
  "socks-lib",
  "thiserror 2.0.17",
  "tokio",

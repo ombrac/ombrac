@@ -13,7 +13,7 @@ use ombrac_transport::{Connection, Initiator};
 
 use crate::client::Client;
 #[cfg(feature = "datagram")]
-use crate::client::UdpSession;
+use crate::connection::UdpSession;
 
 pub struct CommandHandler<T, C>
 where

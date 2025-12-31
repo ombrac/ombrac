@@ -158,13 +158,21 @@ impl Default for TunConfig {
     }
 }
 
-pub struct Tun<T, C> {
+pub struct Tun<T, C>
+where
+    T: Initiator<Connection = C>,
+    C: Connection,
+{
     config: Arc<TunConfig>,
     client: Arc<Client<T, C>>,
     fakedns: Arc<FakeDns>,
 }
 
-impl<T, C> Clone for Tun<T, C> {
+impl<T, C> Clone for Tun<T, C>
+where
+    T: Initiator<Connection = C>,
+    C: Connection,
+{
     fn clone(&self) -> Self {
         Self {
             config: self.config.clone(),

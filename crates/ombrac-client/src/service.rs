@@ -1,5 +1,4 @@
 use std::io;
-use std::marker::PhantomData;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -7,32 +6,29 @@ use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 
 use ombrac_macros::{error, info, warn};
-#[cfg(feature = "transport-quic")]
-use ombrac_transport::quic::{
-    Connection as QuicConnection, TransportConfig as QuicTransportConfig,
-    client::{Client as QuicClient, Config as QuicConfig},
-};
-use ombrac_transport::{Connection, Initiator};
+use ombrac_transport::quic::Connection as QuicConnection;
+use ombrac_transport::quic::TransportConfig as QuicTransportConfig;
+use ombrac_transport::quic::client::Client as QuicClient;
+use ombrac_transport::quic::client::Config as QuicConfig;
+use ombrac_transport::quic::error::Error as QuicError;
 
 use crate::client::Client;
-use crate::config::ServiceConfig;
-#[cfg(feature = "transport-quic")]
-use crate::config::TlsMode;
+use crate::config::{ServiceConfig, TlsMode};
 
 pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
-    #[error("Configuration error: {0}")]
-    Config(String),
-
-    #[error("{0}")]
+    #[error(transparent)]
     Io(#[from] io::Error),
 
-    #[error("Transport layer error: {0}")]
-    Transport(String),
+    #[error("{0}")]
+    Config(String),
 
-    #[error("Endpoint failed: {0}")]
+    #[error(transparent)]
+    Quic(#[from] QuicError),
+
+    #[error("{0}")]
     Endpoint(String),
 }
 
@@ -47,27 +43,60 @@ macro_rules! require_config {
     };
 }
 
-pub trait ServiceBuilder {
-    type Initiator: Initiator<Connection = Self::Connection>;
-    type Connection: Connection;
-
-    fn build(
-        config: &Arc<ServiceConfig>,
-    ) -> impl Future<Output = Result<Arc<Client<Self::Initiator, Self::Connection>>>> + Send;
+/// OmbracClient provides a simple, easy-to-use API for starting and managing
+/// the ombrac client using QUIC transport.
+///
+/// This struct hides all transport-specific implementation details and provides
+/// a clean interface for external users.
+///
+/// # Example
+///
+/// ```no_run
+/// use ombrac_client::{OmbracClient, ServiceConfig};
+/// use std::sync::Arc;
+///
+/// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+/// let config = Arc::new(ServiceConfig {
+///     secret: "my-secret".to_string(),
+///     server: "server.example.com:8080".to_string(),
+///     handshake_option: None,
+///     endpoint: Default::default(),
+///     transport: Default::default(),
+///     logging: Default::default(),
+/// });
+///
+/// let client = OmbracClient::build(config).await?;
+/// // ... use client ...
+/// client.shutdown().await;
+/// # Ok(())
+/// # }
+/// ```
+pub struct OmbracClient {
+    client: Arc<Client<QuicClient, QuicConnection>>,
+    handles: Vec<JoinHandle<()>>,
+    shutdown_tx: broadcast::Sender<()>,
 }
 
-#[cfg(feature = "transport-quic")]
-pub struct QuicServiceBuilder;
-
-#[cfg(feature = "transport-quic")]
-impl ServiceBuilder for QuicServiceBuilder {
-    type Initiator = QuicClient;
-    type Connection = QuicConnection;
-
-    async fn build(
-        config: &Arc<ServiceConfig>,
-    ) -> Result<Arc<Client<Self::Initiator, Self::Connection>>> {
-        let transport = quic_client_from_config(config).await?;
+impl OmbracClient {
+    /// Builds a new client instance from the configuration.
+    ///
+    /// This method:
+    /// 1. Creates a QUIC client from the transport configuration
+    /// 2. Establishes connection with handshake
+    /// 3. Spawns endpoint tasks if configured
+    /// 4. Returns an OmbracClient handle for lifecycle management
+    ///
+    /// # Arguments
+    ///
+    /// * `config` - The service configuration containing transport, endpoint, and secret settings
+    ///
+    /// # Returns
+    ///
+    /// A configured `OmbracClient` instance ready to use, or an error
+    /// if configuration is invalid or client setup fails.
+    pub async fn build(config: Arc<ServiceConfig>) -> Result<Self> {
+        // Build QUIC client from config
+        let transport = quic_client_from_config(&config).await?;
         let secret = *blake3::hash(config.secret.as_bytes()).as_bytes();
         let client = Arc::new(
             Client::new(
@@ -75,35 +104,11 @@ impl ServiceBuilder for QuicServiceBuilder {
                 secret,
                 config.handshake_option.clone().map(Into::into),
             )
-            .await?,
+            .await
+            .map_err(|e| Error::Io(e))?,
         );
-        Ok(client)
-    }
-}
 
-pub struct Service<T, C>
-where
-    T: Initiator<Connection = C>,
-    C: Connection,
-{
-    client: Arc<Client<T, C>>,
-    handles: Vec<JoinHandle<()>>,
-    shutdown_tx: broadcast::Sender<()>,
-    _transport: PhantomData<T>,
-    _connection: PhantomData<C>,
-}
-
-impl<T, C> Service<T, C>
-where
-    T: Initiator<Connection = C>,
-    C: Connection,
-{
-    pub async fn build<Builder>(config: Arc<ServiceConfig>) -> Result<Self>
-    where
-        Builder: ServiceBuilder<Initiator = T, Connection = C>,
-    {
         let mut handles = Vec::new();
-        let client = Builder::build(&config).await?;
         let (shutdown_tx, _) = broadcast::channel(1);
 
         // Start HTTP endpoint if configured
@@ -156,19 +161,44 @@ where
             ));
         }
 
-        Ok(Service {
+        Ok(OmbracClient {
             client,
             handles,
             shutdown_tx,
-            _transport: PhantomData,
-            _connection: PhantomData,
         })
     }
 
+    /// Rebind the transport to a new socket to ensure a clean state for reconnection.
     pub async fn rebind(&self) -> io::Result<()> {
         self.client.rebind().await
     }
 
+    /// Gracefully shuts down the client.
+    ///
+    /// This method will:
+    /// 1. Send a shutdown signal to stop accepting new connections
+    /// 2. Wait for all endpoint tasks to finish gracefully
+    /// 3. Close existing connections
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ombrac_client::OmbracClient;
+    /// # use std::sync::Arc;
+    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// # let config = Arc::new(ombrac_client::ServiceConfig {
+    /// #     secret: "test".to_string(),
+    /// #     server: "server:8080".to_string(),
+    /// #     handshake_option: None,
+    /// #     endpoint: Default::default(),
+    /// #     transport: Default::default(),
+    /// #     logging: Default::default(),
+    /// # });
+    /// # let client = OmbracClient::build(config).await?;
+    /// client.shutdown().await;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn shutdown(self) {
         let _ = self.shutdown_tx.send(());
 
@@ -182,7 +212,7 @@ where
 
     fn spawn_endpoint(
         _name: &'static str,
-        task: impl Future<Output = Result<()>> + Send + 'static,
+        task: impl std::future::Future<Output = Result<()>> + Send + 'static,
     ) -> JoinHandle<()> {
         tokio::spawn(async move {
             if let Err(_e) = task.await {
@@ -194,7 +224,7 @@ where
     #[cfg(feature = "endpoint-http")]
     async fn endpoint_http_accept_loop(
         config: Arc<ServiceConfig>,
-        ombrac: Arc<Client<T, C>>,
+        ombrac: Arc<Client<QuicClient, QuicConnection>>,
         mut shutdown_rx: broadcast::Receiver<()>,
     ) -> Result<()> {
         use crate::endpoint::http::Server as HttpServer;
@@ -214,7 +244,7 @@ where
     #[cfg(feature = "endpoint-socks")]
     async fn endpoint_socks_accept_loop(
         config: Arc<ServiceConfig>,
-        ombrac: Arc<Client<T, C>>,
+        ombrac: Arc<Client<QuicClient, QuicConnection>>,
         mut shutdown_rx: broadcast::Receiver<()>,
     ) -> Result<()> {
         use crate::endpoint::socks::CommandHandler;
@@ -240,7 +270,7 @@ where
     #[cfg(feature = "endpoint-tun")]
     async fn endpoint_tun_accept_loop(
         config: Arc<ServiceConfig>,
-        ombrac: Arc<Client<T, C>>,
+        ombrac: Arc<Client<QuicClient, QuicConnection>>,
         mut shutdown_rx: broadcast::Receiver<()>,
     ) -> Result<()> {
         use crate::endpoint::tun::{AsyncDevice, Tun, TunConfig};
@@ -324,7 +354,6 @@ where
     }
 }
 
-#[cfg(feature = "transport-quic")]
 async fn quic_client_from_config(config: &ServiceConfig) -> io::Result<QuicClient> {
     let server = &config.server;
     let transport_cfg = &config.transport;
