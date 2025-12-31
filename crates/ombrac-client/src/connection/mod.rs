@@ -16,7 +16,7 @@ use ombrac::protocol::{
     self, Address, ClientConnect, ClientHello, ConnectErrorKind, PROTOCOL_VERSION, Secret,
     ServerAuthResponse, ServerConnectResponse,
 };
-use ombrac_macros::{error, info, warn};
+use ombrac_macros::{error, warn};
 use ombrac_transport::{Connection, Initiator};
 
 #[cfg(feature = "datagram")]
@@ -79,7 +79,17 @@ where
     /// This involves performing authentication with the server.
     pub async fn new(transport: T, secret: Secret, options: Option<Bytes>) -> io::Result<Self> {
         let options = options.unwrap_or_default();
-        let connection = authenticate(&transport, secret, options.clone()).await?;
+        let connection = match authenticate(&transport, secret, options.clone()).await {
+            Ok(conn) => conn,
+            Err(err) => {
+                error!(
+                    error = %err,
+                    error_kind = ?err.kind(),
+                    "failed to initialize connection: authentication error"
+                );
+                return Err(err);
+            }
+        };
 
         Ok(Self {
             transport,
@@ -169,10 +179,6 @@ where
         // This data may be present if the server sent additional data immediately after
         // the connection response. We preserve it by wrapping the stream in BufferedStream.
         let buffered_data = if !parts.read_buf.is_empty() {
-            info!(
-                buffered_bytes = parts.read_buf.len(),
-                "preserving buffered data from protocol framing buffer"
-            );
             Bytes::copy_from_slice(&parts.read_buf)
         } else {
             Bytes::new()
@@ -233,10 +239,12 @@ where
         match operation(connection).await {
             Ok(result) => Ok(result),
             Err(e) if is_connection_error(&e) => {
-                warn!(
-                    error = %e,
-                    error_kind = ?e.kind(),
-                    "connection error detected, attempting to reconnect"
+                // Log the connection error before attempting reconnection
+                // This is a system-level error that should be logged
+                log_connection_error(
+                    ErrorContext::new("with_retry")
+                        .with_details("attempting to reconnect".to_string()),
+                    &e,
                 );
                 // Attempt reconnection - if it fails, return the reconnection error
                 self.reconnect(old_conn_id).await?;
@@ -275,28 +283,23 @@ where
             let elapsed = last.elapsed();
             if elapsed < state.backoff {
                 let wait_time = state.backoff - elapsed;
-                warn!(
-                    wait_time_ms = wait_time.as_millis(),
-                    backoff_secs = state.backoff.as_secs(),
-                    "reconnect throttled, too many attempts"
-                );
-
+                let backoff_secs = state.backoff.as_secs();
                 drop(state);
                 tokio::time::sleep(wait_time).await;
-                return Err(io::Error::new(io::ErrorKind::Other, "reconnect throttled"));
+                let err = io::Error::new(io::ErrorKind::Other, "reconnect throttled");
+                log_reconnect_error(ErrorContext::new("reconnect"), &err, Some(backoff_secs));
+                return Err(err);
             }
         }
-
-        info!("attempting to reconnect to server");
 
         state.last_attempt = Some(Instant::now());
 
         if let Err(e) = self.transport.rebind().await {
             state.backoff = (state.backoff * 2).min(MAX_RECONNECT_BACKOFF);
-            warn!(
-                error = %e,
-                next_backoff_secs = state.backoff.as_secs(),
-                "transport rebind failed during reconnect"
+            log_reconnect_error(
+                ErrorContext::new("reconnect").with_details("transport rebind failed".to_string()),
+                &e,
+                Some(state.backoff.as_secs()),
             );
             return Err(e);
         }
@@ -307,16 +310,15 @@ where
                 state.last_attempt = None;
 
                 self.connection.store(Arc::new(new_connection));
-                info!("reconnection successful");
                 Ok(())
             }
             Err(e) => {
                 state.backoff = (state.backoff * 2).min(MAX_RECONNECT_BACKOFF);
-                error!(
-                    error = %e,
-                    error_kind = ?e.kind(),
-                    next_backoff_secs = state.backoff.as_secs(),
-                    "reconnect authentication failed"
+                log_reconnect_error(
+                    ErrorContext::new("reconnect")
+                        .with_details("authentication failed".to_string()),
+                    &e,
+                    Some(state.backoff.as_secs()),
                 );
                 Err(e)
             }
@@ -353,41 +355,86 @@ where
                         stream.shutdown().await?;
                         Ok(connection)
                     }
-                    ServerAuthResponse::Err => {
-                        Err(io::Error::other(format!("authentication failed")))
-                    }
+                    ServerAuthResponse::Err => Err(io::Error::other("authentication failed")),
                 }
             }
-            Some(Err(e)) => {
-                error!(
-                    error = %e,
-                    error_kind = ?e.kind(),
-                    "connection error during authentication"
-                );
-                Err(e)
-            }
-            None => {
-                error!("connection closed by server during authentication");
-                Err(io::Error::new(
-                    io::ErrorKind::UnexpectedEof,
-                    "connection closed by server during authentication",
-                ))
-            }
+            Some(Err(e)) => Err(e),
+            None => Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "connection closed by server during authentication",
+            )),
         }
     };
 
     match tokio::time::timeout(AUTH_TIMEOUT, do_auth).await {
         Ok(result) => result,
-        Err(_) => {
-            error!(
-                timeout_secs = AUTH_TIMEOUT.as_secs(),
-                "authentication timed out"
-            );
-            Err(io::Error::new(
-                io::ErrorKind::TimedOut,
-                "client authentication timed out",
-            ))
+        Err(_) => Err(io::Error::new(
+            io::ErrorKind::TimedOut,
+            format!(
+                "client authentication timed out after {}s",
+                AUTH_TIMEOUT.as_secs()
+            ),
+        )),
+    }
+}
+
+// --- Error Handling ---
+/// Error context for connection-related operations
+struct ErrorContext {
+    operation: &'static str,
+    details: Option<String>,
+}
+
+impl ErrorContext {
+    fn new(operation: &'static str) -> Self {
+        Self {
+            operation,
+            details: None,
         }
+    }
+
+    fn with_details(mut self, details: String) -> Self {
+        self.details = Some(details);
+        self
+    }
+}
+
+/// Logs and returns a connection error.
+///
+/// This is used for system-level connection errors that should be logged
+/// at the point of occurrence (e.g., during automatic reconnection).
+fn log_connection_error(ctx: ErrorContext, err: &io::Error) {
+    if is_connection_error(err) {
+        warn!(
+            error = %err,
+            error_kind = ?err.kind(),
+            operation = ctx.operation,
+            details = ctx.details.as_deref(),
+            "connection error detected"
+        );
+    }
+}
+
+/// Logs and returns a reconnection error.
+///
+/// This is used for system-level reconnection errors that should be logged
+/// at the point of occurrence.
+fn log_reconnect_error(ctx: ErrorContext, err: &io::Error, backoff_secs: Option<u64>) {
+    if err.kind() == io::ErrorKind::Other && err.to_string() == "reconnect throttled" {
+        warn!(
+            operation = ctx.operation,
+            backoff_secs = backoff_secs,
+            "reconnect throttled, too many attempts"
+        );
+    } else {
+        error!(
+            error = %err,
+            error_kind = ?err.kind(),
+            operation = ctx.operation,
+            backoff_secs = backoff_secs,
+            details = ctx.details.as_deref(),
+            "reconnection failed"
+        );
     }
 }
 
