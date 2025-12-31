@@ -183,7 +183,6 @@ where
             ServerConnectResponse::Err { kind, message } => {
                 // Connection failed - return appropriate error
                 let error_kind = match kind {
-                    ConnectErrorKind::DnsResolutionFailed => io::ErrorKind::NotFound,
                     ConnectErrorKind::ConnectionRefused => io::ErrorKind::ConnectionRefused,
                     ConnectErrorKind::TimedOut => io::ErrorKind::TimedOut,
                     ConnectErrorKind::NetworkUnreachable => io::ErrorKind::NetworkUnreachable,
@@ -257,7 +256,7 @@ where
     /// Handles the reconnection logic.
     ///
     /// It uses a mutex to prevent multiple tasks from trying to reconnect simultaneously.
-     async fn reconnect(&self, old_conn_id: usize) -> io::Result<()> {
+    async fn reconnect(&self, old_conn_id: usize) -> io::Result<()> {
         let mut state = self.reconnect_lock.lock().await;
 
         let current_conn = self.connection.load();
@@ -270,16 +269,19 @@ where
             let elapsed = last.elapsed();
             if elapsed < state.backoff {
                 let wait_time = state.backoff - elapsed;
-                warn!("Too many reconnect attempts. Global throttling for {:?}...", wait_time);
+                warn!(
+                    "Too many reconnect attempts. Global throttling for {:?}...",
+                    wait_time
+                );
 
                 drop(state);
-                tokio::time::sleep(wait_time).await; 
+                tokio::time::sleep(wait_time).await;
                 return Err(io::Error::new(io::ErrorKind::Other, "Reconnect throttled"));
             }
         }
 
         info!("Attemping to reconnect...");
-        
+
         state.last_attempt = Some(Instant::now());
 
         if let Err(e) = self.transport.rebind().await {
@@ -291,14 +293,17 @@ where
             Ok(new_connection) => {
                 state.backoff = Duration::from_secs(1);
                 state.last_attempt = None;
-                
+
                 self.connection.store(Arc::new(new_connection));
                 info!("Reconnection successful");
                 Ok(())
             }
             Err(e) => {
                 state.backoff = (state.backoff * 2).min(Duration::from_secs(60));
-                error!("Reconnect failed: {}. Next retry backoff: {:?}", e, state.backoff);
+                error!(
+                    "Reconnect failed: {}. Next retry backoff: {:?}",
+                    e, state.backoff
+                );
                 Err(e)
             }
         }
@@ -548,7 +553,7 @@ mod datagram {
                                     if current_delay != INITIAL_DELAY {
                                         current_delay = INITIAL_DELAY;
                                     }
-                                    
+
                                     inner.udp_dispatcher.dispatch(session_id, data, address).await;
                                 }
                                 Err(_e) => {

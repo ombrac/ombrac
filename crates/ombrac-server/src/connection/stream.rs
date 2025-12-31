@@ -1,9 +1,8 @@
-use std::error::Error;
 use std::io;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use futures::StreamExt;
+use futures::{SinkExt, StreamExt};
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
 use tokio_util::codec::Framed;
@@ -11,7 +10,6 @@ use tokio_util::sync::CancellationToken;
 #[cfg(feature = "tracing")]
 use tracing::Instrument;
 
-use futures::SinkExt;
 use ombrac::{codec, protocol};
 use ombrac_macros::info;
 use ombrac_transport::Connection;
@@ -82,8 +80,9 @@ impl<C: Connection> StreamTunnel<C> {
                     let stream = result?;
                     let future = async move {
                         let mut guard = StreamGuard::default();
-                        // handle_connect is responsible for setting guard.reason on all error paths
-                        let _ = Self::handle_connect(stream, &mut guard).await;
+                        if let Err(e) = Self::handle_connect(stream, &mut guard).await {
+                            guard.reason = Some(e);
+                        }
                     };
 
                     #[cfg(not(feature = "tracing"))]
@@ -103,60 +102,33 @@ impl<C: Connection> StreamTunnel<C> {
     ) -> io::Result<()> {
         let mut framed = Framed::new(&mut stream, codec::length_codec());
 
-        // Step 1: Read the connection request from the client
-        let destination = match Self::read_connect_message(&mut framed).await {
-            Ok(addr) => {
-                guard.destination = Some(addr.clone());
-                addr
-            }
-            Err(e) => {
-                let err = io::Error::new(e.kind(), e.to_string());
-                guard.reason = Some(err);
-                return Err(e);
-            }
-        };
+        // Step 1: Read the connection request from the client (with timeout)
+        let destination = Self::read_connect_message(&mut framed).await?;
+        guard.destination = Some(destination.clone());
 
-        // Step 2: Attempt to connect to the destination
+        // Step 2: Attempt to connect to the destination (with timeout)
         let connect_result = Self::connect_to_destination(&destination).await;
 
         // Step 3: Send connection response to client
-        if let Err(e) = Self::send_connect_response(&mut framed, &connect_result).await {
-            let err = io::Error::new(e.kind(), e.to_string());
-            guard.reason = Some(err);
-            return Err(e);
-        }
+        Self::send_connect_response(&mut framed, &connect_result).await?;
 
         // Step 4: If connection failed, return error
-        let mut tcp_stream = match connect_result {
-            Ok(stream) => stream,
-            Err(e) => {
-                let error_msg = format!("Failed to connect to destination: {}", e);
-                let err = io::Error::new(io::ErrorKind::ConnectionRefused, error_msg.clone());
-                guard.reason = Some(io::Error::new(e.kind(), error_msg));
-                return Err(err);
-            }
-        };
+        let mut tcp_stream = connect_result?;
 
         // Step 5: Exchange data between client and destination
-        match Self::exchange_data(framed, &mut tcp_stream, guard).await {
-            Ok(()) => Ok(()),
-            Err(e) => {
-                // Only set reason if not already set (exchange_data may have set it)
-                if guard.reason.is_none() {
-                    let err = io::Error::new(e.kind(), e.to_string());
-                    guard.reason = Some(err);
-                }
-                Err(e)
-            }
-        }
+        // Note: This phase has no timeout as it's the normal data transfer phase
+        // that can last for the entire lifetime of the TCP connection.
+        Self::exchange_data(framed, &mut tcp_stream, guard).await
     }
 
     /// Reads the connect message from the client.
+    ///
+    /// This function includes a timeout to prevent hanging on unresponsive clients.
     async fn read_connect_message(
         framed: &mut Framed<&mut C::Stream, codec::LengthDelimitedCodec>,
     ) -> io::Result<protocol::Address> {
-        match framed.next().await {
-            Some(Ok(payload)) => {
+        match tokio::time::timeout(Self::DEFAULT_CONNECT_TIMEOUT, framed.next()).await {
+            Ok(Some(Ok(payload))) => {
                 let message = protocol::decode(&payload)?;
                 match message {
                     codec::UpstreamMessage::Connect(connect) => Ok(connect.address),
@@ -166,18 +138,20 @@ impl<C: Connection> StreamTunnel<C> {
                     )),
                 }
             }
-            Some(Err(e)) => Err(e),
-            None => Err(io::Error::new(
+            Ok(Some(Err(e))) => Err(e),
+            Ok(None) => Err(io::Error::new(
                 io::ErrorKind::UnexpectedEof,
                 "Failed to read connect message on stream",
+            )),
+            Err(_) => Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "Timeout reading connect message",
             )),
         }
     }
 
     /// Attempts to connect to the destination address with a timeout.
-    async fn connect_to_destination(
-        destination: &protocol::Address,
-    ) -> io::Result<TcpStream> {
+    async fn connect_to_destination(destination: &protocol::Address) -> io::Result<TcpStream> {
         let destination_socket_addr = destination.to_socket_addr().await?;
 
         match tokio::time::timeout(
@@ -209,10 +183,11 @@ impl<C: Connection> StreamTunnel<C> {
             }
             Err(e) => {
                 // Connection failed - send error response
-                let error_kind = Self::classify_error(e);
+                // Use protocol layer error conversion for consistent error handling
+                let error_kind = protocol::ConnectErrorKind::from_io_error(e);
                 let error_message = e.to_string();
-                    protocol::ServerConnectResponse::Err {
-                        kind: error_kind,
+                protocol::ServerConnectResponse::Err {
+                    kind: error_kind,
                     message: error_message,
                 }
             }
@@ -252,80 +227,6 @@ impl<C: Connection> StreamTunnel<C> {
                 Err(e)
             }
         }
-    }
-
-    /// Classifies an IO error into a ConnectErrorKind for better error handling.
-    ///
-    /// This function attempts to categorize connection errors by examining both
-    /// the error kind and the error message/chain. DNS resolution failures are
-    /// particularly tricky as they can manifest in different ways across platforms.
-    fn classify_error(error: &io::Error) -> protocol::ConnectErrorKind {
-        // First, check the primary error kind
-        match error.kind() {
-            io::ErrorKind::TimedOut => return protocol::ConnectErrorKind::TimedOut,
-            io::ErrorKind::ConnectionRefused => return protocol::ConnectErrorKind::ConnectionRefused,
-            io::ErrorKind::NetworkUnreachable => return protocol::ConnectErrorKind::NetworkUnreachable,
-            io::ErrorKind::HostUnreachable => return protocol::ConnectErrorKind::HostUnreachable,
-            io::ErrorKind::NotFound => {
-                // NotFound can indicate DNS resolution failure, but we need to verify
-                if Self::is_dns_error(error) {
-                    return protocol::ConnectErrorKind::DnsResolutionFailed;
-                }
-                // Otherwise, NotFound might be a different issue
-                return protocol::ConnectErrorKind::Other;
-            }
-            _ => {
-                // For other error kinds, check if it's a DNS-related error
-                if Self::is_dns_error(error) {
-                    return protocol::ConnectErrorKind::DnsResolutionFailed;
-                }
-            }
-        }
-
-        protocol::ConnectErrorKind::Other
-    }
-
-    /// Checks if an error is related to DNS resolution failure.
-    ///
-    /// This function examines the error message and error chain to determine
-    /// if the error is DNS-related. It uses multiple heuristics to be more robust
-    /// across different platforms and error reporting styles.
-    fn is_dns_error(error: &io::Error) -> bool {
-        // Check the error message for DNS-related keywords
-        let error_msg = error.to_string().to_lowercase();
-        
-        // Common DNS-related keywords across platforms
-        let dns_keywords = [
-            "dns",
-            "resolve",
-            "resolution",
-            "lookup",
-            "name resolution",
-            "hostname",
-            "nodename",
-            "name or service not known",
-            "could not be resolved",
-            "no such host",
-            "temporary failure",
-            "name server",
-        ];
-
-        if dns_keywords.iter().any(|keyword| error_msg.contains(keyword)) {
-            return true;
-        }
-
-        // Check the error source chain for DNS-related errors
-        // This is more robust as it can catch wrapped DNS errors
-        let mut source = error.source();
-        while let Some(err) = source {
-            let source_msg = format!("{}", err).to_lowercase();
-            if dns_keywords.iter().any(|keyword| source_msg.contains(keyword)) {
-                return true;
-            }
-            source = err.source();
-        }
-
-        false
     }
 }
 

@@ -134,8 +134,6 @@ pub enum ServerConnectResponse {
 /// Categorizes connection errors to help clients handle them appropriately.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ConnectErrorKind {
-    /// DNS resolution failed
-    DnsResolutionFailed,
     /// Connection refused by the destination
     ConnectionRefused,
     /// Connection timed out
@@ -144,8 +142,28 @@ pub enum ConnectErrorKind {
     NetworkUnreachable,
     /// Host unreachable
     HostUnreachable,
-    /// Other connection error
+    /// Other connection error (including DNS resolution failures)
     Other,
+}
+
+impl ConnectErrorKind {
+    /// Converts an `io::Error` to a `ConnectErrorKind` based on the error kind.
+    ///
+    /// This function maps standard IO error kinds to protocol error kinds,
+    /// ensuring consistent error handling across the codebase. DNS resolution
+    /// failures are categorized as `Other` since they can manifest with
+    /// different error kinds depending on the platform.
+    pub fn from_io_error(error: &io::Error) -> Self {
+        match error.kind() {
+            io::ErrorKind::ConnectionRefused => ConnectErrorKind::ConnectionRefused,
+            io::ErrorKind::TimedOut => ConnectErrorKind::TimedOut,
+            io::ErrorKind::NetworkUnreachable => ConnectErrorKind::NetworkUnreachable,
+            io::ErrorKind::HostUnreachable => ConnectErrorKind::HostUnreachable,
+            // All other errors, including DNS resolution failures (NotFound, etc.),
+            // are categorized as Other
+            _ => ConnectErrorKind::Other,
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash)]
