@@ -80,31 +80,19 @@ jobs:
             gcc-x86-64-linux-gnu \
             gcc-aarch64-linux-gnu
 
-      - name: Build Release (default features)
-        run: cargo build --release --verbose --target ${{ matrix.target }}
+      - name: Build Release (all configurations)
+        run: |
+          cargo build --release --verbose --target ${{ matrix.target }}
+          cargo build --release --verbose --all-features --target ${{ matrix.target }}
+          cargo build --release --verbose --bin ombrac-client --features binary --target ${{ matrix.target }}
+          cargo build --release --verbose --bin ombrac-server --features binary --target ${{ matrix.target }}
 
-      - name: Build Release (all features)
-        run: cargo build --release --verbose --all-features --target ${{ matrix.target }}
-
-      - name: Build Binary Release (client)
-        run: cargo build --release --bin ombrac-client --features binary --target ${{ matrix.target }}
-
-      - name: Build Binary Release (server)
-        run: cargo build --release --bin ombrac-server --features binary --target ${{ matrix.target }}
-
-      - name: Test Release
+      - name: Test Release (full feature)
         if: |
           matrix.target == 'x86_64-apple-darwin' ||
           matrix.target == 'x86_64-pc-windows-msvc' ||
           matrix.target == 'x86_64-unknown-linux-gnu'
-        run: cargo test --release --verbose --target ${{ matrix.target }}
-
-      - name: Test Release with datagram feature
-        if: |
-          matrix.target == 'x86_64-apple-darwin' ||
-          matrix.target == 'x86_64-pc-windows-msvc' ||
-          matrix.target == 'x86_64-unknown-linux-gnu'
-        run: cargo test --release --verbose --features datagram --target ${{ matrix.target }}
+        run: cargo test --release --verbose --features full --target ${{ matrix.target }}
 
       - name: Move binaries
         shell: bash

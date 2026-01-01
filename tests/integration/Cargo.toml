@@ -16,7 +16,16 @@ datagram = [
     "ombrac-transport/datagram"
 ]
 
+# Full feature: includes all features for comprehensive testing
+full = [
+    "ombrac-client/full",
+    "ombrac-server/full",
+    "datagram"
+]
+
 [dev-dependencies]
+tests-support = { path = "../support" }
+
 ombrac = { workspace = true }
 ombrac-client = { workspace = true }
 ombrac-server = { workspace = true }
@@ -27,9 +36,6 @@ bytes = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 curl = { workspace = true }
 ntest = { workspace = true }
-
-tests-support = { path = "../support" }
-
 
 [lints]
 workspace = true
