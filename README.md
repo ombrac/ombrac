@@ -30,12 +30,12 @@ cargo build --release --bin ombrac-client --bin ombrac-server --features binary
 ## Quick Start
 ### Start Server
 ```bash
-ombrac-server -l "[::]:443" -k "your-secret" --tls-cert "cert.pem" --tls-key "key.pem"
+ombrac-server -l "[::]:443" -k "secret-key" --tls-cert "fullchain.pem" --tls-key "key.pem"
 ```
 
 ### Start Client (SOCKS5 Endpoint)
 ```bash
-ombrac-client -s "server-ip:443" -k "your-secret" --socks "127.0.0.1:1080"
+ombrac-client -s "server:443" -k "secret-key" --socks "127.0.0.1:1080"
 ```
 
 ### Run with Docker (Testing Mode)
@@ -46,7 +46,7 @@ docker run -d --name ombrac-server -p 443:443/udp ghcr.io/ombrac/ombrac/ombrac-s
 
 # Client
 docker run -d --name ombrac-client -p 1080:1080/tcp ghcr.io/ombrac/ombrac/ombrac-client:latest \
-  -s server-ip:443 -k secret --socks 0.0.0.0:1080 --tls-mode insecure
+  -s server:443 -k secret --socks 0.0.0.0:1080 --tls-mode insecure
 ```
 
 ## License
