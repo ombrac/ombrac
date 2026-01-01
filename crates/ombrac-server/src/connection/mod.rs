@@ -1,5 +1,6 @@
 #[cfg(feature = "datagram")]
 mod datagram;
+mod dns;
 mod stream;
 
 use std::future::Future;

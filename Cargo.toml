@@ -42,6 +42,7 @@ dashmap = { version = "6", default-features = false }
 arc-swap = { version = "1.7", default-features = false }
 ringbuf = { version = "0.4", default-features = false }
 crossbeam-queue = { version = "0.3", default-features = false }
+blake3 = { version = "1", default-features = false }
 moka = { version = "0.12", default-features = false }
 bincode = { version = "2", default-features = false }
 cbindgen = { version = "0.29", default-features = false }
@@ -59,14 +60,12 @@ rand = { version = "0.9", default-features = false }
 tun-rs = { version = "2.7", default-features = false }
 twox-hash = { version = "2", default-features = false }
 ipnet = { version = "2.11", default-features = false }
-hickory-proto = { version = "0.25", default-features = false }
+hickory-resolver = { version = "0.25", features = ["tokio", "system-config"] }
 
 # binary
 clap = { version = "4", default-features = false }
 serde = { version = "1", default-features = false }
-serde_json = { version = "1", default-features = false }
-figment = { version = "0.10", default-features = false }
-blake3 = { version = "1", default-features = false }
+serde_json = { version = "1" }
 
 # quic
 quinn = { version = "0.11", default-features = false }

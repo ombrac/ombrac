@@ -19,29 +19,26 @@ name = "ombrac_client"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [features]
-default = [
-    "tracing",
-    "datagram",
-    "endpoint-default",
-    "binary",
-    "ffi"
-]
+default = ["tracing"]
 
 binary = [
     "tracing",
     "datagram",
+    "dep:tracing-appender",
+    "dep:tracing-subscriber",
     "endpoint-socks",
     "endpoint-http",
-    "endpoint-tun",
-    "dep:tracing-appender",
-    "dep:tracing-subscriber"
+    "endpoint-tun"
 ]
 
 ffi = [
     "tracing",
     "datagram",
     "dep:tracing-appender",
-    "dep:tracing-subscriber"
+    "dep:tracing-subscriber",
+    "endpoint-socks",
+    "endpoint-http",
+    "endpoint-tun"
 ]
 
 datagram = [
@@ -51,25 +48,25 @@ datagram = [
 
 tracing = [
     "dep:tracing",
-    "ombrac-netstack/tracing",
     "ombrac-macros/tracing",
+    "ombrac-netstack/tracing",
     "ombrac-transport/tracing"
 ]
+
 endpoint-default = ["endpoint-socks"]
 endpoint-socks = ["socks-lib"]
-endpoint-tun = [
-    "ombrac-netstack",
-    "ipnet",
-    "tun-rs",
-    "moka",
-    "twox-hash",
-    "hickory-proto"
-]
 endpoint-http = [
     "http", 
     "hyper", 
     "hyper-util", 
     "http-body-util"
+]
+endpoint-tun = [
+    "ipnet",
+    "tun-rs",
+    "moka",
+    "twox-hash",
+    "ombrac-netstack"
 ]
 
 [dependencies]
@@ -86,7 +83,6 @@ arc-swap = { workspace = true }
 thiserror = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
-figment = { workspace = true, features = ["json"] }
 clap = { workspace = true, features = ["std", "derive", "color", "help", "usage", "error-context", "suggestions"] }
 tokio = { workspace = true, features = ["rt-multi-thread", "net", "macros", "signal", "sync"] }
 tokio-util = { workspace = true, features = ["codec"] }
@@ -104,7 +100,6 @@ http-body-util = { workspace = true, optional = true }
 ipnet = { workspace = true, features = ["json"], optional = true }
 tun-rs = { workspace = true, features = ["async_tokio", "async_framed"], optional = true }
 dashmap = { workspace = true, optional = true }
-hickory-proto = { workspace = true, optional = true }
 twox-hash = { workspace = true, features = ["xxhash64"], optional = true }
 
 [dev-dependencies]

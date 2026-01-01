@@ -28,7 +28,7 @@ impl CommandHandler {
 
     /// Handles data forwarding after a successful connection.
     /// This method is called after the connection is established and response is sent.
-    async fn handle_connect_data_forwarding(
+    async fn handle_connect_forwarding(
         &self,
         stream: &mut Stream<impl AsyncRead + AsyncWrite + Unpin>,
         dest_stream: &mut BufferedStream<<QuicConnection as ombrac_transport::Connection>::Stream>,
@@ -165,17 +165,8 @@ impl Handler for CommandHandler {
                 stream.write_response(&Response::Success(&address)).await?;
 
                 // Now handle the data forwarding
-                if let Err(err) = self
-                    .handle_connect_data_forwarding(stream, &mut dest_stream, address.to_string())
-                    .await
-                {
-                    if err.kind() != io::ErrorKind::BrokenPipe
-                        && err.kind() != io::ErrorKind::ConnectionReset
-                    {
-                        error!("data forwarding failed for {}: {}", address, err);
-                    }
-                    return Err(err);
-                }
+                self.handle_connect_forwarding(stream, &mut dest_stream, address.to_string())
+                    .await?
             }
             #[cfg(feature = "datagram")]
             Request::Associate(_) => {

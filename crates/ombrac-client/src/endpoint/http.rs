@@ -140,7 +140,7 @@ impl Server {
                     }
                 }
                 Err(e) => {
-                    error!("Upgrade error from {}: {}", remote_addr, e);
+                    error!("upgrade error from {}: {}", remote_addr, e);
                 }
             }
         });
@@ -179,7 +179,7 @@ impl Server {
         req: &Request<hyper::body::Incoming>,
     ) -> Result<Address, Box<Response<BoxBody<Bytes, hyper::Error>>>> {
         let host = req.uri().host().ok_or_else(|| {
-            error!("Request URI does not contain a host");
+            error!("request URI does not contain a host");
             Self::create_error_response(StatusCode::BAD_REQUEST)
         })?;
 
@@ -194,7 +194,7 @@ impl Server {
         let addr_str = format!("{}:{}", host, port);
 
         Ok(Address::try_from(addr_str).map_err(|e| {
-            error!("Invalid target address format: {}", e);
+            error!("invalid target address format: {}", e);
             Self::create_error_response(StatusCode::BAD_REQUEST)
         })?)
     }

@@ -18,6 +18,8 @@ use ombrac::reassembly::UdpReassembler;
 use ombrac_macros::{info, warn};
 use ombrac_transport::Connection;
 
+use crate::connection::dns;
+
 // --- Resource Limits ---
 const MAX_SESSIONS: u64 = 8192;
 const MAX_CONCURRENT_HANDLERS: usize = 4096;
@@ -351,7 +353,6 @@ impl<C: Connection> DownstreamHandler<C> {
     }
 }
 
-// TODO
 async fn lookup_host(
     dns_cache: &Cache<Bytes, SocketAddr>,
     address: &Address,
@@ -360,15 +361,6 @@ async fn lookup_host(
         Address::SocketV4(addr) => Ok(SocketAddr::V4(*addr)),
         Address::SocketV6(addr) => Ok(SocketAddr::V6(*addr)),
         Address::Domain(domain, port) => {
-            // Use get_with to ensure only one DNS lookup per domain happens concurrently
-            // This prevents the "thundering herd" problem where many packets trigger
-            // simultaneous DNS queries for the same domain.
-            //
-            // Note: get_with requires the future to return V directly, not Result<V, E>.
-            // If DNS resolution fails, we need to handle it. We'll use a Result-wrapping
-            // approach: cache successful resolutions, and for failures, we'll return an error
-            // without caching (so retries are possible).
-            let domain_str = String::from_utf8_lossy(domain).to_string();
             let port = *port;
 
             // Try to get from cache first (fast path)
@@ -376,29 +368,8 @@ async fn lookup_host(
                 return Ok(addr);
             }
 
-            // Perform DNS resolution with spawn_blocking to avoid blocking the async runtime
-            // Multiple concurrent requests for the same domain will all perform DNS lookup,
-            // but this is acceptable as the OS DNS resolver typically handles this efficiently.
-            // For true deduplication, we'd need additional synchronization, but the cache
-            // will prevent repeated lookups after the first successful resolution.
-            let addr = tokio::task::spawn_blocking(move || {
-                std::net::ToSocketAddrs::to_socket_addrs(&format!("{}:{}", domain_str, port))
-                    .and_then(|mut addrs| {
-                        addrs.next().ok_or_else(|| {
-                            io::Error::new(
-                                io::ErrorKind::NotFound,
-                                format!("DNS resolution failed for {}", domain_str),
-                            )
-                        })
-                    })
-            })
-            .await
-            .map_err(|e| {
-                io::Error::new(
-                    io::ErrorKind::Other,
-                    format!("DNS lookup task panicked: {}", e),
-                )
-            })??;
+            // Use shared DNS resolver for DNS resolution
+            let addr = dns::resolve_domain(domain, port).await?;
 
             // Cache successful resolution
             // Note: There's a race condition here where multiple tasks might resolve

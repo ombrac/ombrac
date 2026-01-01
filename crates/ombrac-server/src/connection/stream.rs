@@ -1,4 +1,5 @@
 use std::io;
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -15,6 +16,8 @@ use ombrac::{codec, protocol};
 use ombrac_macros::info;
 use ombrac_transport::Connection;
 use ombrac_transport::io::{CopyBidirectionalStats, copy_bidirectional};
+
+use crate::connection::dns;
 
 const MAX_CONCURRENT_CONNECTIONS: usize = 4096;
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(15);
@@ -131,8 +134,14 @@ impl<C: Connection> StreamTunnel<C> {
     ///
     /// Returns an error if DNS resolution fails or the connection times out.
     async fn connect_to_destination(destination: &protocol::Address) -> io::Result<TcpStream> {
-        // TODO: use trust-dns-resolver for better DNS handling
-        let addr = destination.to_socket_addr().await?;
+        let addr = match destination {
+            protocol::Address::SocketV4(addr) => SocketAddr::V4(*addr),
+            protocol::Address::SocketV6(addr) => SocketAddr::V6(*addr),
+            protocol::Address::Domain(domain, port) => {
+                // Use shared DNS resolver for DNS resolution
+                dns::resolve_domain(domain, *port).await?
+            }
+        };
 
         tokio::time::timeout(UPSTREAM_CONNECT_TIMEOUT, TcpStream::connect(addr))
             .await

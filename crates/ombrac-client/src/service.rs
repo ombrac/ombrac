@@ -5,7 +5,7 @@ use std::time::Duration;
 use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 
-use ombrac_macros::{error, info, warn};
+use ombrac_macros::{error, info};
 use ombrac_transport::quic::Connection as QuicConnection;
 use ombrac_transport::quic::TransportConfig as QuicTransportConfig;
 use ombrac_transport::quic::client::Client as QuicClient;
@@ -207,7 +207,6 @@ impl OmbracClient {
                 error!("task failed to shut down cleanly: {:?}", _err);
             }
         }
-        warn!("service shutdown complete");
     }
 
     fn spawn_endpoint(

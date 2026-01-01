@@ -19,12 +19,7 @@ name = "ombrac_server"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [features]
-default = [
-    "tracing",
-    "datagram",
-    "binary",
-    "ffi"
-]
+default = ["tracing"]
 
 datagram = [
     "moka",
@@ -68,6 +63,7 @@ serde_json = { workspace = true }
 clap = { workspace = true, features = ["std", "derive", "color", "help", "usage", "error-context", "suggestions"] }
 tokio = { workspace = true, features = ["rt-multi-thread", "net", "macros", "signal"] }
 tokio-util = { workspace = true, features = ["codec"] }
+hickory-resolver = { workspace = true }
 moka = { workspace = true, features = ["future"], optional = true }
 tracing = { workspace = true, features = ["attributes"], optional = true }
 tracing-appender = { workspace = true, optional = true }

@@ -199,10 +199,7 @@ where
                     ConnectErrorKind::TimedOut => io::ErrorKind::TimedOut,
                     ConnectErrorKind::Other => io::ErrorKind::Other,
                 };
-                Err(io::Error::new(
-                    error_kind,
-                    format!("failed to connect to {}: {}", dest_addr, message),
-                ))
+                Err(io::Error::new(error_kind, message))
             }
         }
     }

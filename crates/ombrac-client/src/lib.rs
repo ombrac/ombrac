@@ -1,7 +1,14 @@
 pub mod client;
 pub mod config;
 pub mod connection;
+#[cfg(any(
+    feature = "endpoint-default",
+    feature = "endpoint-socks",
+    feature = "endpoint-http",
+    feature = "endpoint-tun"
+))]
 pub mod endpoint;
+#[cfg(feature = "ffi")]
 pub mod ffi;
 #[cfg(feature = "tracing")]
 pub mod logging;
