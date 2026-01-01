@@ -5,29 +5,29 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Error, Debug)]
 pub enum Error {
-    #[error("I/O error: {0}")]
+    #[error(transparent)]
     Io(#[from] io::Error),
 
-    #[error("Rustls error: {0}")]
+    #[error(transparent)]
     Rustls(#[from] rustls::Error),
 
-    #[error("Rcgen error: {0}")]
+    #[error(transparent)]
     Rcgen(#[from] rcgen::Error),
 
-    #[error("Rustls error: {0}")]
+    #[error(transparent)]
     QuinnRustls(#[from] quinn::crypto::rustls::NoInitialCipherSuite),
 
-    #[error("QUIC connect error: {0}")]
+    #[error(transparent)]
     QuinnConnect(#[from] quinn::ConnectError),
 
-    #[error("QUIC ConnectionError error: {0}")]
+    #[error(transparent)]
     QuinnConnection(#[from] quinn::ConnectionError),
 
     #[cfg(feature = "datagram")]
-    #[error("QUIC Datagram send error: {0}")]
+    #[error(transparent)]
     QuinnSendDatagram(#[from] quinn::SendDatagramError),
 
-    #[error("Rustls error: {0}")]
+    #[error(transparent)]
     QuinnVarInt(#[from] quinn::VarIntBoundsExceeded),
 
     #[error("Certificate or Key must be provided when TLS is enabled")]

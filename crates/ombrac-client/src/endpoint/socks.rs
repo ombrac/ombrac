@@ -8,7 +8,7 @@ use socks_lib::v5::server::Handler;
 use socks_lib::v5::{Address as Socks5Address, Request, Response, Stream, UdpPacket};
 use tokio::net::UdpSocket;
 
-use ombrac_macros::{debug, error, info, warn};
+use ombrac_macros::{error, info, warn};
 use ombrac_transport::quic::Connection as QuicConnection;
 use ombrac_transport::quic::client::Client as QuicClient;
 
@@ -32,28 +32,27 @@ impl CommandHandler {
         &self,
         stream: &mut Stream<impl AsyncRead + AsyncWrite + Unpin>,
         dest_stream: &mut BufferedStream<<QuicConnection as ombrac_transport::Connection>::Stream>,
+        dst_addr: String,
     ) -> io::Result<()> {
-        let src_addr = stream.local_addr();
+        let src_addr = stream.peer_addr();
         match ombrac_transport::io::copy_bidirectional(stream, dest_stream).await {
             Ok(stats) => {
-                #[cfg(feature = "tracing")]
-                tracing::info!(
-                    src_addr = src_addr.to_string(),
+                info!(
+                    src_addr = %src_addr,
+                    dst_addr = %dst_addr,
                     send = stats.a_to_b_bytes,
                     recv = stats.b_to_a_bytes,
-                    status = "ok",
-                    "Connect"
+                    "connect"
                 );
             }
             Err((err, stats)) => {
-                #[cfg(feature = "tracing")]
-                tracing::error!(
-                    src_addr = src_addr.to_string(),
+                error!(
+                    src_addr = %src_addr,
+                    dst_addr = %dst_addr,
                     send = stats.a_to_b_bytes,
                     recv = stats.b_to_a_bytes,
-                    status = "err",
                     error = %err,
-                    "Connect"
+                    "connect"
                 );
                 return Err(err);
             }
@@ -68,7 +67,7 @@ impl CommandHandler {
         &self,
         stream: &mut Stream<impl AsyncRead + AsyncWrite + Unpin + Send>,
     ) -> io::Result<()> {
-        info!("SOCKS: Handling UDP ASSOCIATE from {}", stream.peer_addr());
+        info!("handling udp associate from {}", stream.peer_addr());
 
         let udp_session = self.client.open_associate();
 
@@ -77,7 +76,7 @@ impl CommandHandler {
             stream.local_addr().ip(),
             relay_socket.local_addr().unwrap().port(),
         );
-        info!("SOCKS: UDP relay listening on {}", relay_addr);
+        info!("udp relay listening on {}", relay_addr);
 
         let response_addr = Socks5Address::from(relay_addr);
         stream
@@ -108,7 +107,7 @@ impl CommandHandler {
                 result = stream.read_u8() => {
                     match result {
                         Ok(0) | Err(_) => {
-                            info!("SOCKS: TCP control connection for UDP associate closed. Ending session.");
+                            info!("tcp control connection for udp associate closed, ending session");
                             return Ok(());
                         }
                         _ => {}
@@ -121,7 +120,7 @@ impl CommandHandler {
                         let udp_response = UdpPacket::un_frag(socks_from_addr, data);
                         relay_socket.send_to(&udp_response.to_bytes(), dest).await?;
                     } else {
-                        warn!("SOCKS: Received packet from tunnel before client, discarding.");
+                        warn!("received packet from tunnel before client, discarding");
                     }
                 }
 
@@ -129,7 +128,7 @@ impl CommandHandler {
                     let (len, src) = result?;
                     if client_udp_src.is_none() {
                         client_udp_src = Some(src);
-                        info!("SOCKS: First UDP packet received from client {}", src);
+                        info!("first udp packet received from client {}", src);
                     }
                     let mut bytes = Bytes::copy_from_slice(&buf[..len]);
                     let udp_request = UdpPacket::from_bytes(&mut bytes)?;
@@ -148,8 +147,6 @@ impl Handler for CommandHandler {
     where
         S: AsyncRead + AsyncWrite + Unpin + Send + Sync,
     {
-        debug!("SOCKS Request: {:?}", request);
-
         match request {
             Request::Connect(address) => {
                 // Try to connect first, then send appropriate response
@@ -159,7 +156,7 @@ impl Handler for CommandHandler {
                     Ok(stream) => stream,
                     Err(err) => {
                         // Connection failed - return error to let Handler trait handle the response
-                        error!("SOCKS: Connect to {} failed: {}", address, err);
+                        error!("connect to {} failed: {}", address, err);
                         return Err(err);
                     }
                 };
@@ -169,13 +166,13 @@ impl Handler for CommandHandler {
 
                 // Now handle the data forwarding
                 if let Err(err) = self
-                    .handle_connect_data_forwarding(stream, &mut dest_stream)
+                    .handle_connect_data_forwarding(stream, &mut dest_stream, address.to_string())
                     .await
                 {
                     if err.kind() != io::ErrorKind::BrokenPipe
                         && err.kind() != io::ErrorKind::ConnectionReset
                     {
-                        error!("SOCKS: Data forwarding failed for {}: {}", address, err);
+                        error!("data forwarding failed for {}: {}", address, err);
                     }
                     return Err(err);
                 }
@@ -186,17 +183,13 @@ impl Handler for CommandHandler {
                     if err.kind() != io::ErrorKind::BrokenPipe
                         && err.kind() != io::ErrorKind::ConnectionReset
                     {
-                        error!(
-                            "SOCKS: Associate from {} failed: {}",
-                            stream.peer_addr(),
-                            err
-                        );
+                        error!("associate from {} failed: {}", stream.peer_addr(), err);
                     }
                     return Err(err);
                 }
             }
             _ => {
-                warn!("SOCKS: BIND command is not supported.");
+                warn!("bind command is not supported.");
                 stream.write_response_unsupported().await?;
             }
         }

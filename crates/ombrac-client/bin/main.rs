@@ -4,7 +4,7 @@ fn main() {
     let config = match ombrac_client::config::load() {
         Ok(cfg) => cfg,
         Err(error) => {
-            eprintln!("Failed to load configuration: {}", error);
+            eprintln!("failed to load configuration: {}", error);
             std::process::exit(1);
         }
     };
@@ -19,7 +19,7 @@ fn main() {
         .unwrap();
 
     if let Err(e) = rt.block_on(run_from_cli(config)) {
-        eprintln!("A fatal error occurred during runtime: {}", e);
+        eprintln!("fatal error occurred during runtime: {}", e);
         std::process::exit(1);
     }
 }

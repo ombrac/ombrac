@@ -10,7 +10,7 @@ use hyper_util::rt::TokioIo;
 use tokio::net::TcpListener;
 
 use ombrac::protocol::Address;
-use ombrac_macros::error;
+use ombrac_macros::{error, info};
 use ombrac_transport::quic::Connection as QuicConnection;
 use ombrac_transport::quic::client::Client as QuicClient;
 
@@ -119,26 +119,22 @@ impl Server {
                     .await
                     {
                         Ok(stats) => {
-                            #[cfg(feature = "tracing")]
-                            tracing::info!(
-                                src_addr = remote_addr.to_string(),
-                                dst_addr = target_addr.to_string(),
+                            info!(
+                                src_addr = %remote_addr,
+                                dst_addr = %target_addr,
                                 send = stats.a_to_b_bytes,
                                 recv = stats.b_to_a_bytes,
-                                status = "ok",
-                                "Connect"
+                                "connect"
                             );
                         }
                         Err((err, stats)) => {
-                            #[cfg(feature = "tracing")]
-                            tracing::error!(
-                                src_addr = remote_addr.to_string(),
-                                dst_addr = target_addr.to_string(),
+                            error!(
+                                src_addr = %remote_addr,
+                                dst_addr = %target_addr,
                                 send = stats.a_to_b_bytes,
                                 recv = stats.b_to_a_bytes,
-                                status = "err",
                                 error = %err,
-                                "Connect"
+                                "connect"
                             );
                         }
                     }

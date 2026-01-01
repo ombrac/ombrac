@@ -1,3 +1,7 @@
+#[cfg(feature = "datagram")]
+mod datagram;
+mod stream;
+
 use std::future::Future;
 use std::io;
 use std::sync::Arc;
@@ -19,11 +23,10 @@ use ombrac::protocol::{
 use ombrac_macros::{error, warn};
 use ombrac_transport::{Connection, Initiator};
 
-#[cfg(feature = "datagram")]
-mod datagram;
-mod stream;
-
 pub use stream::BufferedStream;
+
+#[cfg(feature = "datagram")]
+pub use datagram::{UdpDispatcher, UdpSession};
 
 // --- Authentication & Connection ---
 /// Timeout for the initial authentication with the server [default: 10 seconds]
@@ -35,9 +38,6 @@ const INITIAL_RECONNECT_BACKOFF: Duration = Duration::from_secs(1);
 
 /// Maximum backoff duration for reconnection attempts [default: 60 seconds]
 const MAX_RECONNECT_BACKOFF: Duration = Duration::from_secs(60);
-
-#[cfg(feature = "datagram")]
-pub use datagram::{UdpDispatcher, UdpSession};
 
 struct ReconnectState {
     last_attempt: Option<Instant>,
@@ -85,7 +85,7 @@ where
                 error!(
                     error = %err,
                     error_kind = ?err.kind(),
-                    "failed to initialize connection: authentication error"
+                    "failed to initialize connection"
                 );
                 return Err(err);
             }

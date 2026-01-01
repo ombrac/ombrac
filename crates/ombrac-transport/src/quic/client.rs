@@ -84,7 +84,7 @@ impl Config {
         tls_config.alpn_protocols = self.alpn_protocols.clone();
 
         if self.skip_server_verification {
-            warn!("TLS certificate verification is DISABLED - this is not secure!");
+            warn!("tls certificate verification is DISABLED - this is not secure!");
             tls_config
                 .dangerous()
                 .set_certificate_verifier(Arc::new(cert_verifier::NullVerifier));
@@ -110,7 +110,7 @@ impl Client {
         let endpoint_config = config.build_endpoint_config()?;
 
         let runtime =
-            quinn::default_runtime().ok_or_else(|| io::Error::other("No async runtime found"))?;
+            quinn::default_runtime().ok_or_else(|| io::Error::other("no async runtime found"))?;
         let mut endpoint = quinn::Endpoint::new_with_abstract_socket(
             endpoint_config,
             None,
@@ -142,13 +142,13 @@ impl Client {
                 Ok((conn, zero_rtt_accepted)) => {
                     let is_accepted = zero_rtt_accepted.await;
                     if !is_accepted {
-                        warn!("Zero-RTT connection not accepted by server");
+                        warn!("zero-rtt connection not accepted by server");
                     }
 
                     (conn, is_accepted)
                 }
                 Err(conn) => {
-                    debug!("Zero-RTT not available, using regular connection");
+                    debug!("zero-rtt not available, using regular connection");
                     (conn.await?, false)
                 }
             }
@@ -157,8 +157,10 @@ impl Client {
         };
 
         info!(
-            "Connection established with {} at {} (0-RTT: {})",
-            &self.config.server_name, &self.config.server_addr, _is_zero_rtt_accepted
+            server = %self.config.server_name,
+            addr = %self.config.server_addr,
+            zero_rtt = if _is_zero_rtt_accepted { Some(true) } else { None },
+            "connection established"
         );
 
         Ok(connection)

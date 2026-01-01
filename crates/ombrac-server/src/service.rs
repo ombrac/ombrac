@@ -183,7 +183,7 @@ async fn quic_server_from_config(config: &ServiceConfig) -> Result<QuicServer> {
             )?);
         }
         TlsMode::Insecure => {
-            warn!("tls is running in insecure mode, self-signed certificates will be generated");
+            warn!("tls is in insecure mode; generating self-signed certificates for local/dev use");
             quic_config.enable_self_signed = true;
         }
     }

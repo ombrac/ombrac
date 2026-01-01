@@ -7,7 +7,7 @@ use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::Weak;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use futures::{SinkExt, StreamExt};
 use tokio::sync::OwnedSemaphorePermit;
@@ -20,7 +20,7 @@ use tracing::Instrument;
 
 use ombrac::codec;
 use ombrac::protocol;
-use ombrac_macros::{debug, error, info, warn};
+use ombrac_macros::{debug, error, warn};
 use ombrac_transport::{Acceptor, Connection};
 
 use crate::config::ConnectionConfig;
@@ -51,12 +51,7 @@ impl<C: Connection> ClientConnectionProcessor<C> {
         A: Authenticator<C>,
     {
         let (auth_context, connection) =
-            Self::perform_authentication(connection, authenticator, &config)
-                .await
-                .map_err(|e| {
-                    error!("authentication failed: {}", e);
-                    e
-                })?;
+            Self::perform_authentication(connection, authenticator, &config).await?;
 
         let transport_connection = Arc::new(connection);
 
@@ -171,54 +166,40 @@ impl<C: Connection> ClientConnectionProcessor<C> {
             Self::handle_auth_failure(control_frame).await;
             return Err(io::Error::new(
                 io::ErrorKind::PermissionDenied,
-                "authentication failed: incompatible version",
+                "incompatible version",
             ));
         }
 
         // Perform authentication with timeout
-        let auth_result = tokio::time::timeout(timeout, authenticator.verify(hello))
-            .await
-            .unwrap_or(Err(ConnectionAuthError::ServerError));
+        let auth_context = tokio::time::timeout(timeout, authenticator.verify(hello)).await??;
 
-        match auth_result {
-            Ok(auth_context) => {
-                // Send success response
-                Self::send_auth_response(control_frame, timeout, protocol::ServerAuthResponse::Ok)
-                    .await?;
-                Ok(auth_context)
-            }
-            Err(_) => {
-                // Authentication failed - disconnect without sending error response
-                // to prevent information leakage
-                Self::handle_auth_failure(control_frame).await;
-                Err(io::Error::new(
-                    io::ErrorKind::PermissionDenied,
-                    "authentication failed",
-                ))
-            }
-        }
+        Self::send_auth_ok_response(control_frame, timeout).await?;
+
+        Ok(auth_context)
     }
 
     /// Sends authentication response with timeout.
-    async fn send_auth_response(
+    async fn send_auth_ok_response(
         control_frame: &mut Framed<&mut <C as Connection>::Stream, codec::LengthDelimitedCodec>,
         timeout: Duration,
-        response: protocol::ServerAuthResponse,
     ) -> io::Result<()>
     where
         C: Connection,
     {
-        tokio::time::timeout(timeout, control_frame.send(protocol::encode(&response)?))
-            .await
-            .map_err(|_| {
-                io::Error::new(
-                    io::ErrorKind::TimedOut,
-                    format!(
-                        "authentication timeout: failed to send response within {:?}",
-                        timeout
-                    ),
-                )
-            })??;
+        tokio::time::timeout(
+            timeout,
+            control_frame.send(protocol::encode(&protocol::ServerAuthResponse::Ok)?),
+        )
+        .await
+        .map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::TimedOut,
+                format!(
+                    "authentication timeout: failed to send response within {:?}",
+                    timeout
+                ),
+            )
+        })??;
         Ok(())
     }
 
@@ -308,12 +289,18 @@ impl<C: Connection> ClientConnectionProcessor<C> {
 
     #[cfg(feature = "tracing")]
     fn trace_auth(hello: &protocol::ClientHello) {
-        let secret_hex = hello
-            .secret
-            .iter()
-            .map(|b| format!("{:02x}", b))
-            .collect::<String>();
-        tracing::Span::current().record("secret", &secret_hex);
+        use std::io::Write;
+
+        let mut buf = [0u8; 6];
+        let mut cursor = std::io::Cursor::new(&mut buf[..]);
+
+        for byte in hello.secret.iter().take(3) {
+            let _ = write!(cursor, "{:02x}", byte);
+        }
+
+        if let Ok(hex_str) = std::str::from_utf8(&buf) {
+            tracing::Span::current().record("secret", hex_str);
+        }
     }
 }
 
@@ -444,7 +431,8 @@ impl<T: Acceptor, A: Authenticator<T::Connection> + 'static> ConnectionAcceptor<
             fields(
                 id = connection.id(),
                 from = tracing::field::Empty,
-                secret = tracing::field::Empty
+                secret = tracing::field::Empty,
+                reason = tracing::field::Empty
             )
         )
     )]
@@ -454,27 +442,24 @@ impl<T: Acceptor, A: Authenticator<T::Connection> + 'static> ConnectionAcceptor<
         config: Arc<ConnectionConfig>,
     ) {
         #[cfg(feature = "tracing")]
-        let created_at = Instant::now();
-
         if let Ok(addr) = connection.remote_address() {
-            #[cfg(feature = "tracing")]
             tracing::Span::current().record("from", tracing::field::display(addr));
         }
 
-        let result =
+        let _result =
             ClientConnectionProcessor::handle(connection, authenticator.as_ref(), config).await;
 
-        let reason: std::borrow::Cow<'static, str> = match result {
-            Ok(_) => "ok".into(),
-            Err(e) => format!("{e}").into(),
-        };
-
         #[cfg(feature = "tracing")]
-        info!(
-            duration = created_at.elapsed().as_millis(),
-            reason = %reason.as_ref(),
-            "connection closed"
-        );
+        match _result {
+            Ok(_) => {
+                tracing::Span::current().record("reason", "ok");
+                tracing::info!("connection closed");
+            }
+            Err(e) => {
+                tracing::Span::current().record("reason", tracing::field::display(&e));
+                tracing::error!(error = %e, "connection closed with error");
+            }
+        }
     }
 
     pub fn local_addr(&self) -> io::Result<SocketAddr> {
@@ -507,6 +492,25 @@ pub enum ConnectionAuthError {
     ServerError,
     /// Other error
     Other(String),
+}
+
+impl From<ConnectionAuthError> for io::Error {
+    fn from(value: ConnectionAuthError) -> Self {
+        match value {
+            ConnectionAuthError::IncompatibleVersion => {
+                io::Error::new(io::ErrorKind::Unsupported, "incompatible protocol version")
+            }
+            ConnectionAuthError::InvalidSecret => io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "invalid authentication secret",
+            ),
+            ConnectionAuthError::ServerError => io::Error::new(
+                io::ErrorKind::ConnectionAborted,
+                "internal server error during auth",
+            ),
+            ConnectionAuthError::Other(msg) => io::Error::new(io::ErrorKind::Other, msg),
+        }
+    }
 }
 
 /// Authenticator trait for verifying and accepting client connections.
