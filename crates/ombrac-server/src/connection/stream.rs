@@ -145,7 +145,8 @@ impl<C: Connection> StreamTunnel<C> {
 
         tokio::time::timeout(UPSTREAM_CONNECT_TIMEOUT, TcpStream::connect(addr))
             .await
-            .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "connection timeout"))?}
+            .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "connection timeout"))?
+    }
 
     /// Sends the connection response to the client.
     ///

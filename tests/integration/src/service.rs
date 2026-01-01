@@ -118,8 +118,8 @@ mod tests {
 
         if let Err(err) = client_result {
             match err.kind() {
-                io::ErrorKind::PermissionDenied => {},
-                io::ErrorKind::ConnectionReset | io::ErrorKind::UnexpectedEof => {},
+                io::ErrorKind::PermissionDenied => {}
+                io::ErrorKind::ConnectionReset | io::ErrorKind::UnexpectedEof => {}
                 _ => panic!("Unexpected error kind: {:?}", err.kind()),
             }
         }

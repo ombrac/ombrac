@@ -84,9 +84,7 @@ impl<C: Connection> ClientConnectionProcessor<C> {
 
         // Accept control stream
         let mut control_stream = connection.accept_bidirectional().await.map_err(|e| {
-            io::Error::other(
-                format!("failed to accept bidirectional stream: {}", e),
-            )
+            io::Error::other(format!("failed to accept bidirectional stream: {}", e))
         })?;
         let mut control_frame = Framed::new(&mut control_stream, codec::length_codec());
 
@@ -555,7 +553,5 @@ impl<T: Send + Sync> Authenticator<T> for ombrac::protocol::Secret {
         }
     }
 
-    async fn accept(&self, _auth_context: Self::AuthContext, _connection: ConnectionHandle<T>) {
-        
-    }
+    async fn accept(&self, _auth_context: Self::AuthContext, _connection: ConnectionHandle<T>) {}
 }

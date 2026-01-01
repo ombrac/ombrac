@@ -166,12 +166,10 @@ where
         // Verify write buffer is empty (send() should have flushed, but verify for safety)
         if !parts.write_buf.is_empty() {
             // This indicates send() didn't complete properly - this is a serious error
-            return Err(io::Error::other(
-                format!(
-                    "write buffer not empty after send: {} bytes remaining - data may be lost",
-                    parts.write_buf.len()
-                ),
-            ));
+            return Err(io::Error::other(format!(
+                "write buffer not empty after send: {} bytes remaining - data may be lost",
+                parts.write_buf.len()
+            )));
         }
 
         // Extract any remaining buffered read data
