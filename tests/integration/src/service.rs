@@ -40,7 +40,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[cfg(feature = "datagram")]
+    #[ntest::timeout(30000)]
     async fn test_udp_proxy_unfragmented() -> io::Result<()> {
         let (client, _shutdown_tx, _) = setup_test_env().await;
 
@@ -66,7 +66,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[cfg(feature = "datagram")]
+    #[ntest::timeout(30000)]
     async fn test_udp_proxy_fragmented() -> io::Result<()> {
         let (client, _shutdown_tx, _) = setup_test_env().await;
 
@@ -99,6 +99,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ntest::timeout(30000)]
     async fn test_handshake_with_invalid_secret() {
         let (initiator, acceptor) = mock_transport_pair();
         let server_secret = random_secret();
@@ -126,6 +127,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ntest::timeout(30000)]
     async fn test_handshake_with_valid_secret() {
         let (initiator, acceptor) = mock_transport_pair();
         let secret = random_secret();

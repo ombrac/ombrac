@@ -10,32 +10,20 @@ description.workspace = true
 keywords.workspace = true
 readme = "../../README.md"
 
-[features]
-datagram = [
-    "ombrac-client/datagram",
-    "ombrac-transport/datagram"
-]
-
-# Full feature: includes all features for comprehensive testing
-full = [
-    "ombrac-client/full",
-    "ombrac-server/full",
-    "datagram"
-]
-
 [dev-dependencies]
 tests-support = { path = "../support" }
 
 ombrac = { workspace = true }
-ombrac-client = { workspace = true }
-ombrac-server = { workspace = true }
+ombrac-client = { workspace = true, features = ["full"] }
+ombrac-server = { workspace = true, features = ["full"] }
 ombrac-transport = { workspace = true }
 
-rand = { workspace = true, features = ["thread_rng"] }
 bytes = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 curl = { workspace = true }
 ntest = { workspace = true }
+rand = { workspace = true, features = ["thread_rng"] }
+blake3 = { workspace = true }
 
 [lints]
 workspace = true

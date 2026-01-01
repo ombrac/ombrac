@@ -182,6 +182,10 @@ impl OmbracClient {
         self.client.rebind().await
     }
 
+    pub fn client(&self) -> &Arc<Client<QuicClient, QuicConnection>> {
+        &self.client
+    }
+
     /// Gracefully shuts down the client.
     ///
     /// This method will:

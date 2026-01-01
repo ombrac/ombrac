@@ -42,6 +42,7 @@ mod tests {
 
     /// Test that client waits for server connection response before returning stream
     #[tokio::test]
+    #[ntest::timeout(30000)]
     async fn test_client_waits_for_connection_response() {
         let (client, _shutdown_tx, _) = setup_test_env().await;
 
@@ -82,6 +83,7 @@ mod tests {
     /// With mock transport, the server's TCP connection attempt will fail for unreachable addresses,
     /// and this error should be propagated back to the client.
     #[tokio::test]
+    #[ntest::timeout(30000)]
     async fn test_connection_error_propagation() {
         let (client, _shutdown_tx, _) = setup_test_env().await;
 
@@ -120,6 +122,7 @@ mod tests {
 
     /// Test successful connection flow
     #[tokio::test]
+    #[ntest::timeout(30000)]
     async fn test_successful_connection_flow() {
         let (client, _shutdown_tx, _) = setup_test_env().await;
 
@@ -158,6 +161,7 @@ mod tests {
 
     /// Test that connection response is received before data exchange
     #[tokio::test]
+    #[ntest::timeout(30000)]
     async fn test_connection_response_before_data() {
         let (client, _shutdown_tx, _) = setup_test_env().await;
 

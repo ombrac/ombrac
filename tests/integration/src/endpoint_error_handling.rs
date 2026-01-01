@@ -45,6 +45,7 @@ mod tests {
     /// This test verifies that HTTP endpoint properly handles connection errors
     /// by returning appropriate HTTP error responses to the client.
     #[tokio::test]
+    #[ntest::timeout(30000)]
     async fn test_http_endpoint_connection_error() {
         let (client, _shutdown_tx, _) = setup_test_env().await;
 
@@ -85,6 +86,7 @@ mod tests {
     /// This test verifies that SOCKS endpoint properly handles connection errors
     /// by propagating them back to the SOCKS client.
     #[tokio::test]
+    #[ntest::timeout(30000)]
     async fn test_socks_endpoint_connection_error() {
         let (client, _shutdown_tx, _) = setup_test_env().await;
 
@@ -102,6 +104,7 @@ mod tests {
 
     /// Test TUN endpoint error handling
     #[tokio::test]
+    #[ntest::timeout(30000)]
     async fn test_tun_endpoint_connection_error() {
         let (client, _shutdown_tx, _) = setup_test_env().await;
 
@@ -144,6 +147,7 @@ mod tests {
     /// This test verifies that the error propagation mechanism works correctly.
     /// The server attempts real TCP connections, and failures are propagated back.
     #[tokio::test]
+    #[ntest::timeout(30000)]
     async fn test_endpoint_propagates_errors() {
         let (client, _shutdown_tx, _) = setup_test_env().await;
 

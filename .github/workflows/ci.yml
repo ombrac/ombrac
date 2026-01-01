@@ -81,7 +81,7 @@ jobs:
             gcc-x86-64-linux-gnu \
             gcc-aarch64-linux-gnu
 
-      - name: Build (all configurations)
+      - name: Build
         run: |
           cargo build --verbose --target ${{ matrix.target }}
           cargo build --verbose --all-features --target ${{ matrix.target }}
@@ -90,7 +90,7 @@ jobs:
           cargo build --release --verbose --all-features --target ${{ matrix.target }}
           cargo build --release --verbose --no-default-features --target ${{ matrix.target }}
 
-      - name: Build Binaries (Release)
+      - name: Build Binaries
         run: |
           cargo build --release --verbose --bin ombrac-client --features binary --target ${{ matrix.target }}
           cargo build --release --verbose --bin ombrac-server --features binary --target ${{ matrix.target }}
@@ -103,7 +103,7 @@ jobs:
             target/${{ matrix.target }}/release/ombrac-client${{ matrix.file-ext }}
             target/${{ matrix.target }}/release/ombrac-server${{ matrix.file-ext }}
 
-      - name: Test (full feature)
+      - name: Test
         if: |
           matrix.target == 'x86_64-apple-darwin' ||
           matrix.target == 'x86_64-pc-windows-msvc' ||
@@ -111,20 +111,8 @@ jobs:
           matrix.target == 'aarch64-apple-darwin' ||
           matrix.target == 'aarch64-unknown-linux-gnu'
         run: |
-          cargo test --verbose --features full --target ${{ matrix.target }}
-          cargo test --release --verbose --features full --target ${{ matrix.target }}
-
-      - name: Test Integration (full feature)
-        if: |
-          matrix.target == 'x86_64-apple-darwin' ||
-          matrix.target == 'x86_64-pc-windows-msvc' ||
-          matrix.target == 'x86_64-unknown-linux-gnu'
-        run: |
-          cargo test --verbose \
-            --package tests-integration \
-            --features full \
-            --target ${{ matrix.target }}
-
+          cargo test --verbose --target ${{ matrix.target }}
+          cargo test --release --verbose --target ${{ matrix.target }}
 
   build-ios:
     runs-on: macos-latest

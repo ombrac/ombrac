@@ -64,7 +64,9 @@ impl Connection for MockConnection {
     }
 
     fn max_datagram_size(&self) -> Option<usize> {
-        Some(100)
+        // Use a reasonable MTU size that allows for fragmentation testing
+        // This should be larger than the fragmented_overhead() (~277 bytes)
+        Some(1500)
     }
 
     fn open_bidirectional(&self) -> impl Future<Output = io::Result<Self::Stream>> + Send {
