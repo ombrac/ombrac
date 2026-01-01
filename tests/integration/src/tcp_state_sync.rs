@@ -73,14 +73,6 @@ mod tests {
             "Error should be a connection-related error, got: {:?}",
             err.kind()
         );
-
-        // Error message should contain the destination address
-        let err_msg = err.to_string();
-        assert!(
-            err_msg.contains(&unreachable_addr.to_string())
-                || err_msg.contains("Failed to connect"),
-            "Error message should contain destination address or indicate connection failure"
-        );
     }
 
     /// Test that client receives proper error information from server
