@@ -19,8 +19,8 @@ edition = "2024"
 license = "Apache-2.0"
 authors = ["Contributors"]
 repository = "https://github.com/ombrac/ombrac"
-description = "Safe, fast, small TCP tunnel using Rust"
-keywords = ["proxy", "firewall"]
+description = "Safe, fast, small TCP over QUIC tunnel using Rust"
+keywords = ["proxy", "firewall", "tcp", "quic"]
 
 [workspace.dependencies]
 # ombrac
