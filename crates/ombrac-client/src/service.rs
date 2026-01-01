@@ -32,6 +32,12 @@ pub enum Error {
     Endpoint(String),
 }
 
+#[cfg(any(
+    feature = "endpoint-default",
+    feature = "endpoint-socks",
+    feature = "endpoint-http",
+    feature = "endpoint-tun"
+))]
 macro_rules! require_config {
     ($config_opt:expr, $field_name:expr) => {
         $config_opt.ok_or_else(|| {
@@ -97,6 +103,9 @@ impl OmbracClient {
     pub async fn build(config: Arc<ServiceConfig>) -> Result<Self> {
         // Build QUIC client from config
         let transport = quic_client_from_config(&config).await?;
+
+        info!("binding udp socket to {}", transport.local_addr()?);
+
         let secret = *blake3::hash(config.secret.as_bytes()).as_bytes();
         let client = Arc::new(
             Client::new(
@@ -105,16 +114,16 @@ impl OmbracClient {
                 config.auth_option.clone().map(Into::into),
             )
             .await
-            .map_err(|e| Error::Io(e))?,
+            .map_err(Error::Io)?,
         );
 
-        let mut handles = Vec::new();
+        let mut _handles = Vec::new();
         let (shutdown_tx, _) = broadcast::channel(1);
 
         // Start HTTP endpoint if configured
         #[cfg(feature = "endpoint-http")]
         if config.endpoint.http.is_some() {
-            handles.push(Self::spawn_endpoint(
+            _handles.push(Self::spawn_endpoint(
                 "HTTP",
                 Self::endpoint_http_accept_loop(
                     config.clone(),
@@ -127,7 +136,7 @@ impl OmbracClient {
         // Start SOCKS endpoint if configured
         #[cfg(feature = "endpoint-socks")]
         if config.endpoint.socks.is_some() {
-            handles.push(Self::spawn_endpoint(
+            _handles.push(Self::spawn_endpoint(
                 "SOCKS",
                 Self::endpoint_socks_accept_loop(
                     config.clone(),
@@ -144,7 +153,7 @@ impl OmbracClient {
                 || tun_config.tun_ipv6.is_some()
                 || tun_config.tun_fd.is_some())
         {
-            handles.push(Self::spawn_endpoint(
+            _handles.push(Self::spawn_endpoint(
                 "TUN",
                 Self::endpoint_tun_accept_loop(
                     config.clone(),
@@ -154,7 +163,7 @@ impl OmbracClient {
             ));
         }
 
-        if handles.is_empty() {
+        if _handles.is_empty() {
             return Err(Error::Config(
                 "no endpoints were configured or enabled, the service has nothing to do."
                     .to_string(),
@@ -163,7 +172,7 @@ impl OmbracClient {
 
         Ok(OmbracClient {
             client,
-            handles,
+            handles: _handles,
             shutdown_tx,
         })
     }
@@ -209,6 +218,12 @@ impl OmbracClient {
         }
     }
 
+    #[cfg(any(
+        feature = "endpoint-default",
+        feature = "endpoint-socks",
+        feature = "endpoint-http",
+        feature = "endpoint-tun"
+    ))]
     fn spawn_endpoint(
         _name: &'static str,
         task: impl std::future::Future<Output = Result<()>> + Send + 'static,

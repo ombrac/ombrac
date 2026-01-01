@@ -11,11 +11,13 @@ static DNS_RESOLVER: OnceCell<TokioResolver> = OnceCell::const_new();
 ///
 /// The resolver is created from system configuration on first use.
 pub(crate) async fn get_dns_resolver() -> &'static TokioResolver {
-    DNS_RESOLVER.get_or_init(|| async {
-        TokioResolver::builder_tokio()
-            .expect("failed to create dns resolver from system config")
-            .build()
-    }).await
+    DNS_RESOLVER
+        .get_or_init(|| async {
+            TokioResolver::builder_tokio()
+                .expect("failed to create dns resolver from system config")
+                .build()
+        })
+        .await
 }
 
 /// Resolves a domain name to a socket address using hickory-resolver.
@@ -60,4 +62,3 @@ pub(crate) async fn resolve_domain(domain: &[u8], port: u16) -> io::Result<Socke
             )
         })
 }
-

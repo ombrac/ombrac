@@ -66,6 +66,7 @@ endpoint-tun = [
     "tun-rs",
     "moka",
     "twox-hash",
+    "hickory-proto",
     "ombrac-netstack"
 ]
 
@@ -100,6 +101,7 @@ http-body-util = { workspace = true, optional = true }
 ipnet = { workspace = true, features = ["json"], optional = true }
 tun-rs = { workspace = true, features = ["async_tokio", "async_framed"], optional = true }
 dashmap = { workspace = true, optional = true }
+hickory-proto = { workspace = true, optional = true }
 twox-hash = { workspace = true, features = ["xxhash64"], optional = true }
 
 [dev-dependencies]

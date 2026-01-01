@@ -60,7 +60,8 @@ rand = { version = "0.9", default-features = false }
 tun-rs = { version = "2.7", default-features = false }
 twox-hash = { version = "2", default-features = false }
 ipnet = { version = "2.11", default-features = false }
-hickory-resolver = { version = "0.25", features = ["tokio", "system-config"] }
+hickory-proto = { version = "0.25", default-features = false }
+hickory-resolver = { version = "0.25", features = ["tokio", "system-config"], default-features = false }
 
 # binary
 clap = { version = "4", default-features = false }

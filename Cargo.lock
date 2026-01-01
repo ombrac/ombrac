@@ -1798,6 +1798,7 @@ dependencies = [
  "clap",
  "dashmap",
  "futures",
+ "hickory-proto",
  "http",
  "http-body-util",
  "hyper",

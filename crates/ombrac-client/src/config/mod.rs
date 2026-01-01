@@ -295,14 +295,14 @@ impl ConfigBuilder {
         })
     }
 
-    fn merge_endpoint(base: EndpointConfig, override_config: EndpointConfig) -> EndpointConfig {
+    fn merge_endpoint(_base: EndpointConfig, _override_config: EndpointConfig) -> EndpointConfig {
         EndpointConfig {
             #[cfg(feature = "endpoint-http")]
-            http: override_config.http.or(base.http),
+            http: _override_config.http.or(_base.http),
             #[cfg(feature = "endpoint-socks")]
-            socks: override_config.socks.or(base.socks),
+            socks: _override_config.socks.or(_base.socks),
             #[cfg(feature = "endpoint-tun")]
-            tun: override_config.tun.or(base.tun),
+            tun: _override_config.tun.or(_base.tun),
         }
     }
 

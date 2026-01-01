@@ -209,5 +209,5 @@ async fn quic_server_from_config(config: &ServiceConfig) -> Result<QuicServer> {
 
     QuicServer::new(socket, quic_config)
         .await
-        .map_err(|e| Error::Quic(e))
+        .map_err(Error::Quic)
 }

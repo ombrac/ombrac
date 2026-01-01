@@ -166,8 +166,7 @@ where
         // Verify write buffer is empty (send() should have flushed, but verify for safety)
         if !parts.write_buf.is_empty() {
             // This indicates send() didn't complete properly - this is a serious error
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
+            return Err(io::Error::other(
                 format!(
                     "write buffer not empty after send: {} bytes remaining - data may be lost",
                     parts.write_buf.len()
@@ -283,7 +282,7 @@ where
                 let backoff_secs = state.backoff.as_secs();
                 drop(state);
                 tokio::time::sleep(wait_time).await;
-                let err = io::Error::new(io::ErrorKind::Other, "reconnect throttled");
+                let err = io::Error::other("reconnect throttled");
                 log_reconnect_error(ErrorContext::new("reconnect"), &err, Some(backoff_secs));
                 return Err(err);
             }

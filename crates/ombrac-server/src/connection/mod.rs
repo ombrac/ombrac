@@ -84,8 +84,7 @@ impl<C: Connection> ClientConnectionProcessor<C> {
 
         // Accept control stream
         let mut control_stream = connection.accept_bidirectional().await.map_err(|e| {
-            io::Error::new(
-                io::ErrorKind::Other,
+            io::Error::other(
                 format!("failed to accept bidirectional stream: {}", e),
             )
         })?;
@@ -509,7 +508,7 @@ impl From<ConnectionAuthError> for io::Error {
                 io::ErrorKind::ConnectionAborted,
                 "internal server error during auth",
             ),
-            ConnectionAuthError::Other(msg) => io::Error::new(io::ErrorKind::Other, msg),
+            ConnectionAuthError::Other(msg) => io::Error::other(msg),
         }
     }
 }
@@ -557,6 +556,6 @@ impl<T: Send + Sync> Authenticator<T> for ombrac::protocol::Secret {
     }
 
     async fn accept(&self, _auth_context: Self::AuthContext, _connection: ConnectionHandle<T>) {
-        ()
+        
     }
 }

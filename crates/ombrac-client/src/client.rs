@@ -8,7 +8,6 @@ use bytes::Bytes;
 use tokio_util::sync::CancellationToken;
 
 use ombrac::protocol::{Address, Secret};
-use ombrac_macros::info;
 use ombrac_transport::{Connection, Initiator};
 
 use crate::connection::BufferedStream;
@@ -88,6 +87,8 @@ where
     /// for sending and receiving UDP datagrams over the existing connection.
     #[cfg(feature = "datagram")]
     pub fn open_associate(&self) -> UdpSession<T, C> {
+        use ombrac_macros::info;
+
         let session_id = self
             .session_id_counter
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
