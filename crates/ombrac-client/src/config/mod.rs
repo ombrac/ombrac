@@ -122,49 +122,25 @@ impl Default for LoggingConfig {
 
 #[cfg(feature = "endpoint-tun")]
 #[derive(Deserialize, Serialize, Debug, Clone)]
-#[cfg_attr(
-    all(feature = "binary", feature = "endpoint-tun"),
-    derive(clap::Parser)
-)]
 pub struct TunConfig {
     /// Use a pre-existing TUN device by providing its file descriptor.  
     /// `tun_ipv4`, `tun_ipv6`, and `tun_mtu` will be ignored.
-    #[cfg_attr(
-        feature = "binary",
-        clap(long, help_heading = "Endpoint", value_name = "FD")
-    )]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tun_fd: Option<i32>,
 
     /// The IPv4 address and subnet for the TUN device, in CIDR notation (e.g., 198.19.0.1/24).
-    #[cfg_attr(
-        feature = "binary",
-        clap(long, help_heading = "Endpoint", value_name = "CIDR")
-    )]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tun_ipv4: Option<String>,
 
     /// The IPv6 address and subnet for the TUN device, in CIDR notation (e.g., fd00::1/64).
-    #[cfg_attr(
-        feature = "binary",
-        clap(long, help_heading = "Endpoint", value_name = "CIDR")
-    )]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tun_ipv6: Option<String>,
 
     /// The Maximum Transmission Unit (MTU) for the TUN device. [default: 1500]
-    #[cfg_attr(
-        feature = "binary",
-        clap(long, help_heading = "Endpoint", value_name = "U16")
-    )]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tun_mtu: Option<u16>,
 
     /// The IPv4 address pool for the built-in fake DNS server, in CIDR notation. [default: 198.18.0.0/16]
-    #[cfg_attr(
-        feature = "binary",
-        clap(long, help_heading = "Endpoint", value_name = "CIDR")
-    )]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fake_dns: Option<String>,
 }
@@ -302,7 +278,23 @@ impl ConfigBuilder {
             #[cfg(feature = "endpoint-socks")]
             socks: _override_config.socks.or(_base.socks),
             #[cfg(feature = "endpoint-tun")]
-            tun: _override_config.tun.or(_base.tun),
+            tun: Self::merge_tun(_base.tun, _override_config.tun),
+        }
+    }
+
+    #[cfg(feature = "endpoint-tun")]
+    fn merge_tun(base: Option<TunConfig>, override_config: Option<TunConfig>) -> Option<TunConfig> {
+        match (base, override_config) {
+            (None, None) => None,
+            (Some(base), None) => Some(base),
+            (None, Some(override_config)) => Some(override_config),
+            (Some(base), Some(override_config)) => Some(TunConfig {
+                tun_fd: override_config.tun_fd.or(base.tun_fd),
+                tun_ipv4: override_config.tun_ipv4.or(base.tun_ipv4),
+                tun_ipv6: override_config.tun_ipv6.or(base.tun_ipv6),
+                tun_mtu: override_config.tun_mtu.or(base.tun_mtu),
+                fake_dns: override_config.fake_dns.or(base.fake_dns),
+            }),
         }
     }
 

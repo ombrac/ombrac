@@ -7,8 +7,6 @@ use clap::builder::styling::{AnsiColor, Style};
 
 use ombrac_transport::quic::Congestion;
 
-#[cfg(feature = "endpoint-tun")]
-use crate::config::TunConfig;
 use crate::config::{EndpointConfig, TlsMode, TransportConfig};
 
 /// Command-line arguments for the ombrac client
@@ -74,7 +72,7 @@ pub struct CliEndpointConfig {
 
     #[cfg(feature = "endpoint-tun")]
     #[clap(flatten)]
-    pub tun: Option<TunConfig>,
+    pub tun: Option<CliTunConfig>,
 }
 
 impl CliEndpointConfig {
@@ -86,7 +84,47 @@ impl CliEndpointConfig {
             #[cfg(feature = "endpoint-socks")]
             socks: self.socks,
             #[cfg(feature = "endpoint-tun")]
-            tun: self.tun,
+            tun: self.tun.map(|t| t.into_tun_config()),
+        }
+    }
+}
+
+/// CLI-specific TUN configuration
+#[cfg(feature = "endpoint-tun")]
+#[derive(Parser, Debug, Clone, Default)]
+pub struct CliTunConfig {
+    /// Use a pre-existing TUN device by providing its file descriptor.  
+    /// `tun_ipv4`, `tun_ipv6`, and `tun_mtu` will be ignored.
+    #[clap(long, help_heading = "Endpoint", value_name = "FD")]
+    pub tun_fd: Option<i32>,
+
+    /// The IPv4 address and subnet for the TUN device, in CIDR notation (e.g., 198.19.0.1/24).
+    #[clap(long, help_heading = "Endpoint", value_name = "CIDR")]
+    pub tun_ipv4: Option<String>,
+
+    /// The IPv6 address and subnet for the TUN device, in CIDR notation (e.g., fd00::1/64).
+    #[clap(long, help_heading = "Endpoint", value_name = "CIDR")]
+    pub tun_ipv6: Option<String>,
+
+    /// The Maximum Transmission Unit (MTU) for the TUN device. [default: 1500]
+    #[clap(long, help_heading = "Endpoint", value_name = "MTU")]
+    pub tun_mtu: Option<u16>,
+
+    /// The IPv4 address pool for the built-in fake DNS server, in CIDR notation. [default: 198.18.0.0/16]
+    #[clap(long, help_heading = "Endpoint", value_name = "CIDR")]
+    pub fake_dns: Option<String>,
+}
+
+#[cfg(feature = "endpoint-tun")]
+impl CliTunConfig {
+    /// Convert CLI TUN config to internal TunConfig
+    pub fn into_tun_config(self) -> crate::config::TunConfig {
+        crate::config::TunConfig {
+            tun_fd: self.tun_fd,
+            tun_ipv4: self.tun_ipv4,
+            tun_ipv6: self.tun_ipv6,
+            tun_mtu: self.tun_mtu,
+            fake_dns: self.fake_dns,
         }
     }
 }
