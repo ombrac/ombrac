@@ -7,8 +7,9 @@
 
 /**
  * A type alias for the C-style callback function pointer.
+ * Changed to pass (buf, len) instead of a null-terminated string for better performance.
  */
-typedef void (*LogCallback)(const char *message);
+typedef void (*LogCallback)(const char *buf, uintptr_t len);
 
 /**
  * Initializes the logging system to use a C-style callback for log messages.

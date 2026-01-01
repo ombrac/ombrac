@@ -1,41 +1,43 @@
 use std::io;
-use std::marker::PhantomData;
 use std::sync::Arc;
 use std::time::Duration;
 
 use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 
-use ombrac_macros::{error, info, warn};
-#[cfg(feature = "transport-quic")]
-use ombrac_transport::quic::{
-    Connection as QuicConnection, TransportConfig as QuicTransportConfig,
-    client::{Client as QuicClient, Config as QuicConfig},
-};
-use ombrac_transport::{Connection, Initiator};
+use ombrac_macros::{error, info};
+use ombrac_transport::quic::Connection as QuicConnection;
+use ombrac_transport::quic::TransportConfig as QuicTransportConfig;
+use ombrac_transport::quic::client::Client as QuicClient;
+use ombrac_transport::quic::client::Config as QuicConfig;
+use ombrac_transport::quic::error::Error as QuicError;
 
 use crate::client::Client;
-use crate::config::ServiceConfig;
-#[cfg(feature = "transport-quic")]
-use crate::config::TlsMode;
+use crate::config::{ServiceConfig, TlsMode};
 
 pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
-    #[error("Configuration error: {0}")]
-    Config(String),
-
-    #[error("{0}")]
+    #[error(transparent)]
     Io(#[from] io::Error),
 
-    #[error("Transport layer error: {0}")]
-    Transport(String),
+    #[error("{0}")]
+    Config(String),
 
-    #[error("Endpoint failed: {0}")]
+    #[error(transparent)]
+    Quic(#[from] QuicError),
+
+    #[error("{0}")]
     Endpoint(String),
 }
 
+#[cfg(any(
+    feature = "endpoint-default",
+    feature = "endpoint-socks",
+    feature = "endpoint-http",
+    feature = "endpoint-tun"
+))]
 macro_rules! require_config {
     ($config_opt:expr, $field_name:expr) => {
         $config_opt.ok_or_else(|| {
@@ -47,69 +49,81 @@ macro_rules! require_config {
     };
 }
 
-pub trait ServiceBuilder {
-    type Initiator: Initiator<Connection = Self::Connection>;
-    type Connection: Connection;
-
-    fn build(
-        config: &Arc<ServiceConfig>,
-    ) -> impl Future<Output = Result<Arc<Client<Self::Initiator, Self::Connection>>>> + Send;
+/// OmbracClient provides a simple, easy-to-use API for starting and managing
+/// the ombrac client using QUIC transport.
+///
+/// This struct hides all transport-specific implementation details and provides
+/// a clean interface for external users.
+///
+/// # Example
+///
+/// ```no_run
+/// use ombrac_client::{OmbracClient, ServiceConfig};
+/// use std::sync::Arc;
+///
+/// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+/// let config = Arc::new(ServiceConfig {
+///     secret: "my-secret".to_string(),
+///     server: "server.example.com:8080".to_string(),
+///     auth_option: None,
+///     endpoint: Default::default(),
+///     transport: Default::default(),
+///     logging: Default::default(),
+/// });
+///
+/// let client = OmbracClient::build(config).await?;
+/// // ... use client ...
+/// client.shutdown().await;
+/// # Ok(())
+/// # }
+/// ```
+pub struct OmbracClient {
+    client: Arc<Client<QuicClient, QuicConnection>>,
+    handles: Vec<JoinHandle<()>>,
+    shutdown_tx: broadcast::Sender<()>,
 }
 
-#[cfg(feature = "transport-quic")]
-pub struct QuicServiceBuilder;
+impl OmbracClient {
+    /// Builds a new client instance from the configuration.
+    ///
+    /// This method:
+    /// 1. Creates a QUIC client from the transport configuration
+    /// 2. Establishes connection with authentication
+    /// 3. Spawns endpoint tasks if configured
+    /// 4. Returns an OmbracClient handle for lifecycle management
+    ///
+    /// # Arguments
+    ///
+    /// * `config` - The service configuration containing transport, endpoint, and secret settings
+    ///
+    /// # Returns
+    ///
+    /// A configured `OmbracClient` instance ready to use, or an error
+    /// if configuration is invalid or client setup fails.
+    pub async fn build(config: Arc<ServiceConfig>) -> Result<Self> {
+        // Build QUIC client from config
+        let transport = quic_client_from_config(&config).await?;
 
-#[cfg(feature = "transport-quic")]
-impl ServiceBuilder for QuicServiceBuilder {
-    type Initiator = QuicClient;
-    type Connection = QuicConnection;
+        info!("binding udp socket to {}", transport.local_addr()?);
 
-    async fn build(
-        config: &Arc<ServiceConfig>,
-    ) -> Result<Arc<Client<Self::Initiator, Self::Connection>>> {
-        let transport = quic_client_from_config(config).await?;
         let secret = *blake3::hash(config.secret.as_bytes()).as_bytes();
         let client = Arc::new(
             Client::new(
                 transport,
                 secret,
-                config.handshake_option.clone().map(Into::into),
+                config.auth_option.clone().map(Into::into),
             )
-            .await?,
+            .await
+            .map_err(Error::Io)?,
         );
-        Ok(client)
-    }
-}
 
-pub struct Service<T, C>
-where
-    T: Initiator<Connection = C>,
-    C: Connection,
-{
-    client: Arc<Client<T, C>>,
-    handles: Vec<JoinHandle<()>>,
-    shutdown_tx: broadcast::Sender<()>,
-    _transport: PhantomData<T>,
-    _connection: PhantomData<C>,
-}
-
-impl<T, C> Service<T, C>
-where
-    T: Initiator<Connection = C>,
-    C: Connection,
-{
-    pub async fn build<Builder>(config: Arc<ServiceConfig>) -> Result<Self>
-    where
-        Builder: ServiceBuilder<Initiator = T, Connection = C>,
-    {
-        let mut handles = Vec::new();
-        let client = Builder::build(&config).await?;
+        let mut _handles = Vec::new();
         let (shutdown_tx, _) = broadcast::channel(1);
 
         // Start HTTP endpoint if configured
         #[cfg(feature = "endpoint-http")]
         if config.endpoint.http.is_some() {
-            handles.push(Self::spawn_endpoint(
+            _handles.push(Self::spawn_endpoint(
                 "HTTP",
                 Self::endpoint_http_accept_loop(
                     config.clone(),
@@ -122,7 +136,7 @@ where
         // Start SOCKS endpoint if configured
         #[cfg(feature = "endpoint-socks")]
         if config.endpoint.socks.is_some() {
-            handles.push(Self::spawn_endpoint(
+            _handles.push(Self::spawn_endpoint(
                 "SOCKS",
                 Self::endpoint_socks_accept_loop(
                     config.clone(),
@@ -139,7 +153,7 @@ where
                 || tun_config.tun_ipv6.is_some()
                 || tun_config.tun_fd.is_some())
         {
-            handles.push(Self::spawn_endpoint(
+            _handles.push(Self::spawn_endpoint(
                 "TUN",
                 Self::endpoint_tun_accept_loop(
                     config.clone(),
@@ -149,44 +163,74 @@ where
             ));
         }
 
-        if handles.is_empty() {
+        if _handles.is_empty() {
             return Err(Error::Config(
-                "No endpoints were configured or enabled. The service has nothing to do."
+                "no endpoints were configured or enabled, the service has nothing to do."
                     .to_string(),
             ));
         }
 
-        Ok(Service {
+        Ok(OmbracClient {
             client,
-            handles,
+            handles: _handles,
             shutdown_tx,
-            _transport: PhantomData,
-            _connection: PhantomData,
         })
     }
 
+    /// Rebind the transport to a new socket to ensure a clean state for reconnection.
     pub async fn rebind(&self) -> io::Result<()> {
         self.client.rebind().await
     }
 
+    /// Gracefully shuts down the client.
+    ///
+    /// This method will:
+    /// 1. Send a shutdown signal to stop accepting new connections
+    /// 2. Wait for all endpoint tasks to finish gracefully
+    /// 3. Close existing connections
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ombrac_client::OmbracClient;
+    /// # use std::sync::Arc;
+    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// # let config = Arc::new(ombrac_client::ServiceConfig {
+    /// #     secret: "test".to_string(),
+    /// #     server: "server:8080".to_string(),
+    /// #     auth_option: None,
+    /// #     endpoint: Default::default(),
+    /// #     transport: Default::default(),
+    /// #     logging: Default::default(),
+    /// # });
+    /// # let client = OmbracClient::build(config).await?;
+    /// client.shutdown().await;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn shutdown(self) {
         let _ = self.shutdown_tx.send(());
 
         for handle in self.handles {
             if let Err(_err) = handle.await {
-                error!("A task failed to shut down cleanly: {:?}", _err);
+                error!("task failed to shut down cleanly: {:?}", _err);
             }
         }
-        warn!("Service shutdown complete");
     }
 
+    #[cfg(any(
+        feature = "endpoint-default",
+        feature = "endpoint-socks",
+        feature = "endpoint-http",
+        feature = "endpoint-tun"
+    ))]
     fn spawn_endpoint(
         _name: &'static str,
-        task: impl Future<Output = Result<()>> + Send + 'static,
+        task: impl std::future::Future<Output = Result<()>> + Send + 'static,
     ) -> JoinHandle<()> {
         tokio::spawn(async move {
             if let Err(_e) = task.await {
-                error!("The {_name} endpoint shut down due to an error: {_e}");
+                error!("the {_name} endpoint shut down due to an error: {_e}");
             }
         })
     }
@@ -194,27 +238,27 @@ where
     #[cfg(feature = "endpoint-http")]
     async fn endpoint_http_accept_loop(
         config: Arc<ServiceConfig>,
-        ombrac: Arc<Client<T, C>>,
+        ombrac: Arc<Client<QuicClient, QuicConnection>>,
         mut shutdown_rx: broadcast::Receiver<()>,
     ) -> Result<()> {
         use crate::endpoint::http::Server as HttpServer;
         let bind_addr = require_config!(config.endpoint.http, "endpoint.http")?;
         let socket = tokio::net::TcpListener::bind(bind_addr).await?;
 
-        info!("Starting HTTP/HTTPS endpoint, listening on {bind_addr}");
+        info!("starting http/https endpoint, listening on {bind_addr}");
 
         HttpServer::new(ombrac)
             .accept_loop(socket, async {
                 let _ = shutdown_rx.recv().await;
             })
             .await
-            .map_err(|e| Error::Endpoint(format!("HTTP server failed to run: {}", e)))
+            .map_err(|e| Error::Endpoint(format!("http server failed to run: {}", e)))
     }
 
     #[cfg(feature = "endpoint-socks")]
     async fn endpoint_socks_accept_loop(
         config: Arc<ServiceConfig>,
-        ombrac: Arc<Client<T, C>>,
+        ombrac: Arc<Client<QuicClient, QuicConnection>>,
         mut shutdown_rx: broadcast::Receiver<()>,
     ) -> Result<()> {
         use crate::endpoint::socks::CommandHandler;
@@ -224,7 +268,7 @@ where
         let bind_addr = require_config!(config.endpoint.socks, "endpoint.socks")?;
         let socket = tokio::net::TcpListener::bind(bind_addr).await?;
 
-        info!("Starting SOCKS5 endpoint, listening on {bind_addr}");
+        info!("starting socks endpoint, listening on {bind_addr}");
 
         let socks_config = Arc::new(SocksConfig::new(
             NoAuthentication,
@@ -234,13 +278,13 @@ where
             let _ = shutdown_rx.recv().await;
         })
         .await
-        .map_err(|e| Error::Endpoint(format!("SOCKS server failed to run: {}", e)))
+        .map_err(|e| Error::Endpoint(format!("socks server failed to run: {}", e)))
     }
 
     #[cfg(feature = "endpoint-tun")]
     async fn endpoint_tun_accept_loop(
         config: Arc<ServiceConfig>,
-        ombrac: Arc<Client<T, C>>,
+        ombrac: Arc<Client<QuicClient, QuicConnection>>,
         mut shutdown_rx: broadcast::Receiver<()>,
     ) -> Result<()> {
         use crate::endpoint::tun::{AsyncDevice, Tun, TunConfig};
@@ -270,25 +314,25 @@ where
 
                         if let Some(ip_str) = &config.tun_ipv4 {
                             let ip = ipnet::Ipv4Net::from_str(ip_str).map_err(|e| {
-                                Error::Config(format!("Failed to parse IPv4 CIDR '{ip_str}': {e}"))
+                                Error::Config(format!("failed to parse ipv4 cidr '{ip_str}': {e}"))
                             })?;
                             builder = builder.ipv4(ip.addr(), ip.netmask(), None);
                         }
 
                         if let Some(ip_str) = &config.tun_ipv6 {
                             let ip = ipnet::Ipv6Net::from_str(ip_str).map_err(|e| {
-                                Error::Config(format!("Failed to parse IPv6 CIDR '{ip_str}': {e}"))
+                                Error::Config(format!("failed to parse ipv6 cidr '{ip_str}': {e}"))
                             })?;
                             builder = builder.ipv6(ip.addr(), ip.netmask());
                         }
 
                         builder.build_async().map_err(|e| {
-                            Error::Endpoint(format!("Failed to build TUN device: {e}"))
+                            Error::Endpoint(format!("failed to build tun device: {e}"))
                         })?
                     };
 
                     info!(
-                        "Starting TUN endpoint, Name: {:?}, MTU: {:?}, IP: {:?}",
+                        "starting tun endpoint, name: {:?}, mtu: {:?}, ip: {:?}",
                         device.name(),
                         device.mtu(),
                         device.addresses()
@@ -300,7 +344,7 @@ where
                 #[cfg(any(target_os = "android", target_os = "ios"))]
                 {
                     return Err(Error::Config(
-                        "Creating a new TUN device is not supported on this platform. A pre-configured 'tun_fd' must be provided.".to_string()
+                        "creating a new tun device is not supported on this platform. A pre-configured 'tun_fd' must be provided.".to_string()
                     ));
                 }
             }
@@ -309,7 +353,7 @@ where
         let mut tun_config = TunConfig::default();
         if let Some(value) = &config.fake_dns {
             tun_config.fakedns_cidr = value.parse().map_err(|e| {
-                Error::Config(format!("Failed to parse fake_dns CIDR '{value}': {e}"))
+                Error::Config(format!("failed to parse fake_dns cidr '{value}': {e}"))
             })?;
         };
 
@@ -320,11 +364,10 @@ where
 
         tun.accept_loop(device, shutdown_signal)
             .await
-            .map_err(|e| Error::Endpoint(format!("TUN device runtime error: {}", e)))
+            .map_err(|e| Error::Endpoint(format!("tun device runtime error: {}", e)))
     }
 }
 
-#[cfg(feature = "transport-quic")]
 async fn quic_client_from_config(config: &ServiceConfig) -> io::Result<QuicClient> {
     let server = &config.server;
     let transport_cfg = &config.transport;
@@ -335,7 +378,7 @@ async fn quic_client_from_config(config: &ServiceConfig) -> io::Result<QuicClien
             let pos = server.rfind(':').ok_or_else(|| {
                 io::Error::new(
                     io::ErrorKind::InvalidInput,
-                    format!("Invalid server address: {}", server),
+                    format!("invalid server address: {}", server),
                 )
             })?;
             server[..pos].to_string()
@@ -346,7 +389,7 @@ async fn quic_client_from_config(config: &ServiceConfig) -> io::Result<QuicClien
     let server_addr = addrs.into_iter().next().ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::NotFound,
-            format!("Failed to resolve server address: '{}'", server),
+            format!("failed to resolve server address: '{}'", server),
         )
     })?;
 
@@ -367,19 +410,19 @@ async fn quic_client_from_config(config: &ServiceConfig) -> io::Result<QuicClien
             quic_config.root_ca_path = Some(transport_cfg.ca_cert.clone().ok_or_else(|| {
                 io::Error::new(
                     io::ErrorKind::InvalidInput,
-                    "CA cert is required for mTLS mode",
+                    "ca cert is required for mutual tls mode",
                 )
             })?);
             let client_cert = transport_cfg.client_cert.clone().ok_or_else(|| {
                 io::Error::new(
                     io::ErrorKind::InvalidInput,
-                    "Client cert is required for mTLS mode",
+                    "client cert is required for mutual tls mode",
                 )
             })?;
             let client_key = transport_cfg.client_key.clone().ok_or_else(|| {
                 io::Error::new(
                     io::ErrorKind::InvalidInput,
-                    "Client key is required for mTLS mode",
+                    "client key is required for mutual tls mode",
                 )
             })?;
             quic_config.client_cert_key_paths = Some((client_cert, client_key));

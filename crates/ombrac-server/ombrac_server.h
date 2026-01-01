@@ -7,8 +7,9 @@
 
 /**
  * A type alias for the C-style callback function pointer.
+ * Changed to pass (buf, len) instead of a null-terminated string for better performance.
  */
-typedef void (*LogCallback)(const char *message);
+typedef void (*LogCallback)(const char *buf, uintptr_t len);
 
 /**
  * Initializes the logging system to use a C-style callback for log messages.
@@ -19,14 +20,20 @@ typedef void (*LogCallback)(const char *message);
  *
  * # Arguments
  *
- * * `callback` - A function pointer of type `LogCallback`. See the definition of
- *   `LogCallback` for the expected signature and log level mappings.
+ * * `callback` - A function pointer of type `LogCallback`. The callback receives
+ *   a buffer pointer and length. The buffer is valid only during the callback call
+ *   and must be copied if needed for later use.
  *
  * # Safety
  *
  * The provided `callback` function pointer must be valid and remain valid for
  * the lifetime of the program. If a null pointer is passed, logging will be
  * disabled.
+ *
+ * The callback must not modify the buffer and should not call back into Rust
+ * code that might trigger logging, as this could cause deadlocks.
+ *
+ * This function is protected against Rust panics crossing the FFI boundary.
  */
 void ombrac_server_set_log_callback(const LogCallback *callback);
 
@@ -54,6 +61,8 @@ void ombrac_server_set_log_callback(const LogCallback *callback);
  * The caller must ensure that `config_json` is a valid pointer to a
  * null-terminated C string. This function is not thread-safe and should not be
  * called concurrently with `ombrac_server_service_shutdown`.
+ *
+ * This function is protected against Rust panics crossing the FFI boundary.
  */
 int32_t ombrac_server_service_startup(const char *config_json);
 
@@ -72,6 +81,8 @@ int32_t ombrac_server_service_startup(const char *config_json);
  *
  * This function is not thread-safe and should not be called concurrently with
  * `ombrac_server_service_startup`.
+ *
+ * This function is protected against Rust panics crossing the FFI boundary.
  */
 int32_t ombrac_server_service_shutdown(void);
 

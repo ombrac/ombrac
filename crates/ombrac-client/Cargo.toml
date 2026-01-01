@@ -19,16 +19,23 @@ name = "ombrac_client"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [features]
-default = [
-    "tracing",
-    "datagram",
-    "endpoint-default",
-    "transport-default",
-]
+default = ["tracing"]
 
 binary = [
     "tracing",
-    "transport-quic",
+    "datagram",
+    "dep:tracing-appender",
+    "dep:tracing-subscriber",
+    "endpoint-socks",
+    "endpoint-http",
+    "endpoint-tun"
+]
+
+ffi = [
+    "tracing",
+    "datagram",
+    "dep:tracing-appender",
+    "dep:tracing-subscriber",
     "endpoint-socks",
     "endpoint-http",
     "endpoint-tun"
@@ -41,37 +48,32 @@ datagram = [
 
 tracing = [
     "dep:tracing",
-    "dep:tracing-appender",
-    "dep:tracing-subscriber",
-    "ombrac-netstack/tracing",
     "ombrac-macros/tracing",
+    "ombrac-netstack/tracing",
     "ombrac-transport/tracing"
 ]
+
 endpoint-default = ["endpoint-socks"]
 endpoint-socks = ["socks-lib"]
-endpoint-tun = [
-    "ombrac-netstack",
-    "ipnet",
-    "tun-rs",
-    "moka",
-    "twox-hash",
-    "hickory-proto"
-]
 endpoint-http = [
     "http", 
     "hyper", 
     "hyper-util", 
     "http-body-util"
 ]
-
-
-transport-default = ["transport-quic"]
-transport-quic = ["ombrac-transport/quic"]
+endpoint-tun = [
+    "ipnet",
+    "tun-rs",
+    "moka",
+    "twox-hash",
+    "hickory-proto",
+    "ombrac-netstack"
+]
 
 [dependencies]
 ombrac = { workspace = true }
 ombrac-macros = { workspace = true }
-ombrac-transport = { workspace = true }
+ombrac-transport = { workspace = true, features = ["quic"] }
 ombrac-netstack = { workspace = true, optional = true }
 
 bytes = { workspace = true }
@@ -81,7 +83,7 @@ futures = { workspace = true }
 arc-swap = { workspace = true }
 thiserror = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
-figment = { workspace = true, features = ["json"] }
+serde_json = { workspace = true }
 clap = { workspace = true, features = ["std", "derive", "color", "help", "usage", "error-context", "suggestions"] }
 tokio = { workspace = true, features = ["rt-multi-thread", "net", "macros", "signal", "sync"] }
 tokio-util = { workspace = true, features = ["codec"] }

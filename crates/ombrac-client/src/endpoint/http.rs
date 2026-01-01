@@ -11,24 +11,22 @@ use tokio::net::TcpListener;
 
 use ombrac::protocol::Address;
 use ombrac_macros::{error, info};
-use ombrac_transport::{Connection, Initiator};
+use ombrac_transport::quic::Connection as QuicConnection;
+use ombrac_transport::quic::client::Client as QuicClient;
 
 use crate::client::Client;
+use crate::connection::BufferedStream;
 
 type HttpResult = Result<Response<BoxBody<Bytes, hyper::Error>>, hyper::Error>;
 type HyperClientBuilder = hyper::client::conn::http1::Builder;
 type HyperServerBuilder = hyper::server::conn::http1::Builder;
 
-pub struct Server<T, C> {
-    client: Arc<Client<T, C>>,
+pub struct Server {
+    client: Arc<Client<QuicClient, QuicConnection>>,
 }
 
-impl<T, C> Server<T, C>
-where
-    T: Initiator<Connection = C>,
-    C: Connection,
-{
-    pub fn new(client: Arc<Client<T, C>>) -> Self {
+impl Server {
+    pub fn new(client: Arc<Client<QuicClient, QuicConnection>>) -> Self {
         Self { client }
     }
 
@@ -43,14 +41,13 @@ where
             tokio::select! {
                 biased;
                 _ = &mut shutdown_signal => {
-                    info!("Shutdown signal received, exiting accept loop.");
                     return Ok(());
                 },
                 result = listener.accept() => {
                     let (stream, remote_addr) = match result {
                         Ok(res) => res,
                         Err(e) => {
-                            error!("Failed to accept connection: {}", e);
+                            error!("failed to accept connection: {}", e);
                             continue;
                         }
                     };
@@ -69,7 +66,7 @@ where
                             .with_upgrades()
                             .await
                             && !is_connection_closed_error(&e) {
-                                error!("Failed to serve connection from {}: {}", remote_addr, e);
+                                error!("failed to serve connection from {}: {}", remote_addr, e);
                             }
                     });
                 }
@@ -79,7 +76,7 @@ where
 
     async fn proxy_handler(
         req: Request<hyper::body::Incoming>,
-        client: Arc<Client<T, C>>,
+        client: Arc<Client<QuicClient, QuicConnection>>,
         remote_addr: SocketAddr,
     ) -> HttpResult {
         let target_addr = match Self::extract_target_address(&req) {
@@ -91,7 +88,7 @@ where
             Ok(conn) => conn,
             Err(e) => {
                 error!(
-                    "Failed to open outbound connection to {}: {}",
+                    "failed to open outbound connection to {}: {}",
                     target_addr, e
                 );
                 return Ok(Self::create_error_response(StatusCode::SERVICE_UNAVAILABLE));
@@ -107,7 +104,7 @@ where
 
     async fn handle_connect(
         req: Request<hyper::body::Incoming>,
-        mut dest_stream: C::Stream,
+        mut dest_stream: BufferedStream<<QuicConnection as ombrac_transport::Connection>::Stream>,
         remote_addr: SocketAddr,
         target_addr: Address,
     ) -> HttpResult {
@@ -122,32 +119,28 @@ where
                     .await
                     {
                         Ok(stats) => {
-                            #[cfg(feature = "tracing")]
-                            tracing::info!(
-                                src_addr = remote_addr.to_string(),
-                                dst_addr = target_addr.to_string(),
+                            info!(
+                                src_addr = %remote_addr,
+                                dst_addr = %target_addr,
                                 send = stats.a_to_b_bytes,
                                 recv = stats.b_to_a_bytes,
-                                status = "ok",
-                                "Connect"
+                                "connect"
                             );
                         }
                         Err((err, stats)) => {
-                            #[cfg(feature = "tracing")]
-                            tracing::error!(
-                                src_addr = remote_addr.to_string(),
-                                dst_addr = target_addr.to_string(),
+                            error!(
+                                src_addr = %remote_addr,
+                                dst_addr = %target_addr,
                                 send = stats.a_to_b_bytes,
                                 recv = stats.b_to_a_bytes,
-                                status = "err",
                                 error = %err,
-                                "Connect"
+                                "connect"
                             );
                         }
                     }
                 }
                 Err(e) => {
-                    error!("Upgrade error from {}: {}", remote_addr, e);
+                    error!("upgrade error from {}: {}", remote_addr, e);
                 }
             }
         });
@@ -157,7 +150,7 @@ where
 
     async fn handle_http(
         req: Request<hyper::body::Incoming>,
-        outbound_conn: C::Stream,
+        outbound_conn: BufferedStream<<QuicConnection as ombrac_transport::Connection>::Stream>,
         remote_addr: SocketAddr,
         target_addr: Address,
     ) -> HttpResult {
@@ -186,7 +179,7 @@ where
         req: &Request<hyper::body::Incoming>,
     ) -> Result<Address, Box<Response<BoxBody<Bytes, hyper::Error>>>> {
         let host = req.uri().host().ok_or_else(|| {
-            error!("Request URI does not contain a host");
+            error!("request URI does not contain a host");
             Self::create_error_response(StatusCode::BAD_REQUEST)
         })?;
 
@@ -201,7 +194,7 @@ where
         let addr_str = format!("{}:{}", host, port);
 
         Ok(Address::try_from(addr_str).map_err(|e| {
-            error!("Invalid target address format: {}", e);
+            error!("invalid target address format: {}", e);
             Self::create_error_response(StatusCode::BAD_REQUEST)
         })?)
     }

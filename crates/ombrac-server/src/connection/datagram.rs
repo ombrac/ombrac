@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 use bytes::Bytes;
 use moka::future::Cache;
 use tokio::net::UdpSocket;
+use tokio::sync::Semaphore;
 use tokio::task::AbortHandle;
 use tokio_util::sync::CancellationToken;
 #[cfg(feature = "tracing")]
@@ -17,11 +18,24 @@ use ombrac::reassembly::UdpReassembler;
 use ombrac_macros::{info, warn};
 use ombrac_transport::Connection;
 
+use crate::connection::dns;
+
+// --- Resource Limits ---
 const MAX_SESSIONS: u64 = 8192;
+const MAX_CONCURRENT_HANDLERS: usize = 4096;
+const MAX_UDP_RECV_BUFFER_SIZE: usize = 65535;
+
+// --- Protocol & MTU ---
+const DEFAULT_TUNNEL_MTU: usize = 1350;
+
+// --- Timeouts & TTL ---
 const SESSION_IDLE_TIMEOUT: Duration = Duration::from_secs(65);
 const DNS_CACHE_TTL: Duration = Duration::from_secs(300);
-const DEFAULT_MAX_DATAGRAM_SIZE: usize = 1350;
-const MAX_UDP_PAYLOAD_SIZE: usize = 65535;
+const DATAGRAM_SEND_TIMEOUT: Duration = Duration::from_secs(5);
+
+// --- Retry Strategy ---
+const SOCKET_BIND_RETRY_MAX: u32 = 3;
+const SOCKET_BIND_RETRY_INTERVAL: Duration = Duration::from_millis(100);
 
 pub(crate) struct DatagramTunnel<C: Connection> {
     connection: Arc<C>,
@@ -30,6 +44,7 @@ pub(crate) struct DatagramTunnel<C: Connection> {
     dns_cache: Cache<Bytes, SocketAddr>,
     reassembler: Arc<UdpReassembler>,
     fragment_id_counter: Arc<AtomicU32>,
+    semaphore: Arc<Semaphore>,
 }
 
 pub(crate) struct DatagramSession {
@@ -50,6 +65,7 @@ impl<C: Connection> DatagramTunnel<C> {
             dns_cache: Self::create_dns_cache(),
             reassembler: Arc::new(UdpReassembler::default()),
             fragment_id_counter: Arc::new(AtomicU32::new(0)),
+            semaphore: Arc::new(Semaphore::new(MAX_CONCURRENT_HANDLERS)),
         }
     }
 
@@ -59,6 +75,7 @@ impl<C: Connection> DatagramTunnel<C> {
             .time_to_idle(SESSION_IDLE_TIMEOUT)
             .eviction_listener(|session_id, session: Arc<DatagramSession>, _cause| {
                 session.abort_handle.abort();
+
                 #[cfg(feature = "tracing")]
                 info!(
                     session_id = *session_id,
@@ -85,7 +102,7 @@ impl<C: Connection> DatagramTunnel<C> {
                     match result {
                         Ok(packet_bytes) => {
                             if let Err(e) = self.handle_upstream_packet(packet_bytes).await {
-                                warn!("failed to handle upstream packet: {}", e);
+                                warn!("Failed to handle upstream packet: {}", e);
                             }
                         }
                         Err(e) if e.kind() == io::ErrorKind::TimedOut => {
@@ -106,18 +123,37 @@ impl<C: Connection> DatagramTunnel<C> {
         let packet = match UdpPacket::decode(&packet_bytes) {
             Ok(p) => p,
             Err(e) => {
-                warn!("failed to decode udp packet from connection: {e}");
+                warn!("Failed to decode udp packet from connection: {e}");
                 return Ok(()); // Not an IO error, just a bad packet
             }
         };
 
         // Reassemble packet if fragmented
         if let Some((session_id, address, data)) = self.reassembler.process(packet).await? {
-            let session = self.get_or_create_session(session_id, &address).await?;
+            let session = match self.get_or_create_session(session_id, &address).await {
+                Ok(s) => s,
+                Err(e) => {
+                    warn!("Failed to get or create session: {e}");
+                    return Ok(()); // Drop packet on error
+                }
+            };
+
+            // Acquire semaphore permit to limit concurrent packet handlers
+            let permit = match self.semaphore.clone().acquire_owned().await {
+                Ok(p) => p,
+                Err(_) => {
+                    warn!("Semaphore closed, dropping packet");
+                    return Ok(());
+                }
+            };
+
             // This is a cheap, reference-counted clone, not a deep copy of the cache data.
             let dns_cache = self.dns_cache.clone();
 
             let future = async move {
+                // Permit is automatically released when dropped
+                let _permit = permit;
+
                 session
                     .upstream_bytes
                     .fetch_add(data.len() as u64, Ordering::Relaxed);
@@ -125,11 +161,11 @@ impl<C: Connection> DatagramTunnel<C> {
                 match lookup_host(&dns_cache, &address).await {
                     Ok(dest_addr) => {
                         if let Err(err) = session.socket.send_to(&data, dest_addr).await {
-                            warn!("failed to send udp packet to {address}: {err}");
+                            warn!("Failed to send udp packet to {address}: {err}");
                         }
                     }
                     Err(err) => {
-                        warn!("failed to resolve DNS for {address}: {err}");
+                        warn!("Failed to resolve DNS for {address}: {err}");
                     }
                 }
             };
@@ -139,6 +175,7 @@ impl<C: Connection> DatagramTunnel<C> {
             #[cfg(feature = "tracing")]
             tokio::spawn(future.in_current_span());
         }
+
         Ok(())
     }
 
@@ -156,7 +193,8 @@ impl<C: Connection> DatagramTunnel<C> {
                     SocketAddr::V6(_) => "[::]:0",
                 };
 
-                let new_socket = Arc::new(UdpSocket::bind(bind_addr).await?);
+                // Retry UDP socket binding with exponential backoff
+                let new_socket = Arc::new(Self::bind_udp_socket_with_retry(bind_addr).await?);
                 let upstream_bytes = Arc::new(AtomicU64::new(0));
                 let downstream_bytes = Arc::new(AtomicU64::new(0));
 
@@ -181,6 +219,25 @@ impl<C: Connection> DatagramTunnel<C> {
             .map_err(io::Error::other)
     }
 
+    /// Binds a UDP socket with retry logic to handle transient resource exhaustion.
+    async fn bind_udp_socket_with_retry(bind_addr: &str) -> io::Result<UdpSocket> {
+        let mut last_error = None;
+        for attempt in 0..SOCKET_BIND_RETRY_MAX {
+            match UdpSocket::bind(bind_addr).await {
+                Ok(socket) => return Ok(socket),
+                Err(e) => {
+                    last_error = Some(e);
+                    if attempt < SOCKET_BIND_RETRY_MAX - 1 {
+                        tokio::time::sleep(SOCKET_BIND_RETRY_INTERVAL).await;
+                    }
+                }
+            }
+        }
+        Err(last_error.unwrap_or_else(|| {
+            io::Error::new(io::ErrorKind::Other, "UDP bind failed after retries")
+        }))
+    }
+
     /// Spawns a new asynchronous task to handle the downstream traffic for a session.
     fn spawn_downstream_loop(
         &self,
@@ -197,9 +254,9 @@ impl<C: Connection> DatagramTunnel<C> {
             downstream_bytes,
         };
 
-        #[cfg(feature = "tracing")]
-        let abort = tokio::spawn(handler.accept_loop()).abort_handle();
         #[cfg(not(feature = "tracing"))]
+        let abort = tokio::spawn(handler.accept_loop()).abort_handle();
+        #[cfg(feature = "tracing")]
         let abort = tokio::spawn(handler.accept_loop()).abort_handle();
 
         abort
@@ -222,9 +279,9 @@ impl<C: Connection> DownstreamHandler<C> {
         let max_datagram_size = self
             .connection
             .max_datagram_size()
-            .unwrap_or(DEFAULT_MAX_DATAGRAM_SIZE);
+            .unwrap_or(DEFAULT_TUNNEL_MTU);
         let max_payload_size = max_datagram_size.saturating_sub(overhead).max(1);
-        let mut buf = vec![0u8; MAX_UDP_PAYLOAD_SIZE];
+        let mut buf = vec![0u8; MAX_UDP_RECV_BUFFER_SIZE];
 
         loop {
             tokio::select! {
@@ -237,12 +294,12 @@ impl<C: Connection> DownstreamHandler<C> {
                             self.downstream_bytes.fetch_add(len as u64, Ordering::Relaxed);
 
                             if let Err(_err) = self.process_and_send_datagram(address, data, max_payload_size).await {
-                                warn!("failed to send packet to client, {_err} terminating loop.");
+                                warn!("Failed to send packet to client, {_err} terminating loop.");
                                 break;
                             }
                         },
                         Err(_err) => {
-                            warn!("failed to receiving from remote socket {_err}");
+                            warn!("Failed to receiving from remote socket {_err}");
                             break;
                         }
                     };
@@ -284,7 +341,15 @@ impl<C: Connection> DownstreamHandler<C> {
 
     async fn send_datagram(connection: &Arc<C>, packet: UdpPacket) -> io::Result<()> {
         let data = packet.encode()?;
-        connection.send_datagram(data).await
+        // Add timeout to prevent permanent blocking
+        tokio::time::timeout(DATAGRAM_SEND_TIMEOUT, connection.send_datagram(data))
+            .await
+            .map_err(|_| {
+                io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    format!("send_datagram timeout after {:?}", DATAGRAM_SEND_TIMEOUT),
+                )
+            })?
     }
 }
 
@@ -296,19 +361,20 @@ async fn lookup_host(
         Address::SocketV4(addr) => Ok(SocketAddr::V4(*addr)),
         Address::SocketV6(addr) => Ok(SocketAddr::V6(*addr)),
         Address::Domain(domain, port) => {
+            let port = *port;
+
+            // Try to get from cache first (fast path)
             if let Some(addr) = dns_cache.get(domain).await {
                 return Ok(addr);
             }
-            let domain_str = String::from_utf8_lossy(domain);
-            let addr = tokio::net::lookup_host(format!("{}:{}", domain_str, port))
-                .await?
-                .next()
-                .ok_or_else(|| {
-                    io::Error::new(
-                        io::ErrorKind::NotFound,
-                        format!("DNS resolution failed for {}", domain_str),
-                    )
-                })?;
+
+            // Use shared DNS resolver for DNS resolution
+            let addr = dns::resolve_domain(domain, port).await?;
+
+            // Cache successful resolution
+            // Note: There's a race condition here where multiple tasks might resolve
+            // the same domain concurrently, but that's acceptable - we'll just cache
+            // the first successful result, and subsequent lookups will use the cache.
             dns_cache.insert(domain.clone(), addr).await;
             Ok(addr)
         }

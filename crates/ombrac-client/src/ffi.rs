@@ -1,28 +1,20 @@
 use std::ffi::{CStr, c_char};
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 
-use figment::Figment;
-use figment::providers::{Format, Json, Serialized};
 use tokio::runtime::{Builder, Runtime};
 
 use ombrac_macros::{error, info};
 
-use crate::config::{ConfigFile, ServiceConfig};
+use crate::OmbracClient;
 #[cfg(feature = "tracing")]
 use crate::logging::LogCallback;
-#[cfg(feature = "transport-quic")]
-use crate::service::QuicServiceBuilder;
-use crate::service::Service;
 
 // A global, thread-safe handle to the running service instance.
 static SERVICE_HANDLE: Mutex<Option<ServiceHandle>> = Mutex::new(None);
 
 // Encapsulates the service instance and its associated Tokio runtime.
 struct ServiceHandle {
-    #[cfg(feature = "transport-quic")]
-    service: Option<
-        Box<Service<ombrac_transport::quic::client::Client, ombrac_transport::quic::Connection>>,
-    >,
+    service: Option<Box<OmbracClient>>,
     runtime: Runtime,
 }
 
@@ -89,35 +81,10 @@ pub unsafe extern "C" fn ombrac_client_set_log_callback(callback: *const LogCall
 pub unsafe extern "C" fn ombrac_client_service_startup(config_json: *const c_char) -> i32 {
     let config_str = unsafe { c_str_to_str(config_json) };
 
-    let config_file: ConfigFile = match Figment::new()
-        .merge(Serialized::defaults(ConfigFile::default()))
-        .merge(Json::string(config_str))
-        .extract()
-    {
+    let service_config = match crate::config::load_from_json(config_str) {
         Ok(cfg) => cfg,
-        Err(_e) => {
-            error!("Failed to parse config JSON: {_e}");
-            return -1;
-        }
-    };
-
-    let service_config = match (config_file.secret, config_file.server) {
-        (Some(secret), Some(server)) => ServiceConfig {
-            secret,
-            server,
-            handshake_option: config_file.handshake_option,
-            endpoint: config_file.endpoint,
-            #[cfg(feature = "transport-quic")]
-            transport: config_file.transport,
-            #[cfg(feature = "tracing")]
-            logging: config_file.logging,
-        },
-        (None, _) => {
-            error!("Configuration error: missing required field `secret` in JSON config");
-            return -1;
-        }
-        (_, None) => {
-            error!("Configuration error: missing required field `server` in JSON config");
+        Err(e) => {
+            error!("Failed to parse config JSON: {}", e);
             return -1;
         }
     };
@@ -134,11 +101,10 @@ pub unsafe extern "C" fn ombrac_client_service_startup(config_json: *const c_cha
     };
 
     let service = runtime.block_on(async {
-        #[cfg(feature = "transport-quic")]
-        Service::build::<QuicServiceBuilder>(Arc::new(service_config)).await
+        use std::sync::Arc;
+        OmbracClient::build(Arc::new(service_config)).await
     });
 
-    #[cfg(feature = "transport-quic")]
     let service = match service {
         Ok(s) => s,
         Err(e) => {
@@ -147,12 +113,6 @@ pub unsafe extern "C" fn ombrac_client_service_startup(config_json: *const c_cha
         }
     };
 
-    #[cfg(not(feature = "transport-quic"))]
-    {
-        error!("The application was compiled without a transport feature");
-        return -1;
-    }
-
     let mut handle_guard = SERVICE_HANDLE.lock().unwrap();
     if handle_guard.is_some() {
         error!("Service is already running. Please shut down the existing service first.");
@@ -160,7 +120,6 @@ pub unsafe extern "C" fn ombrac_client_service_startup(config_json: *const c_cha
     }
 
     *handle_guard = Some(ServiceHandle {
-        #[cfg(feature = "transport-quic")]
         service: Some(Box::new(service)),
         runtime,
     });
@@ -188,7 +147,6 @@ pub unsafe extern "C" fn ombrac_client_service_startup(config_json: *const c_cha
 pub extern "C" fn ombrac_client_service_rebind() -> i32 {
     let handle_guard = SERVICE_HANDLE.lock().unwrap();
     if let Some(handle) = handle_guard.as_ref() {
-        #[cfg(feature = "transport-quic")]
         if let Some(service) = &handle.service {
             let result = handle.runtime.block_on(service.rebind());
             if let Err(e) = result {
@@ -224,7 +182,6 @@ pub extern "C" fn ombrac_client_service_shutdown() -> i32 {
     if let Some(mut handle) = handle_guard.take() {
         info!("Shutting down service");
 
-        #[cfg(feature = "transport-quic")]
         if let Some(service) = handle.service.take() {
             handle.runtime.block_on(async {
                 service.shutdown().await;

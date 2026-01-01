@@ -8,59 +8,51 @@ use socks_lib::v5::server::Handler;
 use socks_lib::v5::{Address as Socks5Address, Request, Response, Stream, UdpPacket};
 use tokio::net::UdpSocket;
 
-use ombrac_macros::{debug, error, info, warn};
-use ombrac_transport::{Connection, Initiator};
+use ombrac_macros::{error, info, warn};
+use ombrac_transport::quic::Connection as QuicConnection;
+use ombrac_transport::quic::client::Client as QuicClient;
 
 use crate::client::Client;
+use crate::connection::BufferedStream;
 #[cfg(feature = "datagram")]
-use crate::client::UdpSession;
+use crate::connection::UdpSession;
 
-pub struct CommandHandler<T, C>
-where
-    T: Initiator<Connection = C> + Send + Sync + 'static,
-    C: Connection + Send + Sync + 'static,
-{
-    client: Arc<Client<T, C>>,
+pub struct CommandHandler {
+    client: Arc<Client<QuicClient, QuicConnection>>,
 }
 
-impl<T, C> CommandHandler<T, C>
-where
-    T: Initiator<Connection = C> + Send + Sync + 'static,
-    C: Connection + Send + Sync + 'static,
-{
-    pub fn new(client: Arc<Client<T, C>>) -> Self {
+impl CommandHandler {
+    pub fn new(client: Arc<Client<QuicClient, QuicConnection>>) -> Self {
         Self { client }
     }
 
-    async fn handle_connect(
+    /// Handles data forwarding after a successful connection.
+    /// This method is called after the connection is established and response is sent.
+    async fn handle_connect_forwarding(
         &self,
-        address: Socks5Address,
-        mut stream: &mut Stream<impl AsyncRead + AsyncWrite + Unpin>,
+        stream: &mut Stream<impl AsyncRead + AsyncWrite + Unpin>,
+        dest_stream: &mut BufferedStream<<QuicConnection as ombrac_transport::Connection>::Stream>,
+        dst_addr: String,
     ) -> io::Result<()> {
-        let dst_addr = util::socks_to_ombrac_addr(address)?;
-        let mut dest_stream = self.client.open_bidirectional(dst_addr.clone()).await?;
-        match ombrac_transport::io::copy_bidirectional(&mut stream, &mut dest_stream).await {
+        let src_addr = stream.peer_addr();
+        match ombrac_transport::io::copy_bidirectional(stream, dest_stream).await {
             Ok(stats) => {
-                #[cfg(feature = "tracing")]
-                tracing::info!(
-                    src_addr = stream.local_addr().to_string(),
-                    dst_addr = dst_addr.to_string(),
+                info!(
+                    src_addr = %src_addr,
+                    dst_addr = %dst_addr,
                     send = stats.a_to_b_bytes,
                     recv = stats.b_to_a_bytes,
-                    status = "ok",
-                    "Connect"
+                    "connect"
                 );
             }
             Err((err, stats)) => {
-                #[cfg(feature = "tracing")]
-                tracing::error!(
-                    src_addr = stream.local_addr().to_string(),
-                    dst_addr = dst_addr.to_string(),
+                error!(
+                    src_addr = %src_addr,
+                    dst_addr = %dst_addr,
                     send = stats.a_to_b_bytes,
                     recv = stats.b_to_a_bytes,
-                    status = "err",
                     error = %err,
-                    "Connect"
+                    "connect"
                 );
                 return Err(err);
             }
@@ -75,7 +67,7 @@ where
         &self,
         stream: &mut Stream<impl AsyncRead + AsyncWrite + Unpin + Send>,
     ) -> io::Result<()> {
-        info!("SOCKS: Handling UDP ASSOCIATE from {}", stream.peer_addr());
+        info!("handling udp associate from {}", stream.peer_addr());
 
         let udp_session = self.client.open_associate();
 
@@ -84,14 +76,13 @@ where
             stream.local_addr().ip(),
             relay_socket.local_addr().unwrap().port(),
         );
-        info!("SOCKS: UDP relay listening on {}", relay_addr);
+        info!("udp relay listening on {}", relay_addr);
 
         let response_addr = Socks5Address::from(relay_addr);
         stream
             .write_response(&Response::Success(&response_addr))
             .await?;
 
-        // 进入转发循环
         self.udp_relay_loop(stream, relay_socket, udp_session).await
     }
 
@@ -105,22 +96,18 @@ where
         &self,
         stream: &mut Stream<impl AsyncRead + AsyncWrite + Unpin>,
         relay_socket: UdpSocket,
-        mut udp_session: UdpSession<T, C>,
+        mut udp_session: UdpSession<QuicClient, QuicConnection>,
     ) -> io::Result<()> {
         let mut client_udp_src: Option<SocketAddr> = None;
         let mut buf = vec![0u8; 65535]; // Max UDP packet size
 
         loop {
             tokio::select! {
-                // biased; 优先检查控制连接是否关闭
                 biased;
-
-                // 1. 检查 TCP 控制连接是否已关闭。
-                // 如果是，则关联结束，我们应该退出循环。
                 result = stream.read_u8() => {
                     match result {
                         Ok(0) | Err(_) => {
-                            info!("SOCKS: TCP control connection for UDP associate closed. Ending session.");
+                            info!("tcp control connection for udp associate closed, ending session");
                             return Ok(());
                         }
                         _ => {}
@@ -133,7 +120,7 @@ where
                         let udp_response = UdpPacket::un_frag(socks_from_addr, data);
                         relay_socket.send_to(&udp_response.to_bytes(), dest).await?;
                     } else {
-                        warn!("SOCKS: Received packet from tunnel before client, discarding.");
+                        warn!("received packet from tunnel before client, discarding");
                     }
                 }
 
@@ -141,7 +128,7 @@ where
                     let (len, src) = result?;
                     if client_udp_src.is_none() {
                         client_udp_src = Some(src);
-                        info!("SOCKS: First UDP packet received from client {}", src);
+                        info!("first udp packet received from client {}", src);
                     }
                     let mut bytes = Bytes::copy_from_slice(&buf[..len]);
                     let udp_request = UdpPacket::from_bytes(&mut bytes)?;
@@ -155,29 +142,31 @@ where
     }
 }
 
-impl<T, C> Handler for CommandHandler<T, C>
-where
-    T: Initiator<Connection = C> + Send + Sync + 'static,
-    C: Connection + Send + Sync + 'static,
-{
+impl Handler for CommandHandler {
     async fn handle<S>(&self, stream: &mut Stream<S>, request: Request) -> io::Result<()>
     where
         S: AsyncRead + AsyncWrite + Unpin + Send + Sync,
     {
-        debug!("SOCKS Request: {:?}", request);
-
         match request {
             Request::Connect(address) => {
-                stream.write_response_unspecified().await?;
-
-                if let Err(err) = self.handle_connect(address.clone(), stream).await {
-                    if err.kind() != io::ErrorKind::BrokenPipe
-                        && err.kind() != io::ErrorKind::ConnectionReset
-                    {
-                        error!("SOCKS: Connect to {} failed: {}", address, err);
+                // Try to connect first, then send appropriate response
+                // This ensures proper TCP state handling according to SOCKS5 protocol
+                let dst_addr = util::socks_to_ombrac_addr(address.clone())?;
+                let mut dest_stream = match self.client.open_bidirectional(dst_addr.clone()).await {
+                    Ok(stream) => stream,
+                    Err(err) => {
+                        // Connection failed - return error to let Handler trait handle the response
+                        error!("connect to {} failed: {}", address, err);
+                        return Err(err);
                     }
-                    return Err(err);
-                }
+                };
+
+                // Connection successful, send success response
+                stream.write_response(&Response::Success(&address)).await?;
+
+                // Now handle the data forwarding
+                self.handle_connect_forwarding(stream, &mut dest_stream, address.to_string())
+                    .await?
             }
             #[cfg(feature = "datagram")]
             Request::Associate(_) => {
@@ -185,17 +174,13 @@ where
                     if err.kind() != io::ErrorKind::BrokenPipe
                         && err.kind() != io::ErrorKind::ConnectionReset
                     {
-                        error!(
-                            "SOCKS: Associate from {} failed: {}",
-                            stream.peer_addr(),
-                            err
-                        );
+                        error!("associate from {} failed: {}", stream.peer_addr(), err);
                     }
                     return Err(err);
                 }
             }
             _ => {
-                warn!("SOCKS: BIND command is not supported.");
+                warn!("bind command is not supported.");
                 stream.write_response_unsupported().await?;
             }
         }

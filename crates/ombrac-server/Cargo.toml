@@ -19,38 +19,37 @@ name = "ombrac_server"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [features]
-default = [
+default = ["tracing"]
+
+datagram = [
+    "moka",
+    "ombrac-transport/datagram"
+]
+
+ffi = [
     "tracing",
     "datagram",
-    "transport-default"
+    "dep:tracing-appender",
+    "dep:tracing-subscriber"
 ]
 
 binary = [
-    "datagram",
     "tracing",
-    "transport-quic"
-]
-
-datagram = [
-    "ombrac-transport/datagram",
-    "moka"
+    "datagram",
+    "dep:tracing-appender",
+    "dep:tracing-subscriber"
 ]
 
 tracing = [
     "dep:tracing", 
-    "dep:tracing-appender",
-    "dep:tracing-subscriber",
     "ombrac-macros/tracing",
     "ombrac-transport/tracing"
 ]
 
-transport-default = ["transport-quic"]
-transport-quic = ["ombrac-transport/quic"]
-
 [dependencies]
 ombrac = { workspace = true }
 ombrac-macros = { workspace = true }
-ombrac-transport = { workspace = true }
+ombrac-transport = { workspace = true, features = ["quic"] }
 
 bytes = { workspace = true }
 blake3 = { workspace = true }
@@ -58,11 +57,13 @@ bincode = { workspace = true }
 futures = { workspace = true }
 arc-swap = { workspace = true }
 thiserror = { workspace = true }
+rand = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
-figment = { workspace = true, features = ["json"] }
+serde_json = { workspace = true }
 clap = { workspace = true, features = ["std", "derive", "color", "help", "usage", "error-context", "suggestions"] }
 tokio = { workspace = true, features = ["rt-multi-thread", "net", "macros", "signal"] }
 tokio-util = { workspace = true, features = ["codec"] }
+hickory-resolver = { workspace = true }
 moka = { workspace = true, features = ["future"], optional = true }
 tracing = { workspace = true, features = ["attributes"], optional = true }
 tracing-appender = { workspace = true, optional = true }
