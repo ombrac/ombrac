@@ -93,16 +93,16 @@ impl CliEndpointConfig {
 #[cfg(feature = "endpoint-tun")]
 #[derive(Parser, Debug, Clone, Default)]
 pub struct CliTunConfig {
-    /// Use a pre-existing TUN device by providing its file descriptor.  
-    /// `tun_ipv4`, `tun_ipv6`, and `tun_mtu` will be ignored.
+    /// Use a pre-existing TUN device by providing its file descriptor
+    /// `tun_ipv4`, `tun_ipv6`, and `tun_mtu` will be ignored
     #[clap(long, help_heading = "Endpoint", value_name = "FD")]
     pub tun_fd: Option<i32>,
 
-    /// The IPv4 address and subnet for the TUN device, in CIDR notation (e.g., 198.19.0.1/24).
+    /// The IPv4 address and subnet for the TUN device, in CIDR notation
     #[clap(long, help_heading = "Endpoint", value_name = "CIDR")]
     pub tun_ipv4: Option<String>,
 
-    /// The IPv6 address and subnet for the TUN device, in CIDR notation (e.g., fd00::1/64).
+    /// The IPv6 address and subnet for the TUN device, in CIDR notation
     #[clap(long, help_heading = "Endpoint", value_name = "CIDR")]
     pub tun_ipv6: Option<String>,
 
@@ -114,8 +114,8 @@ pub struct CliTunConfig {
     #[clap(long, help_heading = "Endpoint", value_name = "CIDR")]
     pub fake_dns: Option<String>,
 
-    /// Disable UDP traffic to port 443. This can improve experience in certain network environments. [default: false]
-    #[clap(long, help_heading = "Endpoint")]
+    /// Disable UDP traffic to port 443
+    #[clap(long, help_heading = "Endpoint", value_name = "BOOL")]
     pub disable_udp_443: Option<bool>,
 }
 
@@ -146,9 +146,6 @@ pub struct CliTransportConfig {
     pub server_name: Option<String>,
 
     /// Set the TLS mode for the connection
-    /// tls: Standard TLS with server certificate verification
-    /// m-tls: Mutual TLS with client and server certificate verification
-    /// insecure: Skip server certificate verification (for testing only)
     #[clap(long, value_enum, help_heading = "Transport")]
     pub tls_mode: Option<TlsMode>,
 
@@ -165,8 +162,8 @@ pub struct CliTransportConfig {
     #[clap(long, help_heading = "Transport", value_name = "FILE")]
     pub client_key: Option<PathBuf>,
 
-    /// Enable 0-RTT for faster connection establishment (may reduce security)
-    #[clap(long, help_heading = "Transport", action)]
+    /// Enable 0-RTT for faster connection establishment
+    #[clap(long, help_heading = "Transport", value_name = "BOOL")]
     pub zero_rtt: Option<bool>,
 
     /// Application-Layer protocol negotiation (ALPN) protocols [default: h3]
@@ -187,7 +184,6 @@ pub struct CliTransportConfig {
     pub cwnd_init: Option<u64>,
 
     /// Maximum idle time (in milliseconds) before closing the connection [default: 30000]
-    /// 30 second default recommended by RFC 9308
     #[clap(long, help_heading = "Transport", value_name = "TIME")]
     pub idle_timeout: Option<u64>,
 
