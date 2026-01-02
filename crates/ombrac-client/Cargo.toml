@@ -44,11 +44,12 @@ endpoint-http = [
     "http-body-util"
 ]
 endpoint-tun = [
-    "ipnet",
-    "tun-rs",
-    "moka",
-    "twox-hash",
-    "hickory-proto",
+    "dep:moka",
+    "dep:ipnet",
+    "dep:tun-rs",
+    "dep:dashmap",
+    "dep:twox-hash",
+    "dep:hickory-proto",
     "ombrac-netstack"
 ]
 

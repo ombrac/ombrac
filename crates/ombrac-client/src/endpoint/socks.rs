@@ -42,7 +42,7 @@ impl CommandHandler {
                     dst_addr = %dst_addr,
                     send = stats.a_to_b_bytes,
                     recv = stats.b_to_a_bytes,
-                    "connect"
+                    "tcp connect"
                 );
             }
             Err((err, stats)) => {
@@ -52,7 +52,7 @@ impl CommandHandler {
                     send = stats.a_to_b_bytes,
                     recv = stats.b_to_a_bytes,
                     error = %err,
-                    "connect"
+                    "tcp connect"
                 );
                 return Err(err);
             }
@@ -67,7 +67,10 @@ impl CommandHandler {
         &self,
         stream: &mut Stream<impl AsyncRead + AsyncWrite + Unpin + Send>,
     ) -> io::Result<()> {
-        info!("handling udp associate from {}", stream.peer_addr());
+        info!(
+            src_addr = %stream.peer_addr(),
+            "udp associate started"
+        );
 
         let udp_session = self.client.open_associate();
 
@@ -76,7 +79,10 @@ impl CommandHandler {
             stream.local_addr().ip(),
             relay_socket.local_addr().unwrap().port(),
         );
-        info!("udp relay listening on {}", relay_addr);
+        info!(
+            relay_addr = %relay_addr,
+            "udp relay listening"
+        );
 
         let response_addr = Socks5Address::from(relay_addr);
         stream
@@ -107,7 +113,7 @@ impl CommandHandler {
                 result = stream.read_u8() => {
                     match result {
                         Ok(0) | Err(_) => {
-                            info!("tcp control connection for udp associate closed, ending session");
+                            info!("tcp control connection closed, ending udp session");
                             return Ok(());
                         }
                         _ => {}
@@ -120,7 +126,7 @@ impl CommandHandler {
                         let udp_response = UdpPacket::un_frag(socks_from_addr, data);
                         relay_socket.send_to(&udp_response.to_bytes(), dest).await?;
                     } else {
-                        warn!("received packet from tunnel before client, discarding");
+                        warn!("received packet from tunnel before client, discarding packet");
                     }
                 }
 
@@ -128,7 +134,10 @@ impl CommandHandler {
                     let (len, src) = result?;
                     if client_udp_src.is_none() {
                         client_udp_src = Some(src);
-                        info!("first udp packet received from client {}", src);
+                        info!(
+                            client_addr = %src,
+                            "first udp packet received from client"
+                        );
                     }
                     let mut bytes = Bytes::copy_from_slice(&buf[..len]);
                     let udp_request = UdpPacket::from_bytes(&mut bytes)?;
@@ -156,7 +165,11 @@ impl Handler for CommandHandler {
                     Ok(stream) => stream,
                     Err(err) => {
                         // Connection failed - return error to let Handler trait handle the response
-                        error!("connect to {} failed: {}", address, err);
+                        error!(
+                            dst_addr = %address,
+                            error = %err,
+                            "tcp connect failed"
+                        );
                         return Err(err);
                     }
                 };
@@ -174,13 +187,17 @@ impl Handler for CommandHandler {
                     if err.kind() != io::ErrorKind::BrokenPipe
                         && err.kind() != io::ErrorKind::ConnectionReset
                     {
-                        error!("associate from {} failed: {}", stream.peer_addr(), err);
+                        error!(
+                            src_addr = %stream.peer_addr(),
+                            error = %err,
+                            "udp associate failed"
+                        );
                     }
                     return Err(err);
                 }
             }
             _ => {
-                warn!("bind command is not supported.");
+                warn!("bind command not supported");
                 stream.write_response_unsupported().await?;
             }
         }

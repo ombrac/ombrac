@@ -9,8 +9,14 @@ mod tests {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     use ombrac::protocol::Address;
-    use ombrac_client::{OmbracClient, ServiceConfig as ClientServiceConfig, TransportConfig as ClientTransportConfig};
-    use ombrac_server::{OmbracServer, ServiceConfig as ServerServiceConfig, TransportConfig as ServerTransportConfig, config::TlsMode as ServerTlsMode};
+    use ombrac_client::{
+        OmbracClient, ServiceConfig as ClientServiceConfig,
+        TransportConfig as ClientTransportConfig,
+    };
+    use ombrac_server::{
+        OmbracServer, ServiceConfig as ServerServiceConfig,
+        TransportConfig as ServerTransportConfig, config::TlsMode as ServerTlsMode,
+    };
 
     fn random_secret() -> String {
         use rand::RngCore;
@@ -26,7 +32,7 @@ mod tests {
     async fn test_ombrac_server_build() {
         let secret = random_secret();
         let server_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
-        
+
         let server_config = Arc::new(ServerServiceConfig {
             secret: secret.clone(),
             listen: server_addr,
@@ -40,7 +46,7 @@ mod tests {
 
         let server_result = OmbracServer::build(server_config).await;
         assert!(server_result.is_ok(), "OmbracServer::build should succeed");
-        
+
         let server = server_result.unwrap();
         server.shutdown().await;
     }
@@ -54,11 +60,11 @@ mod tests {
     // Helper function to setup server and client for testing
     async fn setup_test_env() -> (OmbracClient, OmbracServer, String, SocketAddr) {
         let secret = random_secret();
-        
+
         // Get an available port and let OmbracServer bind to it
         let port = get_available_port().await;
         let server_addr: SocketAddr = format!("127.0.0.1:{}", port).parse().unwrap();
-        
+
         let server_config = Arc::new(ServerServiceConfig {
             secret: secret.clone(),
             listen: server_addr,
@@ -102,7 +108,7 @@ mod tests {
         let secret = random_secret();
         let port = get_available_port().await;
         let server_addr: SocketAddr = format!("127.0.0.1:{}", port).parse().unwrap();
-        
+
         let server_config = Arc::new(ServerServiceConfig {
             secret: secret.clone(),
             listen: server_addr,
@@ -134,12 +140,15 @@ mod tests {
         });
 
         let client_result = OmbracClient::build(client_config).await;
-        
+
         // Cleanup
         server.shutdown().await;
-        
+
         // Client build should succeed with SOCKS endpoint
-        assert!(client_result.is_ok(), "OmbracClient::build should succeed with SOCKS endpoint");
+        assert!(
+            client_result.is_ok(),
+            "OmbracClient::build should succeed with SOCKS endpoint"
+        );
         if let Ok(client) = client_result {
             client.shutdown().await;
         }
@@ -188,7 +197,7 @@ mod tests {
         // Start echo server
         let echo_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
         let echo_addr = echo_listener.local_addr()?;
-        
+
         tokio::spawn(async move {
             loop {
                 match echo_listener.accept().await {
@@ -227,7 +236,7 @@ mod tests {
     async fn test_handshake_with_invalid_secret() {
         let secret = random_secret();
         let mut wrong_secret = random_secret();
-        
+
         while wrong_secret == secret {
             wrong_secret = random_secret();
         }
@@ -235,7 +244,7 @@ mod tests {
         // Start server - let OmbracServer bind the port itself
         let port = get_available_port().await;
         let server_addr: SocketAddr = format!("127.0.0.1:{}", port).parse().unwrap();
-        
+
         let server_config = Arc::new(ServerServiceConfig {
             secret: secret.clone(),
             listen: server_addr,
@@ -270,7 +279,10 @@ mod tests {
 
         server.shutdown().await;
 
-        assert!(client_result.is_err(), "OmbracClient should fail with wrong secret");
+        assert!(
+            client_result.is_err(),
+            "OmbracClient should fail with wrong secret"
+        );
         // The error might be from OmbracClient::build or from the underlying connection
         if let Err(err) = client_result {
             // Check if it's a service error that contains an IO error
@@ -297,4 +309,3 @@ mod tests {
         server.shutdown().await;
     }
 }
-

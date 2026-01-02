@@ -85,7 +85,7 @@ mod fakedns {
             let query = match Message::from_vec(query_bytes) {
                 Ok(q) => q,
                 Err(e) => {
-                    warn!("failed to parse dns query: {}", e);
+                    warn!(error = %e, "failed to parse dns query");
                     return None;
                 }
             };
@@ -111,8 +111,9 @@ mod fakedns {
                 self.domain_to_ip.insert(domain_name.clone(), new_ip).await;
                 self.ip_to_domain.insert(new_ip, domain_name.clone()).await;
                 debug!(
-                    "fakedns: mapped {} -> {} (stateless calculation)",
-                    domain_name, new_ip
+                    domain = %domain_name,
+                    fake_ip = %new_ip,
+                    "fakedns mapped domain to ip"
                 );
                 new_ip
             };
@@ -223,11 +224,10 @@ impl Tun {
 
         for task in processing_tasks {
             if let Err(err) = task.await {
-                error!("processing task panicked or failed: {:?}", err);
+                error!(error = ?err, "processing task panicked or failed");
             }
         }
 
-        debug!("tun stack has shut down completely");
         Ok(())
     }
 
@@ -244,12 +244,12 @@ impl Tun {
                     match packet_result {
                         Some(Ok(packet)) => {
                             if let Err(err) = tun_sink.send(packet.into_bytes()).await {
-                                error!("failed to send packet to tun device: {}, stopping task", err);
+                                error!("failed to send packet to tun device: {}, stopping forwarding", err);
                                 break;
                             }
                         }
                         Some(Err(err)) => {
-                            error!("netstack read error: {}, stopping task", err);
+                            error!("netstack read error: {}, stopping forwarding", err);
                             break;
                         }
                         None => break,
@@ -257,7 +257,7 @@ impl Tun {
                 }
             }
         }
-        debug!("stack-to-tun forwarding task finished");
+        debug!("stack-to-tun forwarding finished");
     }
 
     async fn forward_packets_from_tun_to_stack(
@@ -273,23 +273,23 @@ impl Tun {
                     match packet_result {
                         Some(Ok(packet)) => {
                             if let Err(err) = stack_sink.send(Packet::new(packet)).await {
-                                error!("failed to send packet to stack: {}, stopping task", err);
+                                error!("failed to send packet to stack: {}, stopping forwarding", err);
                                 break;
                             }
                         }
                         Some(Err(err)) => {
-                            error!("tun device read error: {}, stopping task", err);
+                            error!("tun device read error: {}, stopping forwarding", err);
                             break;
                         }
                         None => {
-                            info!("tun device stream closed, stopping tun-to-stack task");
+                            info!("tun device stream closed, stopping tun-to-stack forwarding");
                             break;
                         }
                     }
                 }
             }
         }
-        debug!("tun-to-stack forwarding task finished");
+        debug!("tun-to-stack forwarding finished");
     }
 
     async fn accept_tcp_connections(
@@ -311,13 +311,17 @@ impl Tun {
                     tokio::spawn(async move {
                         let remote_addr = stream.remote_addr();
                         if let Err(err) = tun_instance.relay_tcp_stream(stream).await {
-                            error!("error handling tcp stream from {}: {}", remote_addr, err);
+                            error!(
+                                src_addr = %remote_addr,
+                                error = %err,
+                                "tcp stream error"
+                            );
                         }
                     });
                 }
             }
         }
-        debug!("tcp connection acceptor task finished");
+        debug!("tcp connection acceptor finished");
     }
 
     async fn relay_tcp_stream(&self, mut stream: TcpStream) -> io::Result<()> {
@@ -344,23 +348,23 @@ impl Tun {
         match ombrac_transport::io::copy_bidirectional(&mut stream, &mut remote_stream).await {
             Ok(stats) => {
                 info!(
-                    src_addr = local_addr.to_string(),
-                    fake_addr = remote_addr.to_string(),
-                    dst_addr = target_addr.to_string(),
+                    src_addr = %local_addr,
+                    fake_addr = %remote_addr,
+                    dst_addr = %target_addr,
                     send = stats.a_to_b_bytes,
                     recv = stats.b_to_a_bytes,
-                    "connect"
+                    "tcp connect"
                 );
             }
             Err((err, stats)) => {
                 error!(
-                    src_addr = local_addr.to_string(),
-                    fake_addr = remote_addr.to_string(),
-                    dst_addr = target_addr.to_string(),
+                    src_addr = %local_addr,
+                    fake_addr = %remote_addr,
+                    dst_addr = %target_addr,
                     send = stats.a_to_b_bytes,
                     recv = stats.b_to_a_bytes,
                     error = %err,
-                    "connect"
+                    "tcp connect"
                 );
                 return Err(err);
             }
@@ -371,8 +375,7 @@ impl Tun {
 
     async fn process_incoming_udp_packets(self, udp_socket: UdpTunnel, token: CancellationToken) {
         let (mut reader, writer) = udp_socket.split();
-        let active_sessions: Arc<DashMap<SocketAddr, mpsc::Sender<(Bytes, Address)>>> =
-            Arc::new(DashMap::new());
+        let active_sessions = Arc::new(DashMap::new());
 
         loop {
             tokio::select! {
@@ -395,7 +398,7 @@ impl Tun {
                 }
             }
         }
-        debug!("udp packet processing task finished");
+        debug!("udp packet processing finished");
     }
 
     async fn handle_dns_query_packet(&self, packet: UdpPacket, writer: &mut SplitWrite) {
@@ -409,11 +412,11 @@ impl Tun {
                         dst_addr: packet.src_addr,
                     };
                     if let Err(err) = writer.send(response_packet).await {
-                        error!("failed to send dns response to tun stack: {}", err);
+                        error!(error = %err, "failed to send dns response to tun stack");
                     }
                 }
                 Err(err) => {
-                    error!("failed to serialize dns response: {}", err);
+                    error!(error = %err, "failed to serialize dns response");
                 }
             }
         }
@@ -455,10 +458,13 @@ impl Tun {
                 entry.insert(sender);
 
                 info!(
-                    "new udp flow: local_addr={}, fake_remote_addr={}, target={}",
-                    local_addr, fake_remote_addr, target_addr
+                    local_addr = %local_addr,
+                    fake_remote_addr = %fake_remote_addr,
+                    target = %target_addr,
+                    "udp flow started"
                 );
 
+                #[cfg(feature = "datagram")]
                 tokio::spawn(self.clone().relay_udp_flow(
                     receiver,
                     writer,
@@ -470,6 +476,7 @@ impl Tun {
         }
     }
 
+    #[cfg(feature = "datagram")]
     async fn relay_udp_flow(
         self,
         mut receiver: mpsc::Receiver<(Bytes, Address)>,
@@ -478,30 +485,35 @@ impl Tun {
         local_addr: SocketAddr,
         fake_remote_addr: SocketAddr,
     ) {
-        debug!("udp flow started: local_addr={}", local_addr);
         let mut udp_session = self.client.open_associate();
 
         let idle_timeout = tokio::time::sleep(self.config.udp_idle_timeout);
         tokio::pin!(idle_timeout);
 
+        let mut total_send_bytes = 0u64;
+        let mut total_recv_bytes = 0u64;
+        let mut target_addr: Option<Address> = None;
+
         loop {
             tokio::select! {
-                Some((packet_data, target_addr)) = receiver.recv() => {
-                    info!(
-                        "udp upstream: local={}, target={}, size={}",
-                        local_addr, target_addr, packet_data.len()
-                    );
-                    if let Err(err) = udp_session.send_to(packet_data, target_addr.clone()).await {
-                        error!("failed to send udp packet: local={}, target={}, error={}", local_addr, target_addr, err);
+                Some((packet_data, addr)) = receiver.recv() => {
+                    if target_addr.is_none() {
+                        target_addr = Some(addr.clone());
+                    }
+                    total_send_bytes += packet_data.len() as u64;
+                    if let Err(err) = udp_session.send_to(packet_data, addr.clone()).await {
+                        error!(
+                            local_addr = %local_addr,
+                            target = %addr,
+                            error = %err,
+                            "udp send failed"
+                        );
                     }
                     idle_timeout.as_mut().reset(tokio::time::Instant::now() + self.config.udp_idle_timeout);
                 }
 
-                Some((packet_data, source_addr)) = udp_session.recv_from() => {
-                    info!(
-                        "udp downstream: source={}, local={}, size={}",
-                        source_addr, local_addr, packet_data.len()
-                    );
+                Some((packet_data, _source_addr)) = udp_session.recv_from() => {
+                    total_recv_bytes += packet_data.len() as u64;
                     let response_packet = UdpPacket {
                         data: Packet::new(packet_data),
                         src_addr: fake_remote_addr,
@@ -509,7 +521,10 @@ impl Tun {
                     };
 
                     if writer.send(response_packet).await.is_err() {
-                        error!("failed to send udp packet to tun stack, terminating flow: local={}", local_addr);
+                        error!(
+                            local_addr = %local_addr,
+                            "udp send to tun stack failed, terminating flow"
+                        );
                         break;
                     }
                     idle_timeout.as_mut().reset(tokio::time::Instant::now() + self.config.udp_idle_timeout);
@@ -517,8 +532,10 @@ impl Tun {
 
                 _ = &mut idle_timeout => {
                     info!(
-                        "udp flow timeout: local={}, fake_remote={}, idle_timeout={}s",
-                        local_addr, fake_remote_addr, self.config.udp_idle_timeout.as_secs()
+                        local_addr = %local_addr,
+                        fake_remote_addr = %fake_remote_addr,
+                        idle_timeout_secs = self.config.udp_idle_timeout.as_secs(),
+                        "udp flow timeout"
                     );
                     break;
                 }
@@ -526,6 +543,23 @@ impl Tun {
         }
 
         active_sessions.remove(&local_addr);
-        info!("udp flow closed and cleaned up: local_addr={}", local_addr);
+        if let Some(target) = target_addr {
+            info!(
+                local_addr = %local_addr,
+                fake_remote_addr = %fake_remote_addr,
+                target = %target,
+                send = total_send_bytes,
+                recv = total_recv_bytes,
+                "udp flow closed"
+            );
+        } else {
+            info!(
+                local_addr = %local_addr,
+                fake_remote_addr = %fake_remote_addr,
+                send = total_send_bytes,
+                recv = total_recv_bytes,
+                "udp flow closed"
+            );
+        }
     }
 }
