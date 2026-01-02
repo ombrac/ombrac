@@ -29,8 +29,9 @@ pub use self::fakedns::FakeDns;
 pub use crate::client::Client;
 
 mod fakedns {
-    use std::hash::{Hash, Hasher};
     use std::net::{IpAddr, Ipv4Addr};
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicU32, Ordering};
     use std::time::Duration;
 
     use hickory_proto::op::{Message, MessageType, ResponseCode};
@@ -38,9 +39,7 @@ mod fakedns {
     use ipnet::Ipv4Net;
     use moka::future::Cache;
     use ombrac_macros::{debug, warn};
-    use twox_hash::XxHash64;
 
-    const XX_HASH_SEED: u64 = 0;
     const DNS_RESPONSE_TTL: u32 = 5;
     const CACHE_TTL: Duration = Duration::from_secs(DNS_RESPONSE_TTL as u64 + (7 * 24 * 60 * 60));
 
@@ -49,6 +48,7 @@ mod fakedns {
         ip_net: Ipv4Net,
         domain_to_ip: Cache<Name, Ipv4Addr>,
         ip_to_domain: Cache<Ipv4Addr, Name>,
+        next_ip_offset: Arc<AtomicU32>,
     }
 
     impl FakeDns {
@@ -63,21 +63,30 @@ mod fakedns {
                     .max_capacity(10_000)
                     .time_to_idle(CACHE_TTL)
                     .build(),
+                next_ip_offset: Arc::new(AtomicU32::new(1)),
             }
         }
 
-        fn get_ip_for_domain(&self, domain_name: &Name) -> Option<Ipv4Addr> {
-            let num_hosts = self.ip_net.hosts().count() as u64;
+        fn get_ip_for_domain(&self, _domain_name: &Name) -> Option<Ipv4Addr> {
+            let num_hosts = self.ip_net.hosts().count() as u32;
             if num_hosts == 0 {
                 return None;
             }
 
             let network_addr = self.ip_net.network();
-            let mut hasher = XxHash64::with_seed(XX_HASH_SEED);
-            domain_name.hash(&mut hasher);
-            let hash_val = hasher.finish();
-            let offset = (hash_val % num_hosts) + 1;
-            let ip_as_u32 = u32::from(network_addr).wrapping_add(offset as u32);
+
+            // Use incremental allocation to avoid hash collisions
+            // Start from offset 1 (network address + 1) and increment
+            let offset = self.next_ip_offset.fetch_add(1, Ordering::Relaxed);
+
+            // Wrap around if we exceed the available host count
+            let wrapped_offset = if offset > num_hosts {
+                ((offset - 1) % num_hosts) + 1
+            } else {
+                offset
+            };
+
+            let ip_as_u32 = u32::from(network_addr).wrapping_add(wrapped_offset);
             Some(Ipv4Addr::from(ip_as_u32))
         }
 
@@ -85,7 +94,7 @@ mod fakedns {
             let query = match Message::from_vec(query_bytes) {
                 Ok(q) => q,
                 Err(e) => {
-                    warn!("failed to parse dns query: {}", e);
+                    warn!(error = %e, "failed to parse dns query");
                     return None;
                 }
             };
@@ -111,8 +120,9 @@ mod fakedns {
                 self.domain_to_ip.insert(domain_name.clone(), new_ip).await;
                 self.ip_to_domain.insert(new_ip, domain_name.clone()).await;
                 debug!(
-                    "fakedns: mapped {} -> {} (stateless calculation)",
-                    domain_name, new_ip
+                    domain = %domain_name,
+                    fake_ip = %new_ip,
+                    "fakedns mapped domain to ip"
                 );
                 new_ip
             };
@@ -145,6 +155,7 @@ pub struct TunConfig {
     pub fakedns_cidr: Ipv4Net,
     pub udp_idle_timeout: Duration,
     pub udp_session_channel_capacity: usize,
+    pub disable_udp_443: bool,
 }
 
 impl Default for TunConfig {
@@ -154,7 +165,8 @@ impl Default for TunConfig {
                 .parse()
                 .expect("Hardcoded FakeDNS CIDR is invalid"),
             udp_idle_timeout: Duration::from_secs(60),
-            udp_session_channel_capacity: 128,
+            udp_session_channel_capacity: 2048,
+            disable_udp_443: false,
         }
     }
 }
@@ -223,11 +235,10 @@ impl Tun {
 
         for task in processing_tasks {
             if let Err(err) = task.await {
-                error!("processing task panicked or failed: {:?}", err);
+                error!(error = ?err, "processing task panicked or failed");
             }
         }
 
-        debug!("tun stack has shut down completely");
         Ok(())
     }
 
@@ -244,12 +255,12 @@ impl Tun {
                     match packet_result {
                         Some(Ok(packet)) => {
                             if let Err(err) = tun_sink.send(packet.into_bytes()).await {
-                                error!("failed to send packet to tun device: {}, stopping task", err);
+                                error!("failed to send packet to tun device: {}, stopping forwarding", err);
                                 break;
                             }
                         }
                         Some(Err(err)) => {
-                            error!("netstack read error: {}, stopping task", err);
+                            error!("netstack read error: {}, stopping forwarding", err);
                             break;
                         }
                         None => break,
@@ -257,7 +268,7 @@ impl Tun {
                 }
             }
         }
-        debug!("stack-to-tun forwarding task finished");
+        debug!("stack-to-tun forwarding finished");
     }
 
     async fn forward_packets_from_tun_to_stack(
@@ -273,23 +284,23 @@ impl Tun {
                     match packet_result {
                         Some(Ok(packet)) => {
                             if let Err(err) = stack_sink.send(Packet::new(packet)).await {
-                                error!("failed to send packet to stack: {}, stopping task", err);
+                                error!("failed to send packet to stack: {}, stopping forwarding", err);
                                 break;
                             }
                         }
                         Some(Err(err)) => {
-                            error!("tun device read error: {}, stopping task", err);
+                            error!("tun device read error: {}, stopping forwarding", err);
                             break;
                         }
                         None => {
-                            info!("tun device stream closed, stopping tun-to-stack task");
+                            info!("tun device stream closed, stopping tun-to-stack forwarding");
                             break;
                         }
                     }
                 }
             }
         }
-        debug!("tun-to-stack forwarding task finished");
+        debug!("tun-to-stack forwarding finished");
     }
 
     async fn accept_tcp_connections(
@@ -311,13 +322,17 @@ impl Tun {
                     tokio::spawn(async move {
                         let remote_addr = stream.remote_addr();
                         if let Err(err) = tun_instance.relay_tcp_stream(stream).await {
-                            error!("error handling tcp stream from {}: {}", remote_addr, err);
+                            error!(
+                                src_addr = %remote_addr,
+                                error = %err,
+                                "tcp stream error"
+                            );
                         }
                     });
                 }
             }
         }
-        debug!("tcp connection acceptor task finished");
+        debug!("tcp connection acceptor finished");
     }
 
     async fn relay_tcp_stream(&self, mut stream: TcpStream) -> io::Result<()> {
@@ -344,23 +359,23 @@ impl Tun {
         match ombrac_transport::io::copy_bidirectional(&mut stream, &mut remote_stream).await {
             Ok(stats) => {
                 info!(
-                    src_addr = local_addr.to_string(),
-                    fake_addr = remote_addr.to_string(),
-                    dst_addr = target_addr.to_string(),
+                    src_addr = %local_addr,
+                    fake_addr = %remote_addr,
+                    dst_addr = %target_addr,
                     send = stats.a_to_b_bytes,
                     recv = stats.b_to_a_bytes,
-                    "connect"
+                    "tcp connect"
                 );
             }
             Err((err, stats)) => {
                 error!(
-                    src_addr = local_addr.to_string(),
-                    fake_addr = remote_addr.to_string(),
-                    dst_addr = target_addr.to_string(),
+                    src_addr = %local_addr,
+                    fake_addr = %remote_addr,
+                    dst_addr = %target_addr,
                     send = stats.a_to_b_bytes,
                     recv = stats.b_to_a_bytes,
                     error = %err,
-                    "connect"
+                    "tcp connect"
                 );
                 return Err(err);
             }
@@ -371,8 +386,7 @@ impl Tun {
 
     async fn process_incoming_udp_packets(self, udp_socket: UdpTunnel, token: CancellationToken) {
         let (mut reader, writer) = udp_socket.split();
-        let active_sessions: Arc<DashMap<SocketAddr, mpsc::Sender<(Bytes, Address)>>> =
-            Arc::new(DashMap::new());
+        let active_sessions = Arc::new(DashMap::new());
 
         loop {
             tokio::select! {
@@ -391,11 +405,21 @@ impl Tun {
                         continue;
                     }
 
+                    // Skip UDP packets to port 443 if disabled
+                    if self.config.disable_udp_443 && packet.dst_addr.port() == 443 {
+                        info!(
+                            src_addr = %packet.src_addr,
+                            dst_addr = %packet.dst_addr,
+                            "dropping UDP packet to port 443"
+                        );
+                        continue;
+                    }
+
                     self.handle_udp_data_packet(packet, &active_sessions, writer.clone()).await;
                 }
             }
         }
-        debug!("udp packet processing task finished");
+        debug!("udp packet processing finished");
     }
 
     async fn handle_dns_query_packet(&self, packet: UdpPacket, writer: &mut SplitWrite) {
@@ -409,11 +433,11 @@ impl Tun {
                         dst_addr: packet.src_addr,
                     };
                     if let Err(err) = writer.send(response_packet).await {
-                        error!("failed to send dns response to tun stack: {}", err);
+                        error!(error = %err, "failed to send dns response to tun stack");
                     }
                 }
                 Err(err) => {
-                    error!("failed to serialize dns response: {}", err);
+                    error!(error = %err, "failed to serialize dns response");
                 }
             }
         }
@@ -455,10 +479,13 @@ impl Tun {
                 entry.insert(sender);
 
                 info!(
-                    "new udp flow: local_addr={}, fake_remote_addr={}, target={}",
-                    local_addr, fake_remote_addr, target_addr
+                    local_addr = %local_addr,
+                    fake_remote_addr = %fake_remote_addr,
+                    target = %target_addr,
+                    "udp flow started"
                 );
 
+                #[cfg(feature = "datagram")]
                 tokio::spawn(self.clone().relay_udp_flow(
                     receiver,
                     writer,
@@ -470,6 +497,7 @@ impl Tun {
         }
     }
 
+    #[cfg(feature = "datagram")]
     async fn relay_udp_flow(
         self,
         mut receiver: mpsc::Receiver<(Bytes, Address)>,
@@ -478,30 +506,35 @@ impl Tun {
         local_addr: SocketAddr,
         fake_remote_addr: SocketAddr,
     ) {
-        debug!("udp flow started: local_addr={}", local_addr);
         let mut udp_session = self.client.open_associate();
 
         let idle_timeout = tokio::time::sleep(self.config.udp_idle_timeout);
         tokio::pin!(idle_timeout);
 
+        let mut total_send_bytes = 0u64;
+        let mut total_recv_bytes = 0u64;
+        let mut target_addr: Option<Address> = None;
+
         loop {
             tokio::select! {
-                Some((packet_data, target_addr)) = receiver.recv() => {
-                    info!(
-                        "udp upstream: local={}, target={}, size={}",
-                        local_addr, target_addr, packet_data.len()
-                    );
-                    if let Err(err) = udp_session.send_to(packet_data, target_addr.clone()).await {
-                        error!("failed to send udp packet: local={}, target={}, error={}", local_addr, target_addr, err);
+                Some((packet_data, addr)) = receiver.recv() => {
+                    if target_addr.is_none() {
+                        target_addr = Some(addr.clone());
+                    }
+                    total_send_bytes += packet_data.len() as u64;
+                    if let Err(err) = udp_session.send_to(packet_data, addr.clone()).await {
+                        error!(
+                            local_addr = %local_addr,
+                            target = %addr,
+                            error = %err,
+                            "udp send failed"
+                        );
                     }
                     idle_timeout.as_mut().reset(tokio::time::Instant::now() + self.config.udp_idle_timeout);
                 }
 
-                Some((packet_data, source_addr)) = udp_session.recv_from() => {
-                    info!(
-                        "udp downstream: source={}, local={}, size={}",
-                        source_addr, local_addr, packet_data.len()
-                    );
+                Some((packet_data, _source_addr)) = udp_session.recv_from() => {
+                    total_recv_bytes += packet_data.len() as u64;
                     let response_packet = UdpPacket {
                         data: Packet::new(packet_data),
                         src_addr: fake_remote_addr,
@@ -509,7 +542,10 @@ impl Tun {
                     };
 
                     if writer.send(response_packet).await.is_err() {
-                        error!("failed to send udp packet to tun stack, terminating flow: local={}", local_addr);
+                        error!(
+                            local_addr = %local_addr,
+                            "udp send to tun stack failed, terminating flow"
+                        );
                         break;
                     }
                     idle_timeout.as_mut().reset(tokio::time::Instant::now() + self.config.udp_idle_timeout);
@@ -517,8 +553,10 @@ impl Tun {
 
                 _ = &mut idle_timeout => {
                     info!(
-                        "udp flow timeout: local={}, fake_remote={}, idle_timeout={}s",
-                        local_addr, fake_remote_addr, self.config.udp_idle_timeout.as_secs()
+                        local_addr = %local_addr,
+                        fake_remote_addr = %fake_remote_addr,
+                        idle_timeout_secs = self.config.udp_idle_timeout.as_secs(),
+                        "udp flow timeout"
                     );
                     break;
                 }
@@ -526,6 +564,23 @@ impl Tun {
         }
 
         active_sessions.remove(&local_addr);
-        info!("udp flow closed and cleaned up: local_addr={}", local_addr);
+        if let Some(target) = target_addr {
+            info!(
+                local_addr = %local_addr,
+                fake_remote_addr = %fake_remote_addr,
+                target = %target,
+                send = total_send_bytes,
+                recv = total_recv_bytes,
+                "udp flow closed"
+            );
+        } else {
+            info!(
+                local_addr = %local_addr,
+                fake_remote_addr = %fake_remote_addr,
+                send = total_send_bytes,
+                recv = total_recv_bytes,
+                "udp flow closed"
+            );
+        }
     }
 }

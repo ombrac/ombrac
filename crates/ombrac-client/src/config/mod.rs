@@ -143,6 +143,10 @@ pub struct TunConfig {
     /// The IPv4 address pool for the built-in fake DNS server, in CIDR notation. [default: 198.18.0.0/16]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fake_dns: Option<String>,
+
+    /// Disable UDP traffic to port 443. This can improve experience in certain network environments. [default: false]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub disable_udp_443: Option<bool>,
 }
 
 #[cfg(feature = "endpoint-tun")]
@@ -154,6 +158,7 @@ impl Default for TunConfig {
             tun_ipv6: None,
             tun_mtu: Some(1500),
             fake_dns: Some("198.18.0.0/16".to_string()),
+            disable_udp_443: Some(false),
         }
     }
 }
@@ -294,6 +299,7 @@ impl ConfigBuilder {
                 tun_ipv6: override_config.tun_ipv6.or(base.tun_ipv6),
                 tun_mtu: override_config.tun_mtu.or(base.tun_mtu),
                 fake_dns: override_config.fake_dns.or(base.fake_dns),
+                disable_udp_443: override_config.disable_udp_443.or(base.disable_udp_443),
             }),
         }
     }

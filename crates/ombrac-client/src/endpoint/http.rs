@@ -47,7 +47,7 @@ impl Server {
                     let (stream, remote_addr) = match result {
                         Ok(res) => res,
                         Err(e) => {
-                            error!("failed to accept connection: {}", e);
+                            error!(error = %e, "failed to accept connection");
                             continue;
                         }
                     };
@@ -66,7 +66,11 @@ impl Server {
                             .with_upgrades()
                             .await
                             && !is_connection_closed_error(&e) {
-                                error!("failed to serve connection from {}: {}", remote_addr, e);
+                                error!(
+                                    src_addr = %remote_addr,
+                                    error = %e,
+                                    "failed to serve connection"
+                                );
                             }
                     });
                 }
@@ -88,8 +92,9 @@ impl Server {
             Ok(conn) => conn,
             Err(e) => {
                 error!(
-                    "failed to open outbound connection to {}: {}",
-                    target_addr, e
+                    dst_addr = %target_addr,
+                    error = %e,
+                    "failed to open outbound connection"
                 );
                 return Ok(Self::create_error_response(StatusCode::SERVICE_UNAVAILABLE));
             }
@@ -124,7 +129,7 @@ impl Server {
                                 dst_addr = %target_addr,
                                 send = stats.a_to_b_bytes,
                                 recv = stats.b_to_a_bytes,
-                                "connect"
+                                "tcp connect"
                             );
                         }
                         Err((err, stats)) => {
@@ -134,13 +139,17 @@ impl Server {
                                 send = stats.a_to_b_bytes,
                                 recv = stats.b_to_a_bytes,
                                 error = %err,
-                                "connect"
+                                "tcp connect"
                             );
                         }
                     }
                 }
                 Err(e) => {
-                    error!("upgrade error from {}: {}", remote_addr, e);
+                    error!(
+                        src_addr = %remote_addr,
+                        error = %e,
+                        "upgrade error"
+                    );
                 }
             }
         });
@@ -165,8 +174,10 @@ impl Server {
         tokio::spawn(async move {
             if let Err(err) = conn.await {
                 error!(
-                    "Connection to {} failed for {}: {:?}",
-                    target_addr, remote_addr, err
+                    src_addr = %remote_addr,
+                    dst_addr = %target_addr,
+                    error = ?err,
+                    "connection failed"
                 );
             }
         });
@@ -179,7 +190,7 @@ impl Server {
         req: &Request<hyper::body::Incoming>,
     ) -> Result<Address, Box<Response<BoxBody<Bytes, hyper::Error>>>> {
         let host = req.uri().host().ok_or_else(|| {
-            error!("request URI does not contain a host");
+            error!("request uri does not contain a host");
             Self::create_error_response(StatusCode::BAD_REQUEST)
         })?;
 
@@ -194,7 +205,10 @@ impl Server {
         let addr_str = format!("{}:{}", host, port);
 
         Ok(Address::try_from(addr_str).map_err(|e| {
-            error!("invalid target address format: {}", e);
+            error!(
+                error = %e,
+                "invalid target address format"
+            );
             Self::create_error_response(StatusCode::BAD_REQUEST)
         })?)
     }
