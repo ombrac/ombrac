@@ -14,28 +14,25 @@ use crate::config::{TlsMode, TransportConfig};
 #[command(version, about, long_about = None, styles = styles())]
 pub struct Args {
     /// Path to the JSON configuration file
-    /// If provided, other required options can be omitted
     #[clap(long, short = 'c', value_name = "FILE")]
     pub config: Option<PathBuf>,
 
-    /// Protocol secret key for client authentication
-    /// Must match the secret used by connecting clients
+    /// Protocol Secret
     #[clap(
         long,
         short = 'k',
         help_heading = "Required",
-        value_name = "SECRET",
+        value_name = "STR",
         required_unless_present = "config"
     )]
     pub secret: Option<String>,
 
-    /// Network address and port to bind the server
-    /// Format: IP:PORT (e.g., 0.0.0.0:8080 or [::]:8080)
+    /// Address to bind the server
     #[clap(
         long,
         short = 'l',
         help_heading = "Required",
-        value_name = "ADDRESS",
+        value_name = "ADDR",
         required_unless_present = "config"
     )]
     pub listen: Option<SocketAddr>,
@@ -51,36 +48,28 @@ pub struct Args {
 /// CLI-specific transport configuration
 #[derive(Parser, Debug, Clone)]
 pub struct CliTransportConfig {
-    /// TLS authentication mode
-    ///
-    /// - tls: Standard TLS (server certificate only)
-    /// - m-tls: Mutual TLS (client and server certificates)
-    /// - insecure: Self-signed certificate for testing (localhost only)
+    /// Set the TLS mode for the connection
     #[clap(long, value_enum, help_heading = "Transport")]
     pub tls_mode: Option<TlsMode>,
 
     /// Path to the Certificate Authority (CA) certificate file
-    /// Required when using m-tls mode
+    /// in 'TLS' mode, if not provided, the system's default root certificates are used
     #[clap(long, help_heading = "Transport", value_name = "FILE")]
     pub ca_cert: Option<PathBuf>,
 
-    /// Path to the TLS server certificate file (PEM format)
-    /// Required for tls and m-tls modes
+    /// Path to the server's TLS certificate
     #[clap(long, help_heading = "Transport", value_name = "FILE")]
     pub tls_cert: Option<PathBuf>,
 
-    /// Path to the TLS private key file (PEM format)
-    /// Required for tls and m-tls modes
+    /// Path to the server's TLS private key
     #[clap(long, help_heading = "Transport", value_name = "FILE")]
     pub tls_key: Option<PathBuf>,
 
-    /// Enable 0-RTT (Zero Round-Trip Time) for faster connection establishment
-    /// Warning: May reduce security by allowing replay attacks
-    #[clap(long, help_heading = "Transport", action)]
+    /// Enable 0-RTT for faster connection establishment
+    #[clap(long, help_heading = "Transport", value_name = "BOOL")]
     pub zero_rtt: Option<bool>,
 
-    /// ALPN (Application-Layer Protocol Negotiation) protocols
-    /// Comma-separated list (e.g., "h3,h2") [default: h3]
+    /// Application-Layer protocol negotiation (ALPN) protocols [default: h3]
     #[clap(
         long,
         help_heading = "Transport",
@@ -89,29 +78,24 @@ pub struct CliTransportConfig {
     )]
     pub alpn_protocols: Option<Vec<Vec<u8>>>,
 
-    /// Congestion control algorithm
-    /// Options: bbr, cubic, newreno [default: bbr]
+    /// Congestion control algorithm to use (e.g. bbr, cubic, newreno) [default: bbr]
     #[clap(long, help_heading = "Transport", value_name = "ALGORITHM")]
     pub congestion: Option<Congestion>,
 
     /// Initial congestion window size in bytes
-    /// Leave unset to use algorithm default
-    #[clap(long, help_heading = "Transport", value_name = "BYTES")]
+    #[clap(long, help_heading = "Transport", value_name = "NUM")]
     pub cwnd_init: Option<u64>,
 
-    /// Maximum idle timeout in milliseconds
-    /// Connection will be closed if no activity for this duration [default: 30000]
-    #[clap(long, help_heading = "Transport", value_name = "MS")]
+    /// Maximum idle time (in milliseconds) before closing the connection [default: 30000]
+    #[clap(long, help_heading = "Transport", value_name = "TIME")]
     pub idle_timeout: Option<u64>,
 
-    /// Keep-alive ping interval in milliseconds
-    /// Sends periodic pings to detect dead connections [default: 8000]
-    #[clap(long, help_heading = "Transport", value_name = "MS")]
+    /// Keep-alive interval (in milliseconds) [default: 8000]
+    #[clap(long, help_heading = "Transport", value_name = "TIME")]
     pub keep_alive: Option<u64>,
 
-    /// Maximum number of concurrent bidirectional streams per connection
-    /// Limits resource usage per client [default: 1000]
-    #[clap(long, help_heading = "Transport", value_name = "COUNT")]
+    /// Maximum number of bidirectional streams that can be open simultaneously [default: 1000]
+    #[clap(long, help_heading = "Transport", value_name = "NUM")]
     pub max_streams: Option<u64>,
 }
 
@@ -119,8 +103,7 @@ pub struct CliTransportConfig {
 #[cfg(feature = "tracing")]
 #[derive(Parser, Debug, Clone)]
 pub struct CliLoggingConfig {
-    /// Logging verbosity level
-    /// Options: TRACE, DEBUG, INFO, WARN, ERROR [default: INFO]
+    /// Logging level (e.g., INFO, WARN, ERROR) [default: INFO]
     #[clap(long, help_heading = "Logging", value_name = "LEVEL")]
     pub log_level: Option<String>,
 }

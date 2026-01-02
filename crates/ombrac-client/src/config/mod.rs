@@ -53,7 +53,7 @@ pub struct TransportConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub client_key: Option<PathBuf>,
 
-    /// Enable 0-RTT for faster connection establishment (may reduce security)
+    /// Enable 0-RTT for faster connection establishment
     #[serde(skip_serializing_if = "Option::is_none")]
     pub zero_rtt: Option<bool>,
 
@@ -144,7 +144,7 @@ pub struct TunConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fake_dns: Option<String>,
 
-    /// Disable UDP traffic to port 443. This can improve experience in certain network environments. [default: false]
+    /// Disable UDP traffic to port 443
     #[serde(skip_serializing_if = "Option::is_none")]
     pub disable_udp_443: Option<bool>,
 }
