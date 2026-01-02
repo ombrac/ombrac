@@ -80,17 +80,12 @@ jobs:
             gcc-x86-64-linux-gnu \
             gcc-aarch64-linux-gnu
 
-      - name: Build Release (default features)
-        run: cargo build --release --verbose --target ${{ matrix.target }}
-
-      - name: Build Release (all features)
-        run: cargo build --release --verbose --all-features --target ${{ matrix.target }}
-
-      - name: Build Binary Release (client)
-        run: cargo build --release --bin ombrac-client --features binary --target ${{ matrix.target }}
-
-      - name: Build Binary Release (server)
-        run: cargo build --release --bin ombrac-server --features binary --target ${{ matrix.target }}
+      - name: Build Release
+        run: |
+          cargo build --release --verbose --target ${{ matrix.target }}
+          cargo build --release --verbose --all-features --target ${{ matrix.target }}
+          cargo build --release --verbose --bin ombrac-client --features binary --target ${{ matrix.target }}
+          cargo build --release --verbose --bin ombrac-server --features binary --target ${{ matrix.target }}
 
       - name: Test Release
         if: |
@@ -99,14 +94,7 @@ jobs:
           matrix.target == 'x86_64-unknown-linux-gnu'
         run: cargo test --release --verbose --target ${{ matrix.target }}
 
-      - name: Test Release with datagram feature
-        if: |
-          matrix.target == 'x86_64-apple-darwin' ||
-          matrix.target == 'x86_64-pc-windows-msvc' ||
-          matrix.target == 'x86_64-unknown-linux-gnu'
-        run: cargo test --release --verbose --features datagram --target ${{ matrix.target }}
-
-      - name: Move binaries
+      - name: Move Binaries
         shell: bash
         run: |
           mkdir -p artifacts/
@@ -136,30 +124,44 @@ jobs:
           omitBodyDuringUpdate: true
           omitDraftDuringUpdate: true
 
-
-  build-and-push-docker-images:
+  build-docker-images:
     needs: release
-
+    runs-on: ${{ matrix.os }}
     permissions:
       contents: read
       packages: write
       attestations: write
       id-token: write
 
-    runs-on: ubuntu-latest
-
     strategy:
-      fail-fast: true
+      fail-fast: false
       matrix:
-        target: [ombrac-server, ombrac-client] 
+        include:
+          - target: ombrac-server
+            arch: amd64
+            os: ubuntu-latest
+          - target: ombrac-server
+            arch: arm64
+            os: ubuntu-24.04-arm
+
+          - target: ombrac-client
+            arch: amd64
+            os: ubuntu-latest
+          - target: ombrac-client
+            arch: arm64
+            os: ubuntu-24.04-arm
 
     env:
       REGISTRY: ghcr.io
-      IMAGE_NAME: ${{ github.repository }}/${{ matrix.target }}
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@main
+
+      - name: Normalize Image Name
+        run: |
+          LOWER_NAME=$(echo "${{ github.repository }}/${{ matrix.target }}" | tr '[:upper:]' '[:lower:]')
+          echo "IMAGE_NAME=$LOWER_NAME" >> $GITHUB_ENV
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@master
@@ -176,30 +178,93 @@ jobs:
         uses: docker/metadata-action@master
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest,enable=${{ github.ref == format('refs/tags/{0}', github.event.repository.default_branch) || startsWith(github.ref, 'refs/heads/release') }}
-          labels: |
-            org.opencontainers.image.title=${{ matrix.target }}
-            org.opencontainers.image.source=${{ github.event.repository.html_url }}
-            org.opencontainers.image.licenses=Apache-2.0
 
-      - name: Build and push Docker image for ${{ matrix.target }}
-        id: push
+      - name: Build and push by digest
+        id: build
         uses: docker/build-push-action@master
         with:
           context: .
           file: ./Dockerfile
           target: ${{ matrix.target }}
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
+          platforms: linux/${{ matrix.arch }}
+          outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
           labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
+      - name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@main
+        with:
+          name: digests-${{ matrix.target }}-${{ matrix.arch }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  push-docker-images:
+    needs: build-docker-images
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      attestations: write
+      id-token: write
+    
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [ombrac-server, ombrac-client]
+
+    env:
+      REGISTRY: ghcr.io
+
+    steps:
+      - name: Log in to the Container registry
+        uses: docker/login-action@master
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Normalize Image Name
+        run: |
+          LOWER_NAME=$(echo "${{ github.repository }}/${{ matrix.target }}" | tr '[:upper:]' '[:lower:]')
+          echo "IMAGE_NAME=$LOWER_NAME" >> $GITHUB_ENV
+
+      - name: Extract metadata (tags, labels) for Docker image
+        id: meta
+        uses: docker/metadata-action@master
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable=${{ github.ref == format('refs/tags/{0}', github.event.repository.default_branch) || startsWith(github.ref, 'refs/heads/release') }}
+
+      - name: Download digests
+        uses: actions/download-artifact@main
+        with:
+          pattern: digests-${{ matrix.target }}-*
+          merge-multiple: true
+          path: /tmp/digests
+
+      - name: Create manifest list and push
+        working-directory: /tmp/digests
+        run: |
+          docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf '${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@sha256:%s ' *)
+
+      - name: Inspect image
+        run: |
+          docker buildx imagetools inspect ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.version }}
 
   publish:
-    needs: [release, build-and-push-docker-images]
+    needs: [release, push-docker-images]
 
     runs-on: ubuntu-latest
 

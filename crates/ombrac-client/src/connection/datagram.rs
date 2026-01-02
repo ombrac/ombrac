@@ -182,10 +182,6 @@ where
     T: Initiator<Connection = C>,
     C: Connection,
 {
-    if data.is_empty() {
-        return Ok(());
-    }
-
     let conn = connection.connection();
     // Use a conservative default MTU if the transport doesn't provide one.
     let max_datagram_size = conn.max_datagram_size().unwrap_or(DEFAULT_TUNNEL_MTU);

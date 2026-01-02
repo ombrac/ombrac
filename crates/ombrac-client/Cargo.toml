@@ -21,6 +21,38 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 [features]
 default = ["tracing"]
 
+# Core features
+tracing = [
+    "dep:tracing",
+    "ombrac-macros/tracing",
+    "ombrac-netstack/tracing",
+    "ombrac-transport/tracing"
+]
+
+datagram = [
+    "ombrac-transport/datagram",
+    "dep:dashmap"
+]
+
+# Endpoint features
+endpoint-default = ["endpoint-socks"]
+endpoint-socks = ["socks-lib"]
+endpoint-http = [
+    "http", 
+    "hyper", 
+    "hyper-util", 
+    "http-body-util"
+]
+endpoint-tun = [
+    "ipnet",
+    "tun-rs",
+    "moka",
+    "twox-hash",
+    "hickory-proto",
+    "ombrac-netstack"
+]
+
+# Composite features
 binary = [
     "tracing",
     "datagram",
@@ -41,33 +73,15 @@ ffi = [
     "endpoint-tun"
 ]
 
-datagram = [
-    "ombrac-transport/datagram",
-    "dep:dashmap"
-]
-
-tracing = [
-    "dep:tracing",
-    "ombrac-macros/tracing",
-    "ombrac-netstack/tracing",
-    "ombrac-transport/tracing"
-]
-
-endpoint-default = ["endpoint-socks"]
-endpoint-socks = ["socks-lib"]
-endpoint-http = [
-    "http", 
-    "hyper", 
-    "hyper-util", 
-    "http-body-util"
-]
-endpoint-tun = [
-    "ipnet",
-    "tun-rs",
-    "moka",
-    "twox-hash",
-    "hickory-proto",
-    "ombrac-netstack"
+# Full feature: includes all features for comprehensive testing
+full = [
+    "tracing",
+    "datagram",
+    "dep:tracing-appender",
+    "dep:tracing-subscriber",
+    "endpoint-socks",
+    "endpoint-http",
+    "endpoint-tun"
 ]
 
 [dependencies]

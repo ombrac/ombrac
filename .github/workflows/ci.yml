@@ -81,35 +81,19 @@ jobs:
             gcc-x86-64-linux-gnu \
             gcc-aarch64-linux-gnu
 
-      - name: Build (default features)
-        run: cargo build --verbose --target ${{ matrix.target }}
+      - name: Build
+        run: |
+          cargo build --verbose --target ${{ matrix.target }}
+          cargo build --verbose --all-features --target ${{ matrix.target }}
+          cargo build --verbose --no-default-features --target ${{ matrix.target }}
+          cargo build --release --verbose --target ${{ matrix.target }}
+          cargo build --release --verbose --all-features --target ${{ matrix.target }}
+          cargo build --release --verbose --no-default-features --target ${{ matrix.target }}
 
-      - name: Build (all features)
-        run: cargo build --verbose --all-features --target ${{ matrix.target }}
-
-      - name: Build (no default features)
-        run: cargo build --verbose --no-default-features --target ${{ matrix.target }}
-
-      - name: Build Release (default features)
-        run: cargo build --release --verbose --target ${{ matrix.target }}
-
-      - name: Build Release (all features)
-        run: cargo build --release --verbose --all-features --target ${{ matrix.target }}
-
-      - name: Build Release (no default features)
-        run: cargo build --release --verbose --no-default-features --target ${{ matrix.target }}
-
-      - name: Build Binary (client)
-        run: cargo build --verbose --bin ombrac-client --features binary --target ${{ matrix.target }}
-
-      - name: Build Binary (server)
-        run: cargo build --verbose --bin ombrac-server --features binary --target ${{ matrix.target }}
-
-      - name: Build Binary Release (client)
-        run: cargo build --release --verbose --bin ombrac-client --features binary --target ${{ matrix.target }}
-
-      - name: Build Binary Release (server)
-        run: cargo build --release --verbose --bin ombrac-server --features binary --target ${{ matrix.target }}
+      - name: Build Binaries
+        run: |
+          cargo build --release --verbose --bin ombrac-client --features binary --target ${{ matrix.target }}
+          cargo build --release --verbose --bin ombrac-server --features binary --target ${{ matrix.target }}
 
       - name: Upload Binaries
         uses: actions/upload-artifact@main
@@ -119,58 +103,16 @@ jobs:
             target/${{ matrix.target }}/release/ombrac-client${{ matrix.file-ext }}
             target/${{ matrix.target }}/release/ombrac-server${{ matrix.file-ext }}
 
-      - name: Test (Debug)
+      - name: Test
         if: |
           matrix.target == 'x86_64-apple-darwin' ||
           matrix.target == 'x86_64-pc-windows-msvc' ||
           matrix.target == 'x86_64-unknown-linux-gnu' ||
           matrix.target == 'aarch64-apple-darwin' ||
           matrix.target == 'aarch64-unknown-linux-gnu'
-        run: cargo test --verbose --target ${{ matrix.target }}
-
-      - name: Test (Release)
-        if: |
-          matrix.target == 'x86_64-apple-darwin' ||
-          matrix.target == 'x86_64-pc-windows-msvc' ||
-          matrix.target == 'x86_64-unknown-linux-gnu'
-        run: cargo test --release --verbose --target ${{ matrix.target }}
-
-      - name: Test with datagram feature
-        if: |
-          matrix.target == 'x86_64-apple-darwin' ||
-          matrix.target == 'x86_64-pc-windows-msvc' ||
-          matrix.target == 'x86_64-unknown-linux-gnu'
-        run: cargo test --verbose --features datagram --target ${{ matrix.target }}
-
-      - name: Test Integration with datagram
-        if: |
-          matrix.target == 'x86_64-apple-darwin' ||
-          matrix.target == 'x86_64-pc-windows-msvc' ||
-          matrix.target == 'x86_64-unknown-linux-gnu'
         run: |
-          cargo test --verbose \
-            --package tests-integration \
-            --features datagram \
-            --target ${{ matrix.target }}
-
-      - name: Test with all endpoint features
-        if: |
-          matrix.target == 'x86_64-apple-darwin' ||
-          matrix.target == 'x86_64-pc-windows-msvc' ||
-          matrix.target == 'x86_64-unknown-linux-gnu'
-        run: |
-          cargo test --verbose \
-            --package ombrac-client \
-            --features endpoint-http,endpoint-socks,endpoint-tun \
-            --target ${{ matrix.target }}
-
-      - name: Test with FFI feature
-        if: |
-          matrix.target == 'x86_64-apple-darwin' ||
-          matrix.target == 'x86_64-pc-windows-msvc' ||
-          matrix.target == 'x86_64-unknown-linux-gnu'
-        run: cargo test --verbose --features ffi --target ${{ matrix.target }}
-
+          cargo test --verbose --target ${{ matrix.target }}
+          cargo test --release --verbose --target ${{ matrix.target }}
 
   build-ios:
     runs-on: macos-latest

@@ -21,9 +21,24 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 [features]
 default = ["tracing"]
 
+# Core features
+tracing = [
+    "dep:tracing", 
+    "ombrac-macros/tracing",
+    "ombrac-transport/tracing"
+]
+
 datagram = [
     "moka",
     "ombrac-transport/datagram"
+]
+
+# Composite features
+binary = [
+    "tracing",
+    "datagram",
+    "dep:tracing-appender",
+    "dep:tracing-subscriber"
 ]
 
 ffi = [
@@ -33,17 +48,12 @@ ffi = [
     "dep:tracing-subscriber"
 ]
 
-binary = [
+# Full feature: includes all features for comprehensive testing
+full = [
     "tracing",
     "datagram",
     "dep:tracing-appender",
     "dep:tracing-subscriber"
-]
-
-tracing = [
-    "dep:tracing", 
-    "ombrac-macros/tracing",
-    "ombrac-transport/tracing"
 ]
 
 [dependencies]

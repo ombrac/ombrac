@@ -1,5 +1,11 @@
 # Ombrac
 
+[![docs][docs-badge]][docs-url]
+[![crates][crates-badge]][crates-url]
+[![Build Status][ci-badge]][ci-url]
+[![Build Status][release-badge]][release-url]
+[![Apache 2.0 Licensed][license-badge]][license-url]
+
 **Ombrac** is a high-performance, secure TCP-over-QUIC tunnel implemented in Rust
 
 ## Features
@@ -7,11 +13,6 @@
 - **High Performance**: Low-latency multiplexing via QUIC bidirectional streams
 - **Versatile**: Supports SOCKS5, HTTP/HTTPS, and TUN device modes
 - **Zero-RTT**: Supports 0-RTT and 0.5-RTT for near-instant connections
-
-
-[![Apache 2.0 Licensed][license-badge]][license-url]
-[![Build Status][ci-badge]][ci-url]
-[![Build Status][release-badge]][release-url]
 
 ## Installation
 The easiest way to get started is to download the latest pre-compiled binary from the [Releases Page](https://github.com/ombrac/ombrac/releases).
@@ -52,6 +53,11 @@ docker run -d --name ombrac-client -p 1080:1080/tcp ghcr.io/ombrac/ombrac/ombrac
 ## License
 This project is licensed under the [Apache-2.0 License](./LICENSE).
 
+
+[docs-badge]: https://docs.rs/ombrac/badge.svg
+[docs-url]: https://docs.rs/ombrac
+[crates-badge]: https://img.shields.io/badge/crates.io-ombrac-orange
+[crates-url]: https://crates.io/crates/ombrac
 [license-badge]: https://img.shields.io/badge/license-apache-blue.svg
 [license-url]: https://github.com/ombrac/ombrac/blob/main/LICENSE
 [ci-badge]: https://github.com/ombrac/ombrac/workflows/CI/badge.svg

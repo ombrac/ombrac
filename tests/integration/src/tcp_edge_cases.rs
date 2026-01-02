@@ -43,6 +43,7 @@ mod tests {
 
     /// Test TCP data transfer after successful connection
     #[tokio::test]
+    #[ntest::timeout(30000)]
     async fn test_tcp_data_transfer() {
         let (client, _shutdown_tx, _) = setup_test_env().await;
 
@@ -79,6 +80,7 @@ mod tests {
 
     /// Test TCP connection to a server that closes immediately
     #[tokio::test]
+    #[ntest::timeout(30000)]
     async fn test_tcp_server_closes_immediately() {
         let (client, _shutdown_tx, _) = setup_test_env().await;
 
@@ -110,6 +112,7 @@ mod tests {
 
     /// Test TCP connection with large data transfer
     #[tokio::test]
+    #[ntest::timeout(30000)]
     async fn test_tcp_large_data_transfer() {
         let (client, _shutdown_tx, _) = setup_test_env().await;
 
@@ -145,6 +148,7 @@ mod tests {
 
     /// Test TCP connection with domain name resolution
     #[tokio::test]
+    #[ntest::timeout(30000)]
     async fn test_tcp_domain_name_resolution() {
         let (client, _shutdown_tx, _) = setup_test_env().await;
 
@@ -175,6 +179,7 @@ mod tests {
 
     /// Test TCP connection to invalid domain name
     #[tokio::test]
+    #[ntest::timeout(30000)]
     async fn test_tcp_invalid_domain_name() {
         let (client, _shutdown_tx, _) = setup_test_env().await;
 
@@ -212,6 +217,7 @@ mod tests {
 
     /// Test multiple concurrent TCP connections
     #[tokio::test]
+    #[ntest::timeout(30000)]
     async fn test_tcp_concurrent_connections() {
         let (client, _shutdown_tx, _) = setup_test_env().await;
 
