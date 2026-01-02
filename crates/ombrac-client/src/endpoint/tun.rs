@@ -29,8 +29,9 @@ pub use self::fakedns::FakeDns;
 pub use crate::client::Client;
 
 mod fakedns {
-    use std::hash::{Hash, Hasher};
     use std::net::{IpAddr, Ipv4Addr};
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicU32, Ordering};
     use std::time::Duration;
 
     use hickory_proto::op::{Message, MessageType, ResponseCode};
@@ -38,9 +39,7 @@ mod fakedns {
     use ipnet::Ipv4Net;
     use moka::future::Cache;
     use ombrac_macros::{debug, warn};
-    use twox_hash::XxHash64;
 
-    const XX_HASH_SEED: u64 = 0;
     const DNS_RESPONSE_TTL: u32 = 5;
     const CACHE_TTL: Duration = Duration::from_secs(DNS_RESPONSE_TTL as u64 + (7 * 24 * 60 * 60));
 
@@ -49,6 +48,7 @@ mod fakedns {
         ip_net: Ipv4Net,
         domain_to_ip: Cache<Name, Ipv4Addr>,
         ip_to_domain: Cache<Ipv4Addr, Name>,
+        next_ip_offset: Arc<AtomicU32>,
     }
 
     impl FakeDns {
@@ -63,21 +63,30 @@ mod fakedns {
                     .max_capacity(10_000)
                     .time_to_idle(CACHE_TTL)
                     .build(),
+                next_ip_offset: Arc::new(AtomicU32::new(1)),
             }
         }
 
-        fn get_ip_for_domain(&self, domain_name: &Name) -> Option<Ipv4Addr> {
-            let num_hosts = self.ip_net.hosts().count() as u64;
+        fn get_ip_for_domain(&self, _domain_name: &Name) -> Option<Ipv4Addr> {
+            let num_hosts = self.ip_net.hosts().count() as u32;
             if num_hosts == 0 {
                 return None;
             }
 
             let network_addr = self.ip_net.network();
-            let mut hasher = XxHash64::with_seed(XX_HASH_SEED);
-            domain_name.hash(&mut hasher);
-            let hash_val = hasher.finish();
-            let offset = (hash_val % num_hosts) + 1;
-            let ip_as_u32 = u32::from(network_addr).wrapping_add(offset as u32);
+
+            // Use incremental allocation to avoid hash collisions
+            // Start from offset 1 (network address + 1) and increment
+            let offset = self.next_ip_offset.fetch_add(1, Ordering::Relaxed);
+
+            // Wrap around if we exceed the available host count
+            let wrapped_offset = if offset > num_hosts {
+                ((offset - 1) % num_hosts) + 1
+            } else {
+                offset
+            };
+
+            let ip_as_u32 = u32::from(network_addr).wrapping_add(wrapped_offset);
             Some(Ipv4Addr::from(ip_as_u32))
         }
 
@@ -146,6 +155,7 @@ pub struct TunConfig {
     pub fakedns_cidr: Ipv4Net,
     pub udp_idle_timeout: Duration,
     pub udp_session_channel_capacity: usize,
+    pub disable_udp_443: bool,
 }
 
 impl Default for TunConfig {
@@ -155,7 +165,8 @@ impl Default for TunConfig {
                 .parse()
                 .expect("Hardcoded FakeDNS CIDR is invalid"),
             udp_idle_timeout: Duration::from_secs(60),
-            udp_session_channel_capacity: 128,
+            udp_session_channel_capacity: 2048,
+            disable_udp_443: false,
         }
     }
 }
@@ -391,6 +402,16 @@ impl Tun {
                     if packet.dst_addr.port() == 53 {
                         let mut dns_writer = writer.clone();
                         self.handle_dns_query_packet(packet, &mut dns_writer).await;
+                        continue;
+                    }
+
+                    // Skip UDP packets to port 443 if disabled
+                    if self.config.disable_udp_443 && packet.dst_addr.port() == 443 {
+                        info!(
+                            src_addr = %packet.src_addr,
+                            dst_addr = %packet.dst_addr,
+                            "dropping UDP packet to port 443"
+                        );
                         continue;
                     }
 

@@ -113,6 +113,10 @@ pub struct CliTunConfig {
     /// The IPv4 address pool for the built-in fake DNS server, in CIDR notation. [default: 198.18.0.0/16]
     #[clap(long, help_heading = "Endpoint", value_name = "CIDR")]
     pub fake_dns: Option<String>,
+
+    /// Disable UDP traffic to port 443. This can improve experience in certain network environments. [default: false]
+    #[clap(long, help_heading = "Endpoint")]
+    pub disable_udp_443: Option<bool>,
 }
 
 #[cfg(feature = "endpoint-tun")]
@@ -125,6 +129,7 @@ impl CliTunConfig {
             tun_ipv6: self.tun_ipv6,
             tun_mtu: self.tun_mtu,
             fake_dns: self.fake_dns,
+            disable_udp_443: self.disable_udp_443,
         }
     }
 }

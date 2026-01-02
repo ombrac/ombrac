@@ -360,6 +360,9 @@ impl OmbracClient {
                 Error::Config(format!("failed to parse fake_dns cidr '{value}': {e}"))
             })?;
         };
+        if let Some(value) = config.disable_udp_443 {
+            tun_config.disable_udp_443 = value;
+        };
 
         let tun = Tun::new(tun_config.into(), ombrac);
         let shutdown_signal = async {
