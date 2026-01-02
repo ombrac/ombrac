@@ -37,7 +37,7 @@ TARGETS=($IOS_ARM64 $SIM_ARM64 $SIM_X86_64 $MACOS_ARM64 $MACOS_X86_64)
 for TARGET in "${TARGETS[@]}"; do
     echo "Building for $TARGET..."
     rustup target add $TARGET
-    cargo build --release --features binary --target $TARGET -p $CRATE_NAME
+    cargo build --release --features ffi --target $TARGET -p $CRATE_NAME
     mkdir -p "$BUILD_DIR/$TARGET"
     cp "target/$TARGET/release/lib${LIB_NAME}.a" "$BUILD_DIR/$TARGET/"
 done
