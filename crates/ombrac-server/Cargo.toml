@@ -48,7 +48,6 @@ ffi = [
     "dep:tracing-subscriber"
 ]
 
-# Full feature: includes all features for comprehensive testing
 full = [
     "tracing",
     "datagram",

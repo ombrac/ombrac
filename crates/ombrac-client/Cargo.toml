@@ -73,7 +73,6 @@ ffi = [
     "endpoint-tun"
 ]
 
-# Full feature: includes all features for comprehensive testing
 full = [
     "tracing",
     "datagram",
