@@ -1,7 +1,7 @@
 use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
@@ -25,8 +25,7 @@ const MAX_SESSIONS: u64 = 8192;
 const MAX_CONCURRENT_HANDLERS: usize = 4096;
 const MAX_UDP_RECV_BUFFER_SIZE: usize = 65535;
 
-// --- Protocol & MTU ---
-const DEFAULT_TUNNEL_MTU: usize = 1350;
+// --- Protocol ---
 
 // --- Timeouts & TTL ---
 const SESSION_IDLE_TIMEOUT: Duration = Duration::from_secs(65);
@@ -43,7 +42,6 @@ pub(crate) struct DatagramTunnel<C: Connection> {
     sessions: Cache<u64, Arc<DatagramSession>>,
     dns_cache: Cache<Bytes, SocketAddr>,
     reassembler: Arc<UdpReassembler>,
-    fragment_id_counter: Arc<AtomicU32>,
     semaphore: Arc<Semaphore>,
 }
 
@@ -64,7 +62,6 @@ impl<C: Connection> DatagramTunnel<C> {
             sessions: Self::create_session_cache(),
             dns_cache: Self::create_dns_cache(),
             reassembler: Arc::new(UdpReassembler::default()),
-            fragment_id_counter: Arc::new(AtomicU32::new(0)),
             semaphore: Arc::new(Semaphore::new(MAX_CONCURRENT_HANDLERS)),
         }
     }
@@ -248,7 +245,6 @@ impl<C: Connection> DatagramTunnel<C> {
         let handler = DownstreamHandler {
             connection: Arc::clone(&self.connection),
             shutdown: self.shutdown.child_token(),
-            fragment_id_counter: Arc::clone(&self.fragment_id_counter),
             session_id,
             socket,
             downstream_bytes,
@@ -269,18 +265,11 @@ struct DownstreamHandler<C: Connection> {
     socket: Arc<UdpSocket>,
     shutdown: CancellationToken,
     downstream_bytes: Arc<AtomicU64>,
-    fragment_id_counter: Arc<AtomicU32>,
 }
 
 impl<C: Connection> DownstreamHandler<C> {
     /// Runs the downstream loop, receiving packets from the destination and sending them to the client connection.
     async fn accept_loop(self) {
-        let overhead = UdpPacket::fragmented_overhead();
-        let max_datagram_size = self
-            .connection
-            .max_datagram_size()
-            .unwrap_or(DEFAULT_TUNNEL_MTU);
-        let max_payload_size = max_datagram_size.saturating_sub(overhead).max(1);
         let mut buf = vec![0u8; MAX_UDP_RECV_BUFFER_SIZE];
 
         loop {
@@ -293,7 +282,7 @@ impl<C: Connection> DownstreamHandler<C> {
                             let data = Bytes::copy_from_slice(&buf[..len]);
                             self.downstream_bytes.fetch_add(len as u64, Ordering::Relaxed);
 
-                            if let Err(_err) = self.process_and_send_datagram(address, data, max_payload_size).await {
+                            if let Err(_err) = self.process_and_send_datagram(address, data).await {
                                 warn!("Failed to send packet to client, {_err} terminating loop.");
                                 break;
                             }
@@ -308,34 +297,22 @@ impl<C: Connection> DownstreamHandler<C> {
         }
     }
 
-    /// Processes a packet, fragmenting it if necessary, and sends it to the client connection.
+    /// Processes a packet and sends it to the client connection without fragmentation.
+    ///
+    /// The packet is sent as-is, allowing the application layer (e.g., QUIC)
+    /// to handle MTU discovery and packet sizing. This ensures proper PMTUD
+    /// behavior and optimal performance.
     async fn process_and_send_datagram(
         &self,
         address: Address,
         data: Bytes,
-        max_payload_size: usize,
     ) -> io::Result<()> {
-        if data.len() <= max_payload_size {
-            let packet = UdpPacket::Unfragmented {
-                session_id: self.session_id,
-                address,
-                data,
-            };
-            Self::send_datagram(&self.connection, packet).await?
-        } else {
-            let fragment_id = self.fragment_id_counter.fetch_add(1, Ordering::Relaxed);
-            let fragments = UdpPacket::split_packet(
-                self.session_id,
-                address,
-                data,
-                max_payload_size,
-                fragment_id,
-            );
-            for fragment in fragments {
-                Self::send_datagram(&self.connection, fragment).await?
-            }
-        }
-
+        let packet = UdpPacket::Unfragmented {
+            session_id: self.session_id,
+            address,
+            data,
+        };
+        Self::send_datagram(&self.connection, packet).await?;
         Ok(())
     }
 

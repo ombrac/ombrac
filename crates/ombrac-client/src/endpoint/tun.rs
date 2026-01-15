@@ -41,7 +41,7 @@ mod fakedns {
     use ombrac_macros::{debug, warn};
 
     const DNS_RESPONSE_TTL: u32 = 5;
-    const CACHE_TTL: Duration = Duration::from_secs(DNS_RESPONSE_TTL as u64 + (7 * 24 * 60 * 60));
+    const CACHE_TTL: Duration = Duration::from_secs(DNS_RESPONSE_TTL as u64 + (60 * 60));
 
     #[derive(Clone)]
     pub struct FakeDns {
