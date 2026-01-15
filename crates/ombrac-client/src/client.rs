@@ -87,15 +87,9 @@ where
     /// for sending and receiving UDP datagrams over the existing connection.
     #[cfg(feature = "datagram")]
     pub fn open_associate(&self) -> UdpSession<T, C> {
-        use ombrac_macros::info;
-
         let session_id = self
             .session_id_counter
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        info!(
-            "[Client] New UDP session created with session_id={}",
-            session_id
-        );
         let receiver = self.udp_dispatcher.register_session(session_id);
 
         UdpSession::new(

@@ -1,6 +1,5 @@
 use std::io;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
 use bytes::Bytes;
@@ -25,23 +24,18 @@ const DATAGRAM_MAX_DELAY: Duration = Duration::from_secs(60);
 /// Channel buffer size for UDP session dispatcher [default: 128]
 const UDP_SESSION_CHANNEL_BUFFER_SIZE: usize = 128;
 
-/// Default tunnel MTU if transport doesn't provide one [default: 1350 bytes]
-const DEFAULT_TUNNEL_MTU: usize = 1350;
-
 type UdpSessionSender = mpsc::Sender<(Bytes, Address)>;
 
 /// Manages all active UDP sessions and dispatches incoming datagrams.
 pub struct UdpDispatcher {
     // Maps a session_id to a sender that forwards data to the `UdpSession`.
     dispatch_map: DashMap<u64, UdpSessionSender>,
-    fragment_id_counter: AtomicU32,
 }
 
 impl UdpDispatcher {
     pub fn new() -> Self {
         Self {
             dispatch_map: DashMap::new(),
-            fragment_id_counter: AtomicU32::new(0),
         }
     }
 
@@ -119,11 +113,6 @@ impl UdpDispatcher {
     pub fn unregister_session(&self, session_id: u64) {
         self.dispatch_map.remove(&session_id);
     }
-
-    /// Provides access to the fragment ID counter for sending datagrams.
-    pub fn fragment_id_counter(&self) -> &AtomicU32 {
-        &self.fragment_id_counter
-    }
 }
 
 /// Reads a UDP datagram from the connection, handling reassembly.
@@ -170,62 +159,33 @@ where
     }
 }
 
-/// Sends a UDP datagram, handling fragmentation if necessary.
+/// Sends a UDP datagram without fragmentation.
+///
+/// The packet is sent as-is, allowing the application layer (e.g., QUIC)
+/// to handle MTU discovery and packet sizing. This ensures proper PMTUD
+/// behavior and optimal performance.
 pub(crate) async fn send_datagram<T, C>(
     connection: &ClientConnection<T, C>,
     session_id: u64,
     dest_addr: Address,
     data: Bytes,
-    fragment_id_counter: &AtomicU32,
 ) -> io::Result<()>
 where
     T: Initiator<Connection = C>,
     C: Connection,
 {
-    let conn = connection.connection();
-    // Use a conservative default MTU if the transport doesn't provide one.
-    let max_datagram_size = conn.max_datagram_size().unwrap_or(DEFAULT_TUNNEL_MTU);
-    // Leave a reasonable margin for headers.
-    let overhead = UdpPacket::fragmented_overhead();
-    let max_payload_size = max_datagram_size.saturating_sub(overhead).max(1);
-
-    if data.len() <= max_payload_size {
-        let packet = UdpPacket::Unfragmented {
-            session_id,
-            address: dest_addr.clone(),
-            data,
-        };
-        let encoded = packet.encode()?;
-        connection
-            .with_retry(|conn| {
-                let data_for_attempt = encoded.clone();
-                async move { conn.send_datagram(data_for_attempt).await }
-            })
-            .await?;
-    } else {
-        // The packet is too large and must be fragmented.
-        debug!(
-            session_id,
-            dest = %dest_addr,
-            packet_size = data.len(),
-            max_payload_size,
-            "packet too large, fragmenting"
-        );
-
-        let fragment_id = fragment_id_counter.fetch_add(1, Ordering::Relaxed);
-        let fragments =
-            UdpPacket::split_packet(session_id, dest_addr, data, max_payload_size, fragment_id);
-
-        for fragment in fragments {
-            let packet_bytes = fragment.encode()?;
-            connection
-                .with_retry(|conn| {
-                    let data_for_attempt = packet_bytes.clone();
-                    async move { conn.send_datagram(data_for_attempt).await }
-                })
-                .await?;
-        }
-    }
+    let packet = UdpPacket::Unfragmented {
+        session_id,
+        address: dest_addr,
+        data,
+    };
+    let encoded = packet.encode()?;
+    connection
+        .with_retry(|conn| {
+            let data_for_attempt = encoded.clone();
+            async move { conn.send_datagram(data_for_attempt).await }
+        })
+        .await?;
     Ok(())
 }
 
@@ -268,7 +228,6 @@ where
             self.session_id,
             dest_addr,
             data,
-            self.dispatcher.fragment_id_counter(),
         )
         .await
     }
