@@ -302,11 +302,7 @@ impl<C: Connection> DownstreamHandler<C> {
     /// The packet is sent as-is, allowing the application layer (e.g., QUIC)
     /// to handle MTU discovery and packet sizing. This ensures proper PMTUD
     /// behavior and optimal performance.
-    async fn process_and_send_datagram(
-        &self,
-        address: Address,
-        data: Bytes,
-    ) -> io::Result<()> {
+    async fn process_and_send_datagram(&self, address: Address, data: Bytes) -> io::Result<()> {
         let packet = UdpPacket::Unfragmented {
             session_id: self.session_id,
             address,

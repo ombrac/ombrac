@@ -185,8 +185,7 @@ impl crate::Connection for quinn::Connection {
 
     #[cfg(feature = "datagram")]
     async fn send_datagram(&self, data: bytes::Bytes) -> io::Result<()> {
-        quinn::Connection::send_datagram(self, data)
-            .map_err(|e| ConnectionError::from(e).into())
+        quinn::Connection::send_datagram(self, data).map_err(|e| ConnectionError::from(e).into())
     }
 
     fn remote_address(&self) -> io::Result<std::net::SocketAddr> {
