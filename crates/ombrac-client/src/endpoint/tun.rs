@@ -1,6 +1,6 @@
 use std::future::Future;
 use std::io;
-use std::net::{IpAddr, SocketAddr};
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -14,22 +14,14 @@ use tokio_util::sync::CancellationToken;
 use tun_rs::async_framed::{BytesCodec, DeviceFramed};
 
 use ombrac::protocol::Address;
-use ombrac_macros::{debug, error, info, warn};
+use ombrac_macros::{debug, error, info};
 use ombrac_netstack::{
-    stack::{NetStack, NetStackConfig, Packet, StackSplitSink, StackSplitStream, IPV6_MINIMUM_MTU},
+    stack::{NetStack, NetStackConfig, Packet, StackSplitSink, StackSplitStream},
     tcp::{TcpConnection, TcpStream},
     udp::{SplitWrite, UdpPacket, UdpTunnel},
 };
 use ombrac_transport::quic::Connection as QuicConnection;
 use ombrac_transport::quic::client::Client as QuicClient;
-
-use crate::config::DEFAULT_FAKEDNS_CIDR;
-
-/// Standard DNS port (RFC 1035)
-const DNS_PORT: u16 = 53;
-
-/// Standard HTTPS port (RFC 2818)
-const HTTPS_PORT: u16 = 443;
 
 pub use tun_rs::AsyncDevice;
 
@@ -158,65 +150,23 @@ mod fakedns {
     }
 }
 
-/// Checks if an IP address should be filtered (not sent through the tunnel).
-///
-/// This function filters:
-/// - Private IP addresses (RFC 1918, RFC 4193, etc.)
-/// - Broadcast addresses
-/// - Multicast addresses
-/// - Link-local addresses
-/// - Loopback addresses
-///
-/// Note: Fake IP addresses (FakeDNS CIDR range) should be handled separately
-/// because they may be valid if they exist in the FakeDNS cache.
-/// Note: Routing loop prevention (filtering proxy server IP) should be handled
-/// at the routing level, not in the application layer.
-fn should_filter_ip(ip: &IpAddr) -> bool {
-    match ip {
-        IpAddr::V4(v4) => {
-            v4.is_loopback() || 
-            v4.is_multicast() || 
-            v4.is_broadcast() || 
-            v4.is_private() || 
-            v4.is_link_local() ||
-            v4.is_unspecified() ||
-            matches!(v4.octets(), [100, b, ..] if b & 0xc0 == 64)
-        }
-        IpAddr::V6(v6) => {
-            v6.is_loopback() || 
-            v6.is_multicast() || 
-            v6.is_unspecified() ||
-            matches!(v6.octets(), [b, ..] if b & 0xfe == 0xfc) ||
-            matches!(v6.octets(), [0xfe, b, ..] if b & 0xc0 == 0x80)
-        }
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct TunConfig {
     pub fakedns_cidr: Ipv4Net,
     pub udp_idle_timeout: Duration,
     pub udp_session_channel_capacity: usize,
     pub disable_udp_443: bool,
-    /// IPv4 address and prefix length for the TUN device (if configured)
-    /// This should match the TUN device's actual IP address for proper NetStack operation
-    pub tun_ipv4: Option<(std::net::Ipv4Addr, u8)>,
-    /// IPv6 address and prefix length for the TUN device (if configured)
-    /// This should match the TUN device's actual IP address for proper NetStack operation
-    pub tun_ipv6: Option<(std::net::Ipv6Addr, u8)>,
 }
 
 impl Default for TunConfig {
     fn default() -> Self {
         Self {
-            fakedns_cidr: DEFAULT_FAKEDNS_CIDR
+            fakedns_cidr: "198.18.0.0/16"
                 .parse()
-                .expect("Default FakeDNS CIDR is invalid"),
+                .expect("Hardcoded FakeDNS CIDR is invalid"),
             udp_idle_timeout: Duration::from_secs(60),
             udp_session_channel_capacity: 2048,
             disable_udp_443: false,
-            tun_ipv4: None,
-            tun_ipv6: None,
         }
     }
 }
@@ -251,29 +201,10 @@ impl Tun {
         device: AsyncDevice,
         shutdown_signal: impl Future<Output = ()>,
     ) -> std::io::Result<()> {
-        // Get the actual MTU from the TUN device to ensure NetStack matches it
-        // This ensures TUN device and NetStack use the same MTU value
-        // Fallback to IPv6 minimum MTU if device MTU is unavailable
-        #[cfg(not(any(target_os = "ios", target_os = "android")))]
-        let device_mtu = device.mtu().unwrap_or(IPV6_MINIMUM_MTU as u16);
-        #[cfg(any(target_os = "ios", target_os = "android"))]
-        let device_mtu = IPV6_MINIMUM_MTU as u16;
-
-        // Synchronize NetStack IP addresses and MTU with TUN device for proper operation
-        // NetStack needs to know the TUN device's IP addresses for:
-        // - Setting source IP addresses in outgoing packets
-        // - Identifying packets destined for this interface
-        // - Correct routing table configuration
-        let stack_config = NetStackConfig::with_mtu_and_ip_addresses(
-            device_mtu as usize,
-            self.config.tun_ipv4,
-            self.config.tun_ipv6,
-        );
-
         let framed = DeviceFramed::new(device, BytesCodec::new());
         let (tun_sink, tun_stream) = framed.split::<bytes::Bytes>();
 
-        let (stack, tcp_listener, udp_socket) = NetStack::new(stack_config);
+        let (stack, tcp_listener, udp_socket) = NetStack::new(NetStackConfig::default());
         let (stack_sink, stack_stream) = stack.split();
 
         let shutdown_token = CancellationToken::new();
@@ -408,24 +339,10 @@ impl Tun {
         let local_addr = stream.local_addr();
         let remote_addr = stream.remote_addr();
 
-        // Filter local/private addresses before processing
-        if should_filter_ip(&remote_addr.ip()) {
-            warn!(
-                src_addr = %local_addr,
-                dst_addr = %remote_addr,
-                "dropping TCP connection to filtered IP address (private/broadcast/multicast/loopback)"
-            );
-            return Err(io::Error::other(format!(
-                "connection to filtered IP address: {}",
-                remote_addr
-            )));
-        }
-
         let target_addr =
             if let Some(domain) = self.fakedns.get_domain_by_ip(&remote_addr.ip()).await {
                 Address::from((domain.to_utf8(), remote_addr.port()))
             } else {
-                // Check if IP is in Fake IP range but not in cache (DNS cache miss)
                 if let SocketAddr::V4(addr) = remote_addr
                     && self.config.fakedns_cidr.contains(addr.ip())
                 {
@@ -482,14 +399,14 @@ impl Tun {
                         None => break,
                     };
 
-                    if packet.dst_addr.port() == DNS_PORT {
+                    if packet.dst_addr.port() == 53 {
                         let mut dns_writer = writer.clone();
                         self.handle_dns_query_packet(packet, &mut dns_writer).await;
                         continue;
                     }
 
                     // Skip UDP packets to port 443 if disabled
-                    if self.config.disable_udp_443 && packet.dst_addr.port() == HTTPS_PORT {
+                    if self.config.disable_udp_443 && packet.dst_addr.port() == 443 {
                         info!(
                             src_addr = %packet.src_addr,
                             dst_addr = %packet.dst_addr,
@@ -536,31 +453,10 @@ impl Tun {
         let fake_remote_addr = packet.dst_addr;
         let packet_data: Bytes = packet.data.into_bytes();
 
-        // Filter local/private addresses before processing
-        if should_filter_ip(&fake_remote_addr.ip()) {
-            warn!(
-                src_addr = %local_addr,
-                dst_addr = %fake_remote_addr,
-                "dropping UDP packet to filtered IP address (private/broadcast/multicast/loopback)"
-            );
-            return;
-        }
-
         let target_addr: Address =
             if let Some(domain) = self.fakedns.get_domain_by_ip(&fake_remote_addr.ip()).await {
                 Address::from((domain.to_utf8(), fake_remote_addr.port()))
             } else {
-                // Check if IP is in Fake IP range but not in cache (DNS cache miss)
-                if let SocketAddr::V4(addr) = fake_remote_addr
-                    && self.config.fakedns_cidr.contains(addr.ip())
-                {
-                    warn!(
-                        src_addr = %local_addr,
-                        dst_addr = %fake_remote_addr,
-                        "dropping UDP packet to Fake IP address not in DNS cache"
-                    );
-                    return;
-                }
                 Address::from(fake_remote_addr)
             };
 
@@ -582,7 +478,7 @@ impl Tun {
 
                 entry.insert(sender);
 
-                debug!(
+                info!(
                     local_addr = %local_addr,
                     fake_remote_addr = %fake_remote_addr,
                     target = %target_addr,
@@ -656,7 +552,7 @@ impl Tun {
                 }
 
                 _ = &mut idle_timeout => {
-                    debug!(
+                    info!(
                         local_addr = %local_addr,
                         fake_remote_addr = %fake_remote_addr,
                         idle_timeout_secs = self.config.udp_idle_timeout.as_secs(),
@@ -675,7 +571,7 @@ impl Tun {
                 target = %target,
                 send = total_send_bytes,
                 recv = total_recv_bytes,
-                "udp flow"
+                "udp flow closed"
             );
         } else {
             info!(
@@ -683,7 +579,7 @@ impl Tun {
                 fake_remote_addr = %fake_remote_addr,
                 send = total_send_bytes,
                 recv = total_recv_bytes,
-                "udp flow"
+                "udp flow closed"
             );
         }
     }

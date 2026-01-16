@@ -312,11 +312,9 @@ impl OmbracClient {
                 {
                     let device = {
                         use std::str::FromStr;
-                        use ombrac_netstack::stack::IPV6_MINIMUM_MTU;
 
                         let mut builder = tun_rs::DeviceBuilder::new();
-                        // Use IPv6 minimum MTU as default (maximum compatibility)
-                        builder = builder.mtu(config.tun_mtu.unwrap_or(IPV6_MINIMUM_MTU as u16));
+                        builder = builder.mtu(config.tun_mtu.unwrap_or(1500));
 
                         if let Some(ip_str) = &config.tun_ipv4 {
                             let ip = ipnet::Ipv4Net::from_str(ip_str).map_err(|e| {
@@ -365,23 +363,6 @@ impl OmbracClient {
         if let Some(value) = config.disable_udp_443 {
             tun_config.disable_udp_443 = value;
         };
-        
-        // Parse and set TUN device IP addresses for NetStack synchronization
-        // This ensures NetStack knows the correct IP addresses of the TUN device
-        if let Some(ip_str) = &config.tun_ipv4 {
-            use std::str::FromStr;
-            let ip_net = ipnet::Ipv4Net::from_str(ip_str).map_err(|e| {
-                Error::Config(format!("failed to parse tun_ipv4 cidr '{ip_str}': {e}"))
-            })?;
-            tun_config.tun_ipv4 = Some((ip_net.addr(), ip_net.prefix_len()));
-        }
-        if let Some(ip_str) = &config.tun_ipv6 {
-            use std::str::FromStr;
-            let ip_net = ipnet::Ipv6Net::from_str(ip_str).map_err(|e| {
-                Error::Config(format!("failed to parse tun_ipv6 cidr '{ip_str}': {e}"))
-            })?;
-            tun_config.tun_ipv6 = Some((ip_net.addr(), ip_net.prefix_len()));
-        }
 
         let tun = Tun::new(tun_config.into(), ombrac);
         let shutdown_signal = async {

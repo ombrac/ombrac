@@ -12,10 +12,6 @@ use crate::tcp::TcpConnection;
 use crate::{buffer::BufferPool, udp::UdpTunnel};
 use crate::{debug, error};
 
-/// IPv6 minimum MTU (RFC 2460). Used as the default MTU for maximum compatibility
-/// across diverse network paths, especially important for VPN tunnels.
-pub const IPV6_MINIMUM_MTU: usize = 1280;
-
 const DEFAULT_IPV4_ADDR: Ipv4Address = Ipv4Address::new(10, 0, 0, 1);
 const DEFAULT_IPV6_ADDR: Ipv6Address = Ipv6Address::new(0x0, 0xfac, 0, 0, 0, 0, 0, 1);
 
@@ -89,115 +85,25 @@ pub struct NetStackConfig {
     pub ip_ttl: u8,
 }
 
-impl NetStackConfig {
-    /// Creates a platform-optimized default configuration.
-    ///
-    /// This function provides different defaults based on the target platform:
-    /// - **Mobile platforms (iOS/Android)**: Uses 1280 MTU, smaller buffers, shorter timeouts
-    /// - **Other platforms**: Uses 1280 MTU (IPv6 minimum, safer default), standard buffers and timeouts
-    ///
-    /// All platforms default to 1280 MTU for maximum compatibility and to avoid fragmentation
-    /// issues across diverse network paths (especially important for VPN tunnels).
-    pub fn platform_default() -> Self {
-        #[cfg(any(target_os = "ios", target_os = "android"))]
-        {
-            Self {
-                // Mobile: Use IPv6 minimum MTU (ensures compatibility and avoids fragmentation)
-                mtu: IPV6_MINIMUM_MTU,
-                // Smaller channel size for mobile devices (memory constrained)
-                channel_size: 4096,
-                // Fewer workers on mobile (typically 2-4 cores)
-                number_workers: std::thread::available_parallelism().map_or(2, |n| n.get().min(4)),
-                // Smaller TCP buffers for mobile (memory and battery optimization)
-                tcp_send_buffer_size: 8 * 1024,
-                tcp_recv_buffer_size: 8 * 1024,
-                // Smaller buffer pool for mobile
-                buffer_pool_size: 16,
-                buffer_pool_default_buffer_size: 1 * 1024,
-                ipv4_addr: DEFAULT_IPV4_ADDR,
-                ipv4_prefix_len: 24,
-                ipv6_addr: DEFAULT_IPV6_ADDR,
-                ipv6_prefix_len: 64,
-                // Shorter timeouts for mobile networks (more unstable)
-                tcp_timeout: Duration::from_secs(30),
-                tcp_keep_alive: Duration::from_secs(20),
-                // Smaller batch size for mobile
-                packet_batch_size: 16,
-                ip_ttl: 64,
-            }
-        }
-
-        #[cfg(not(any(target_os = "ios", target_os = "android")))]
-        {
-            // Default for desktop platforms (macOS, Linux, Windows, etc.)
-            // Use IPv6 minimum MTU for maximum compatibility across network paths
-            Self {
-                mtu: IPV6_MINIMUM_MTU,
-                channel_size: 4096,
-                number_workers: std::thread::available_parallelism().map_or(4, |n| n.get()),
-                tcp_send_buffer_size: 16 * 1024,
-                tcp_recv_buffer_size: 16 * 1024,
-                buffer_pool_size: 32,
-                buffer_pool_default_buffer_size: 2 * 1024,
-                ipv4_addr: DEFAULT_IPV4_ADDR,
-                ipv4_prefix_len: 24,
-                ipv6_addr: DEFAULT_IPV6_ADDR,
-                ipv6_prefix_len: 64,
-                tcp_timeout: Duration::from_secs(60),
-                tcp_keep_alive: Duration::from_secs(28),
-                packet_batch_size: 32,
-                ip_ttl: 64,
-            }
-        }
-    }
-
-    /// Creates a configuration with a custom MTU value.
-    ///
-    /// All other settings use platform defaults.
-    pub fn with_mtu(mtu: usize) -> Self {
-        let mut config = Self::platform_default();
-        config.mtu = mtu;
-        config
-    }
-
-    /// Creates a configuration with custom IP addresses.
-    ///
-    /// All other settings use platform defaults.
-    /// If `ipv4` or `ipv6` is `None`, the default address for that protocol will be used.
-    pub fn with_ip_addresses(
-        ipv4: Option<(Ipv4Addr, u8)>,
-        ipv6: Option<(Ipv6Addr, u8)>,
-    ) -> Self {
-        let mut config = Self::platform_default();
-        if let Some((addr, prefix_len)) = ipv4 {
-            config.ipv4_addr = addr;
-            config.ipv4_prefix_len = prefix_len;
-        }
-        if let Some((addr, prefix_len)) = ipv6 {
-            config.ipv6_addr = addr;
-            config.ipv6_prefix_len = prefix_len;
-        }
-        config
-    }
-
-    /// Creates a configuration with custom MTU and IP addresses.
-    ///
-    /// All other settings use platform defaults.
-    /// If `ipv4` or `ipv6` is `None`, the default address for that protocol will be used.
-    pub fn with_mtu_and_ip_addresses(
-        mtu: usize,
-        ipv4: Option<(Ipv4Addr, u8)>,
-        ipv6: Option<(Ipv6Addr, u8)>,
-    ) -> Self {
-        let mut config = Self::with_ip_addresses(ipv4, ipv6);
-        config.mtu = mtu;
-        config
-    }
-}
-
 impl Default for NetStackConfig {
     fn default() -> Self {
-        Self::platform_default()
+        Self {
+            mtu: 1500,
+            channel_size: 4096,
+            number_workers: std::thread::available_parallelism().map_or(4, |n| n.get()),
+            tcp_send_buffer_size: 16 * 1024,
+            tcp_recv_buffer_size: 16 * 1024,
+            buffer_pool_size: 32,
+            buffer_pool_default_buffer_size: 2 * 1024,
+            ipv4_addr: DEFAULT_IPV4_ADDR,
+            ipv4_prefix_len: 24,
+            ipv6_addr: DEFAULT_IPV6_ADDR,
+            ipv6_prefix_len: 64,
+            tcp_timeout: Duration::from_secs(60),
+            tcp_keep_alive: Duration::from_secs(28),
+            packet_batch_size: 32,
+            ip_ttl: 64,
+        }
     }
 }
 
