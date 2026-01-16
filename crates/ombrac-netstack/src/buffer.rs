@@ -42,9 +42,26 @@ impl BufferPool {
     }
 
     fn release(&self, buffer: BytesMut) {
+        // Limit the capacity of buffers returned to the pool to prevent memory bloat.
+        // If a buffer was expanded during high load, shrink it back to a reasonable size
+        // before returning it to the pool. This prevents the pool from accumulating
+        // oversized buffers that consume memory unnecessarily.
+        const MAX_POOLED_CAPACITY: usize = 4 * 1024; // 4KB max capacity for pooled buffers
+        
+        // If buffer is too large, don't return it to the pool - let it be dropped
+        // This prevents memory bloat from high-load scenarios
+        if buffer.capacity() > MAX_POOLED_CAPACITY {
+            // Drop the oversized buffer - it will be freed immediately
+            // A new buffer will be allocated when needed
+            return;
+        }
+        
+        // Only return buffers to the pool if there's room
+        // This prevents the pool from growing unbounded
         if self.pool.len() < self.max_pool_size {
             self.pool.push(buffer);
         }
+        // If pool is full, the buffer is dropped and memory is freed
     }
 }
 
