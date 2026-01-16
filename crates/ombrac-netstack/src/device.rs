@@ -101,13 +101,17 @@ impl<'a> TxToken for TxTokenImpl<'a> {
         F: FnOnce(&mut [u8]) -> R,
     {
         let mut buffer = self.buffer_pool.get(len);
+
+        let current_cap = buffer.capacity();
+        if current_cap < len {
+            buffer.reserve(len - current_cap);
+        }
+
         buffer.resize(len, 0);
 
         let result = f(&mut buffer);
-
-        let filled_bytes = buffer.split_to(len);
-        let packet = Packet::new(filled_bytes.freeze());
-        self.tx_sender.send(packet);
+        let data_packet = bytes::Bytes::copy_from_slice(&buffer);
+        self.tx_sender.send(Packet::new(data_packet));
 
         result
     }

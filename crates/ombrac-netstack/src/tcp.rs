@@ -9,7 +9,7 @@ use std::time::Duration;
 use ringbuf::HeapRb;
 use ringbuf::traits::{Consumer, Observer, Producer};
 use smoltcp::iface::{Interface, PollResult, SocketSet};
-use smoltcp::socket::tcp::{CongestionControl, Socket, SocketBuffer, State};
+use smoltcp::socket::tcp::{CongestionControl, Socket, SocketBuffer};
 use smoltcp::wire::{IpCidr, IpProtocol, TcpPacket};
 use tokio::sync::{Notify, broadcast, mpsc};
 use tokio::task::JoinHandle;
@@ -218,6 +218,14 @@ impl TcpConnectionWorker {
                 // Handle IO for all active sockets
                 let mut total_bytes_processed = 0;
                 for (socket_handle, socket_control) in self.socket_maps.iter_mut() {
+                    // Skip sockets that have been marked as dropped (they will be cleaned up in next prune)
+                    if socket_control
+                        .shared_state
+                        .socket_dropped
+                        .load(Ordering::Acquire)
+                    {
+                        continue;
+                    }
                     let socket = self.sockets.get_mut::<Socket>(*socket_handle);
                     let (read, written) = Self::handle_socket_io(socket, socket_control);
                     if read > 0 || written > 0 {
@@ -228,7 +236,7 @@ impl TcpConnectionWorker {
                     progress = true;
                 }
 
-                // Prune any closed/aborted sockets
+                // Prune again after IO to clean up any sockets that became inactive during IO
                 if Self::prune_sockets(&mut self.sockets, &mut self.socket_maps) {
                     progress = true;
                 }
@@ -460,9 +468,11 @@ impl TcpConnectionWorker {
                 .load(Ordering::Acquire)
             {
                 socket.abort();
+                sockets.remove(*handle);
+                return false;
             }
 
-            if !socket.is_active() && socket.state() == State::Closed {
+            if !socket.is_active() {
                 sockets.remove(*handle);
                 return false;
             }
@@ -546,19 +556,26 @@ mod stream {
             cx: &mut Context<'_>,
             buf: &mut ReadBuf<'_>,
         ) -> Poll<std::io::Result<()>> {
-            if self.recv_buffer_cons.is_empty() {
+            let len_before = self.recv_buffer_cons.occupied_len();
+
+            if len_before == 0 {
                 if self.shared_state.read_closed.load(Ordering::Acquire) {
                     return Poll::Ready(Ok(()));
                 }
                 self.shared_state.recv_waker.register(cx.waker());
-                return Poll::Pending;
+
+                if self.recv_buffer_cons.is_empty() {
+                    return Poll::Pending;
+                }
             }
 
             let unfilled_slice = buf.initialize_unfilled();
             let n = self.recv_buffer_cons.pop_slice(unfilled_slice);
             buf.advance(n);
 
-            self.worker_notifier.notify_one();
+            if n > 0 {
+                self.worker_notifier.notify_one();
+            }
 
             Poll::Ready(Ok(()))
         }
@@ -570,7 +587,7 @@ mod stream {
             cx: &mut Context<'_>,
             buf: &[u8],
         ) -> Poll<std::io::Result<usize>> {
-            if self.shared_state.socket_dropped.load(Ordering::Relaxed) {
+            if self.shared_state.socket_dropped.load(Ordering::Acquire) {
                 return Poll::Ready(Err(std::io::Error::new(
                     std::io::ErrorKind::BrokenPipe,
                     "Socket is closing",
@@ -579,7 +596,9 @@ mod stream {
 
             if self.send_buffer_prod.is_full() {
                 self.shared_state.send_waker.register(cx.waker());
-                return Poll::Pending;
+                if self.send_buffer_prod.is_full() {
+                    return Poll::Pending;
+                }
             }
 
             let n = self.send_buffer_prod.push_slice(buf);
@@ -596,8 +615,9 @@ mod stream {
         ) -> Poll<std::io::Result<()>> {
             if !self.send_buffer_prod.is_empty() {
                 self.shared_state.send_waker.register(cx.waker());
-                self.worker_notifier.notify_one();
-                return Poll::Pending;
+                if !self.send_buffer_prod.is_empty() {
+                    return Poll::Pending;
+                }
             }
             Poll::Ready(Ok(()))
         }

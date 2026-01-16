@@ -9,7 +9,7 @@ use tokio_util::sync::CancellationToken;
 
 use ombrac::protocol::{Address, UdpPacket};
 use ombrac::reassembly::UdpReassembler;
-use ombrac_macros::{debug, warn};
+use ombrac_macros::warn;
 use ombrac_transport::{Connection, Initiator};
 
 use super::ClientConnection;
@@ -223,13 +223,7 @@ where
 
     /// Sends a UDP datagram to the specified destination through the tunnel.
     pub async fn send_to(&self, data: Bytes, dest_addr: Address) -> io::Result<()> {
-        send_datagram(
-            &self.connection,
-            self.session_id,
-            dest_addr,
-            data,
-        )
-        .await
+        send_datagram(&self.connection, self.session_id, dest_addr, data).await
     }
 
     /// Receives a UDP datagram from the tunnel for this session.
