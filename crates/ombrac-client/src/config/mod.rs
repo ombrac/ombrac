@@ -9,6 +9,10 @@ use ombrac_transport::quic::Congestion;
 pub mod cli;
 pub mod json;
 
+/// Default FakeDNS CIDR range (RFC 2544 - Benchmarking Methodology for Network Interconnect Devices)
+/// This range is reserved for benchmarking and is safe to use for FakeDNS.
+pub const DEFAULT_FAKEDNS_CIDR: &str = "198.18.0.0/16";
+
 #[derive(Deserialize, Serialize, Debug, Clone, Default)]
 pub struct EndpointConfig {
     /// The address to bind for the HTTP/HTTPS server
@@ -136,7 +140,10 @@ pub struct TunConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tun_ipv6: Option<String>,
 
-    /// The Maximum Transmission Unit (MTU) for the TUN device. [default: 1500]
+    /// The Maximum Transmission Unit (MTU) for the TUN device. [default: 1280]
+    ///
+    /// Defaults to 1280 bytes (IPv6 minimum MTU) for maximum compatibility and to avoid
+    /// fragmentation issues across diverse network paths, especially important for VPN tunnels.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tun_mtu: Option<u16>,
 
@@ -152,12 +159,13 @@ pub struct TunConfig {
 #[cfg(feature = "endpoint-tun")]
 impl Default for TunConfig {
     fn default() -> Self {
+        // Use IPv6 minimum MTU as default for all platforms (maximum compatibility)
         Self {
             tun_fd: None,
             tun_ipv4: None,
             tun_ipv6: None,
-            tun_mtu: Some(1500),
-            fake_dns: Some("198.18.0.0/16".to_string()),
+            tun_mtu: Some(ombrac_netstack::stack::IPV6_MINIMUM_MTU as u16),
+            fake_dns: Some(DEFAULT_FAKEDNS_CIDR.to_string()),
             disable_udp_443: Some(false),
         }
     }
