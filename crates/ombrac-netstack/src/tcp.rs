@@ -9,7 +9,7 @@ use std::time::Duration;
 use ringbuf::HeapRb;
 use ringbuf::traits::{Consumer, Observer, Producer};
 use smoltcp::iface::{Interface, PollResult, SocketSet};
-use smoltcp::socket::tcp::{CongestionControl, Socket, SocketBuffer};
+use smoltcp::socket::tcp::{CongestionControl, Socket, SocketBuffer, State};
 use smoltcp::wire::{IpCidr, IpProtocol, TcpPacket};
 use tokio::sync::{Notify, broadcast, mpsc};
 use tokio::task::JoinHandle;
@@ -228,7 +228,7 @@ impl TcpConnectionWorker {
                     progress = true;
                 }
 
-                // Prune again after IO to catch any sockets that became inactive during IO
+                // Prune any closed/aborted sockets
                 if Self::prune_sockets(&mut self.sockets, &mut self.socket_maps) {
                     progress = true;
                 }
@@ -454,23 +454,15 @@ impl TcpConnectionWorker {
         socket_maps.retain(|handle, socket_control| {
             let socket = sockets.get_mut::<Socket>(*handle);
 
-            // If the socket is marked as dropped by the application layer (TcpStream dropped),
-            // immediately abort and clean it up. This is critical for memory management because
-            // the ring buffers are shared via Arc, and we need to release them as soon as possible.
             if socket_control
                 .shared_state
                 .socket_dropped
                 .load(Ordering::Acquire)
             {
                 socket.abort();
-                sockets.remove(*handle);
-                return false; // Remove from socket_maps to release ring buffer references
             }
 
-            // Clean up sockets that are not active, regardless of their state.
-            // This includes Closed, TimeWait, and other terminal states.
-            // This prevents memory leaks from sockets stuck in intermediate states.
-            if !socket.is_active() {
+            if !socket.is_active() && socket.state() == State::Closed {
                 sockets.remove(*handle);
                 return false;
             }

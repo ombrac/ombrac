@@ -106,10 +106,7 @@ pub struct CliTunConfig {
     #[clap(long, help_heading = "Endpoint", value_name = "CIDR")]
     pub tun_ipv6: Option<String>,
 
-    /// The Maximum Transmission Unit (MTU) for the TUN device. [default: 1280]
-    ///
-    /// Defaults to 1280 bytes (IPv6 minimum MTU) for maximum compatibility and to avoid
-    /// fragmentation issues across diverse network paths, especially important for VPN tunnels.
+    /// The Maximum Transmission Unit (MTU) for the TUN device. [default: 1500]
     #[clap(long, help_heading = "Endpoint", value_name = "MTU")]
     pub tun_mtu: Option<u16>,
 
