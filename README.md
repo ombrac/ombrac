@@ -42,12 +42,23 @@ ombrac-client -s "server:443" -k "secret-key" --socks "127.0.0.1:1080" --http "1
 ### Docker Deployment (Insecure Mode)
 ```bash
 # Server
-docker run -d --name ombrac-server -p 443:443/udp ghcr.io/ombrac/ombrac/ombrac-server:latest \
-  -l 0.0.0.0:443 -k secret --tls-mode insecure
+docker run -d \
+  --name ombrac-server \
+  -p 443:443/udp \
+  ghcr.io/ombrac/ombrac/ombrac-server:latest \
+  -l 0.0.0.0:443 \
+  -k secret \
+  --tls-mode insecure
 
 # Client
-docker run -d --name ombrac-client -p 1080:1080/tcp ghcr.io/ombrac/ombrac/ombrac-client:latest \
-  -s server:443 -k secret --socks 0.0.0.0:1080 --tls-mode insecure
+docker run -d \
+  --name ombrac-client \
+  -p 1080:1080/tcp \
+  ghcr.io/ombrac/ombrac/ombrac-client:latest \
+  -s remote:443 \
+  -k secret \
+  --socks 0.0.0.0:1080 \
+  --tls-mode insecure
 ```
 
 ## CLI
