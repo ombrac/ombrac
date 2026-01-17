@@ -34,60 +34,92 @@ mod fakedns {
     use std::sync::atomic::{AtomicU32, Ordering};
     use std::time::Duration;
 
+    use crossbeam_queue::SegQueue;
     use hickory_proto::op::{Message, MessageType, ResponseCode};
     use hickory_proto::rr::{Name, RData, Record, RecordType};
     use ipnet::Ipv4Net;
     use moka::future::Cache;
+    use moka::notification::ListenerFuture;
     use ombrac_macros::{debug, warn};
 
     const DNS_RESPONSE_TTL: u32 = 5;
-    const CACHE_TTL: Duration = Duration::from_secs(DNS_RESPONSE_TTL as u64 + (60 * 60));
+    const CACHE_TTL: Duration = Duration::from_secs(DNS_RESPONSE_TTL as u64 + (7 * 24 * 60 * 60));
 
     #[derive(Clone)]
     pub struct FakeDns {
         ip_net: Ipv4Net,
         domain_to_ip: Cache<Name, Ipv4Addr>,
         ip_to_domain: Cache<Ipv4Addr, Name>,
-        next_ip_offset: Arc<AtomicU32>,
+        recycled_ips: Arc<SegQueue<Ipv4Addr>>,
+        cursor: Arc<AtomicU32>,
+        max_hosts: u32,
     }
 
     impl FakeDns {
         pub fn new(ip_net: Ipv4Net) -> Self {
+            let max_hosts = ip_net.hosts().count() as u32;
+            let recycled_ips = Arc::new(SegQueue::new());
+            let cursor = Arc::new(AtomicU32::new(2));
+
+            let domain_to_ip: Cache<Name, Ipv4Addr> = Cache::builder()
+                .max_capacity(max_hosts as u64)
+                .time_to_idle(CACHE_TTL)
+                .build();
+
+            let recycled_ips_ref = recycled_ips.clone();
+            let domain_cache_ref = domain_to_ip.clone();
+
+            let listener = move |k: Arc<Ipv4Addr>, v: Name, cause| -> ListenerFuture {
+                let q = recycled_ips_ref.clone();
+                let d_cache = domain_cache_ref.clone();
+                Box::pin(async move {
+                    d_cache.invalidate(&v).await;
+                    q.push(*k);
+                    debug!(ip = %k, domain = %v, reason = ?cause, "fakedns ip recycled");
+                })
+            };
+
+            let ip_to_domain = Cache::builder()
+                .max_capacity(max_hosts as u64)
+                .time_to_idle(CACHE_TTL)
+                .async_eviction_listener(listener)
+                .build();
+
             Self {
                 ip_net,
-                domain_to_ip: Cache::builder()
-                    .max_capacity(10_000)
-                    .time_to_idle(CACHE_TTL)
-                    .build(),
-                ip_to_domain: Cache::builder()
-                    .max_capacity(10_000)
-                    .time_to_idle(CACHE_TTL)
-                    .build(),
-                next_ip_offset: Arc::new(AtomicU32::new(1)),
+                domain_to_ip,
+                ip_to_domain,
+                recycled_ips,
+                cursor,
+                max_hosts,
             }
         }
 
-        fn get_ip_for_domain(&self, _domain_name: &Name) -> Option<Ipv4Addr> {
-            let num_hosts = self.ip_net.hosts().count() as u32;
-            if num_hosts == 0 {
-                return None;
+        async fn allocate_unique_ip(&self) -> Option<Ipv4Addr> {
+            if let Some(ip) = self.recycled_ips.pop() {
+                return Some(ip);
             }
 
-            let network_addr = self.ip_net.network();
+            loop {
+                let current = self.cursor.load(Ordering::Relaxed);
+                if current >= self.max_hosts {
+                    break;
+                }
 
-            // Use incremental allocation to avoid hash collisions
-            // Start from offset 1 (network address + 1) and increment
-            let offset = self.next_ip_offset.fetch_add(1, Ordering::Relaxed);
+                if self.cursor.compare_exchange(
+                    current,
+                    current + 1,
+                    Ordering::SeqCst,
+                    Ordering::Relaxed
+                ).is_ok() {
+                    let network_u32 = u32::from(self.ip_net.network());
+                    let new_ip = Ipv4Addr::from(network_u32 + 1 + current);
+                    return Some(new_ip);
+                }
+            }
 
-            // Wrap around if we exceed the available host count
-            let wrapped_offset = if offset > num_hosts {
-                ((offset - 1) % num_hosts) + 1
-            } else {
-                offset
-            };
-
-            let ip_as_u32 = u32::from(network_addr).wrapping_add(wrapped_offset);
-            Some(Ipv4Addr::from(ip_as_u32))
+            warn!("fakedns ip pool is exhausted! no recycled or new ips available");
+            None
         }
 
         pub async fn handle_dns_query(&self, query_bytes: &[u8]) -> Option<Message> {
@@ -116,14 +148,10 @@ mod fakedns {
             let fake_ip = if let Some(ip) = self.domain_to_ip.get(domain_name).await {
                 ip
             } else {
-                let new_ip = self.get_ip_for_domain(domain_name)?;
-                self.domain_to_ip.insert(domain_name.clone(), new_ip).await;
+                let new_ip = self.allocate_unique_ip().await?;
                 self.ip_to_domain.insert(new_ip, domain_name.clone()).await;
-                debug!(
-                    domain = %domain_name,
-                    fake_ip = %new_ip,
-                    "fakedns mapped domain to ip"
-                );
+                self.domain_to_ip.insert(domain_name.clone(), new_ip).await;
+                debug!(domain = %domain_name, fake_ip = %new_ip, "fakedns mapped new domain");
                 new_ip
             };
 
@@ -163,7 +191,7 @@ impl Default for TunConfig {
         Self {
             fakedns_cidr: "198.18.0.0/16"
                 .parse()
-                .expect("Hardcoded FakeDNS CIDR is invalid"),
+                .expect("default fake dns cidr is invalid"),
             udp_idle_timeout: Duration::from_secs(60),
             udp_session_channel_capacity: 2048,
             disable_udp_443: false,
