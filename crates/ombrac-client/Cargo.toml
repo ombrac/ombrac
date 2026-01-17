@@ -48,7 +48,7 @@ endpoint-tun = [
     "dep:ipnet",
     "dep:tun-rs",
     "dep:dashmap",
-    "dep:twox-hash",
+    "dep:crossbeam-queue",
     "dep:hickory-proto",
     "ombrac-netstack"
 ]
@@ -116,7 +116,7 @@ ipnet = { workspace = true, features = ["json"], optional = true }
 tun-rs = { workspace = true, features = ["async_tokio", "async_framed"], optional = true }
 dashmap = { workspace = true, optional = true }
 hickory-proto = { workspace = true, optional = true }
-twox-hash = { workspace = true, features = ["xxhash64"], optional = true }
+crossbeam-queue = { workspace = true, features = ["std"], optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["full"] }

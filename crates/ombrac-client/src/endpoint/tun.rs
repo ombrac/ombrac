@@ -1,6 +1,6 @@
 use std::future::Future;
 use std::io;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -34,60 +34,91 @@ mod fakedns {
     use std::sync::atomic::{AtomicU32, Ordering};
     use std::time::Duration;
 
+    use crossbeam_queue::SegQueue;
     use hickory_proto::op::{Message, MessageType, ResponseCode};
     use hickory_proto::rr::{Name, RData, Record, RecordType};
     use ipnet::Ipv4Net;
     use moka::future::Cache;
+    use moka::notification::ListenerFuture;
     use ombrac_macros::{debug, warn};
 
     const DNS_RESPONSE_TTL: u32 = 5;
-    const CACHE_TTL: Duration = Duration::from_secs(DNS_RESPONSE_TTL as u64 + (60 * 60));
+    const CACHE_TTL: Duration = Duration::from_secs(DNS_RESPONSE_TTL as u64 + (7 * 24 * 60 * 60));
 
     #[derive(Clone)]
     pub struct FakeDns {
         ip_net: Ipv4Net,
         domain_to_ip: Cache<Name, Ipv4Addr>,
         ip_to_domain: Cache<Ipv4Addr, Name>,
-        next_ip_offset: Arc<AtomicU32>,
+        recycled_ips: Arc<SegQueue<Ipv4Addr>>,
+        cursor: Arc<AtomicU32>,
+        max_hosts: u32,
     }
 
     impl FakeDns {
         pub fn new(ip_net: Ipv4Net) -> Self {
+            let max_hosts = ip_net.hosts().count() as u32;
+            let recycled_ips = Arc::new(SegQueue::new());
+            let cursor = Arc::new(AtomicU32::new(2));
+
+            let domain_to_ip: Cache<Name, Ipv4Addr> = Cache::builder()
+                .max_capacity(max_hosts as u64)
+                .time_to_idle(CACHE_TTL)
+                .build();
+
+            let recycled_ips_ref = recycled_ips.clone();
+            let domain_cache_ref = domain_to_ip.clone();
+
+            let listener = move |k: Arc<Ipv4Addr>, v: Name, cause| -> ListenerFuture {
+                let q = recycled_ips_ref.clone();
+                let d_cache = domain_cache_ref.clone();
+                Box::pin(async move {
+                    d_cache.invalidate(&v).await;
+                    q.push(*k);
+                    debug!(ip = %k, domain = %v, reason = ?cause, "fakedns ip recycled");
+                })
+            };
+
+            let ip_to_domain = Cache::builder()
+                .max_capacity(max_hosts as u64)
+                .time_to_idle(CACHE_TTL)
+                .async_eviction_listener(listener)
+                .build();
+
             Self {
                 ip_net,
-                domain_to_ip: Cache::builder()
-                    .max_capacity(10_000)
-                    .time_to_idle(CACHE_TTL)
-                    .build(),
-                ip_to_domain: Cache::builder()
-                    .max_capacity(10_000)
-                    .time_to_idle(CACHE_TTL)
-                    .build(),
-                next_ip_offset: Arc::new(AtomicU32::new(1)),
+                domain_to_ip,
+                ip_to_domain,
+                recycled_ips,
+                cursor,
+                max_hosts,
             }
         }
 
-        fn get_ip_for_domain(&self, _domain_name: &Name) -> Option<Ipv4Addr> {
-            let num_hosts = self.ip_net.hosts().count() as u32;
-            if num_hosts == 0 {
-                return None;
+        async fn allocate_unique_ip(&self) -> Option<Ipv4Addr> {
+            if let Some(ip) = self.recycled_ips.pop() {
+                return Some(ip);
             }
 
-            let network_addr = self.ip_net.network();
+            loop {
+                let current = self.cursor.load(Ordering::Relaxed);
+                if current >= self.max_hosts {
+                    break;
+                }
 
-            // Use incremental allocation to avoid hash collisions
-            // Start from offset 1 (network address + 1) and increment
-            let offset = self.next_ip_offset.fetch_add(1, Ordering::Relaxed);
+                if self
+                    .cursor
+                    .compare_exchange(current, current + 1, Ordering::SeqCst, Ordering::Relaxed)
+                    .is_ok()
+                {
+                    let network_u32 = u32::from(self.ip_net.network());
+                    let new_ip = Ipv4Addr::from(network_u32 + 1 + current);
+                    return Some(new_ip);
+                }
+            }
 
-            // Wrap around if we exceed the available host count
-            let wrapped_offset = if offset > num_hosts {
-                ((offset - 1) % num_hosts) + 1
-            } else {
-                offset
-            };
-
-            let ip_as_u32 = u32::from(network_addr).wrapping_add(wrapped_offset);
-            Some(Ipv4Addr::from(ip_as_u32))
+            warn!("fakedns ip pool is exhausted! no recycled or new ips available");
+            None
         }
 
         pub async fn handle_dns_query(&self, query_bytes: &[u8]) -> Option<Message> {
@@ -116,14 +147,10 @@ mod fakedns {
             let fake_ip = if let Some(ip) = self.domain_to_ip.get(domain_name).await {
                 ip
             } else {
-                let new_ip = self.get_ip_for_domain(domain_name)?;
-                self.domain_to_ip.insert(domain_name.clone(), new_ip).await;
+                let new_ip = self.allocate_unique_ip().await?;
                 self.ip_to_domain.insert(new_ip, domain_name.clone()).await;
-                debug!(
-                    domain = %domain_name,
-                    fake_ip = %new_ip,
-                    "fakedns mapped domain to ip"
-                );
+                self.domain_to_ip.insert(domain_name.clone(), new_ip).await;
+                debug!(domain = %domain_name, fake_ip = %new_ip, "fakedns mapped new domain");
                 new_ip
             };
 
@@ -163,7 +190,7 @@ impl Default for TunConfig {
         Self {
             fakedns_cidr: "198.18.0.0/16"
                 .parse()
-                .expect("Hardcoded FakeDNS CIDR is invalid"),
+                .expect("default fake dns cidr is invalid"),
             udp_idle_timeout: Duration::from_secs(60),
             udp_session_channel_capacity: 2048,
             disable_udp_443: false,
@@ -325,7 +352,7 @@ impl Tun {
                             error!(
                                 src_addr = %remote_addr,
                                 error = %err,
-                                "tcp stream error"
+                                "tcp connect"
                             );
                         }
                     });
@@ -337,22 +364,30 @@ impl Tun {
 
     async fn relay_tcp_stream(&self, mut stream: TcpStream) -> io::Result<()> {
         let local_addr = stream.local_addr();
-        let remote_addr = stream.remote_addr();
+        let fake_remote_addr = stream.remote_addr();
 
         let target_addr =
-            if let Some(domain) = self.fakedns.get_domain_by_ip(&remote_addr.ip()).await {
-                Address::from((domain.to_utf8(), remote_addr.port()))
+            if let Some(domain) = self.fakedns.get_domain_by_ip(&fake_remote_addr.ip()).await {
+                Address::from((domain.to_utf8(), fake_remote_addr.port()))
             } else {
-                if let SocketAddr::V4(addr) = remote_addr
+                if let SocketAddr::V4(addr) = fake_remote_addr
                     && self.config.fakedns_cidr.contains(addr.ip())
                 {
                     return Err(io::Error::other(format!(
                         "dns cache miss: {} -> {}",
-                        local_addr, remote_addr
+                        local_addr, fake_remote_addr
                     )));
                 }
-                Address::from(remote_addr)
+                Address::from(fake_remote_addr)
             };
+
+        // Skip private/reserved addresses to avoid wasting resources
+        if Self::should_skip_address(&target_addr) {
+            return Err(io::Error::other(format!(
+                "skipping private/reserved address: {} -> {}",
+                local_addr, target_addr
+            )));
+        }
 
         let mut remote_stream = self.client.open_bidirectional(target_addr.clone()).await?;
 
@@ -360,7 +395,7 @@ impl Tun {
             Ok(stats) => {
                 info!(
                     src_addr = %local_addr,
-                    fake_addr = %remote_addr,
+                    fake_addr = %fake_remote_addr,
                     dst_addr = %target_addr,
                     send = stats.a_to_b_bytes,
                     recv = stats.b_to_a_bytes,
@@ -370,7 +405,7 @@ impl Tun {
             Err((err, stats)) => {
                 error!(
                     src_addr = %local_addr,
-                    fake_addr = %remote_addr,
+                    fake_addr = %fake_remote_addr,
                     dst_addr = %target_addr,
                     send = stats.a_to_b_bytes,
                     recv = stats.b_to_a_bytes,
@@ -399,23 +434,33 @@ impl Tun {
                         None => break,
                     };
 
-                    if packet.dst_addr.port() == 53 {
+                    let src_addr = packet.src_addr;
+                    let dst_addr = packet.dst_addr;
+
+                    if dst_addr.port() == 53 {
                         let mut dns_writer = writer.clone();
                         self.handle_dns_query_packet(packet, &mut dns_writer).await;
                         continue;
                     }
 
                     // Skip UDP packets to port 443 if disabled
-                    if self.config.disable_udp_443 && packet.dst_addr.port() == 443 {
+                    if self.config.disable_udp_443 && dst_addr.port() == 443 {
                         info!(
-                            src_addr = %packet.src_addr,
-                            dst_addr = %packet.dst_addr,
-                            "dropping UDP packet to port 443"
+                            src_addr = %src_addr,
+                            dst_addr = %dst_addr,
+                            "dropping udp packet to port 443"
                         );
                         continue;
                     }
 
-                    self.handle_udp_data_packet(packet, &active_sessions, writer.clone()).await;
+                    if let Err(err) = self.handle_udp_data_packet(packet, &active_sessions, writer.clone()).await {
+                        error!(
+                            src_addr = %src_addr,
+                            dst_addr = %dst_addr,
+                            error = %err,
+                            "udp error"
+                        );
+                    };
                 }
             }
         }
@@ -448,17 +493,33 @@ impl Tun {
         packet: UdpPacket,
         active_sessions: &Arc<DashMap<SocketAddr, mpsc::Sender<(Bytes, Address)>>>,
         writer: SplitWrite,
-    ) {
+    ) -> io::Result<()> {
         let local_addr = packet.src_addr;
         let fake_remote_addr = packet.dst_addr;
-        let packet_data: Bytes = packet.data.into_bytes();
+        let packet_data = packet.data.into_bytes();
 
-        let target_addr: Address =
+        let target_addr =
             if let Some(domain) = self.fakedns.get_domain_by_ip(&fake_remote_addr.ip()).await {
                 Address::from((domain.to_utf8(), fake_remote_addr.port()))
             } else {
+                if let SocketAddr::V4(addr) = fake_remote_addr
+                    && self.config.fakedns_cidr.contains(addr.ip())
+                {
+                    return Err(io::Error::other(format!(
+                        "dns cache miss: {} -> {}",
+                        local_addr, fake_remote_addr
+                    )));
+                }
                 Address::from(fake_remote_addr)
             };
+
+        // Skip private/reserved addresses to avoid wasting resources
+        if Self::should_skip_address(&target_addr) {
+            return Err(io::Error::other(format!(
+                "skipping private/reserved address: {} -> {}",
+                local_addr, target_addr
+            )));
+        }
 
         match active_sessions.entry(local_addr) {
             Entry::Occupied(entry) => {
@@ -473,17 +534,10 @@ impl Tun {
                     .await
                     .is_err()
                 {
-                    return;
+                    return Ok(());
                 }
 
                 entry.insert(sender);
-
-                info!(
-                    local_addr = %local_addr,
-                    fake_remote_addr = %fake_remote_addr,
-                    target = %target_addr,
-                    "udp flow started"
-                );
 
                 #[cfg(feature = "datagram")]
                 tokio::spawn(self.clone().relay_udp_flow(
@@ -495,6 +549,8 @@ impl Tun {
                 ));
             }
         }
+
+        Ok(())
     }
 
     #[cfg(feature = "datagram")]
@@ -552,11 +608,11 @@ impl Tun {
                 }
 
                 _ = &mut idle_timeout => {
-                    info!(
+                    debug!(
                         local_addr = %local_addr,
                         fake_remote_addr = %fake_remote_addr,
                         idle_timeout_secs = self.config.udp_idle_timeout.as_secs(),
-                        "udp flow timeout"
+                        "udp session timeout"
                     );
                     break;
                 }
@@ -566,21 +622,61 @@ impl Tun {
         active_sessions.remove(&local_addr);
         if let Some(target) = target_addr {
             info!(
-                local_addr = %local_addr,
-                fake_remote_addr = %fake_remote_addr,
-                target = %target,
+                src_addr = %local_addr,
+                fake_addr = %fake_remote_addr,
+                dst_addr = %target,
                 send = total_send_bytes,
                 recv = total_recv_bytes,
-                "udp flow closed"
+                "udp session"
             );
         } else {
             info!(
-                local_addr = %local_addr,
-                fake_remote_addr = %fake_remote_addr,
+                src_addr = %local_addr,
+                fake_addr = %fake_remote_addr,
                 send = total_send_bytes,
                 recv = total_recv_bytes,
-                "udp flow closed"
+                "udp session"
             );
+        }
+    }
+
+    /// Check if an IP address is a private/local network or reserved address.
+    /// Returns true if the address should be skipped (not tunneled).
+    fn is_private_or_reserved(ip: &IpAddr) -> bool {
+        match ip {
+            IpAddr::V4(v4) => {
+                v4.is_private()
+                    || v4.is_loopback()
+                    || v4.is_link_local()
+                    || v4.is_multicast()
+                    || v4.is_broadcast()
+                    || v4.is_documentation()
+                    || match v4.octets() {
+                        [0, ..] => true,                             // Current network
+                        [100, b, ..] if b >= 64 && b <= 127 => true, // CGNAT
+                        [192, 0, 0, ..] => true,                     // IETF Protocol Assignments
+                        [198, 18, ..] | [198, 19, ..] => true,       // Benchmarking
+                        [240, ..] => true,                           // Reserved/Experimental
+                        _ => false,
+                    }
+            }
+            IpAddr::V6(v6) => {
+                v6.is_loopback()
+                    || v6.is_unspecified()
+                    || v6.is_multicast()
+                    || (v6.segments()[0] & 0xfe00) == 0xfc00
+                    || (v6.segments()[0] & 0xffc0) == 0xfe80
+                    || v6.segments()[0] == 0x2001 && v6.segments()[1] == 0xdb8
+                    || v6.segments()[0] == 0x100
+            }
+        }
+    }
+
+    fn should_skip_address(addr: &Address) -> bool {
+        match addr {
+            Address::SocketV4(sock) => Self::is_private_or_reserved(&IpAddr::V4(*sock.ip())),
+            Address::SocketV6(sock) => Self::is_private_or_reserved(&IpAddr::V6(*sock.ip())),
+            Address::Domain(_, _) => false, // Domain names are resolved later, skip check here
         }
     }
 }

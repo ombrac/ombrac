@@ -252,7 +252,7 @@ checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
 name = "benches"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "criterion",
  "ombrac",
@@ -1789,7 +1789,7 @@ dependencies = [
 
 [[package]]
 name = "ombrac"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "bincode",
  "bytes",
@@ -1801,7 +1801,7 @@ dependencies = [
 
 [[package]]
 name = "ombrac-client"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "arc-swap",
  "bincode",
@@ -1809,6 +1809,7 @@ dependencies = [
  "bytes",
  "cbindgen",
  "clap",
+ "crossbeam-queue",
  "dashmap",
  "futures",
  "hickory-proto",
@@ -1832,19 +1833,18 @@ dependencies = [
  "tracing-appender",
  "tracing-subscriber",
  "tun-rs",
- "twox-hash",
 ]
 
 [[package]]
 name = "ombrac-macros"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "tracing",
 ]
 
 [[package]]
 name = "ombrac-netstack"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "bytes",
  "crossbeam-queue",
@@ -1859,7 +1859,7 @@ dependencies = [
 
 [[package]]
 name = "ombrac-server"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "arc-swap",
  "bincode",
@@ -1886,7 +1886,7 @@ dependencies = [
 
 [[package]]
 name = "ombrac-transport"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "arc-swap",
  "async-channel",
@@ -2734,7 +2734,7 @@ dependencies = [
 
 [[package]]
 name = "tests-integration"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "blake3",
  "bytes",
@@ -2751,7 +2751,7 @@ dependencies = [
 
 [[package]]
 name = "tests-support"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "bytes",
  "ombrac-transport",
@@ -3059,12 +3059,6 @@ dependencies = [
  "windows-sys 0.61.1",
  "winreg 0.55.0",
 ]
-
-[[package]]
-name = "twox-hash"
-version = "2.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9ea3136b675547379c4bd395ca6b938e5ad3c3d20fad76e7fe85f9e0d011419c"
 
 [[package]]
 name = "unicode-ident"
