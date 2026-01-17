@@ -1,6 +1,6 @@
 use std::future::Future;
 use std::io;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -106,12 +106,11 @@ mod fakedns {
                     break;
                 }
 
-                if self.cursor.compare_exchange(
-                    current,
-                    current + 1,
-                    Ordering::SeqCst,
-                    Ordering::Relaxed
-                ).is_ok() {
+                if self
+                    .cursor
+                    .compare_exchange(current, current + 1, Ordering::SeqCst, Ordering::Relaxed)
+                    .is_ok()
+                {
                     let network_u32 = u32::from(self.ip_net.network());
                     let new_ip = Ipv4Addr::from(network_u32 + 1 + current);
                     return Some(new_ip);
@@ -353,7 +352,7 @@ impl Tun {
                             error!(
                                 src_addr = %remote_addr,
                                 error = %err,
-                                "tcp stream error"
+                                "tcp connect"
                             );
                         }
                     });
@@ -365,22 +364,30 @@ impl Tun {
 
     async fn relay_tcp_stream(&self, mut stream: TcpStream) -> io::Result<()> {
         let local_addr = stream.local_addr();
-        let remote_addr = stream.remote_addr();
+        let fake_remote_addr = stream.remote_addr();
 
         let target_addr =
-            if let Some(domain) = self.fakedns.get_domain_by_ip(&remote_addr.ip()).await {
-                Address::from((domain.to_utf8(), remote_addr.port()))
+            if let Some(domain) = self.fakedns.get_domain_by_ip(&fake_remote_addr.ip()).await {
+                Address::from((domain.to_utf8(), fake_remote_addr.port()))
             } else {
-                if let SocketAddr::V4(addr) = remote_addr
+                if let SocketAddr::V4(addr) = fake_remote_addr
                     && self.config.fakedns_cidr.contains(addr.ip())
                 {
                     return Err(io::Error::other(format!(
                         "dns cache miss: {} -> {}",
-                        local_addr, remote_addr
+                        local_addr, fake_remote_addr
                     )));
                 }
-                Address::from(remote_addr)
+                Address::from(fake_remote_addr)
             };
+
+        // Skip private/reserved addresses to avoid wasting resources
+        if Self::should_skip_address(&target_addr) {
+            return Err(io::Error::other(format!(
+                "skipping private/reserved address: {} -> {}",
+                local_addr, target_addr
+            )));
+        }
 
         let mut remote_stream = self.client.open_bidirectional(target_addr.clone()).await?;
 
@@ -388,7 +395,7 @@ impl Tun {
             Ok(stats) => {
                 info!(
                     src_addr = %local_addr,
-                    fake_addr = %remote_addr,
+                    fake_addr = %fake_remote_addr,
                     dst_addr = %target_addr,
                     send = stats.a_to_b_bytes,
                     recv = stats.b_to_a_bytes,
@@ -398,7 +405,7 @@ impl Tun {
             Err((err, stats)) => {
                 error!(
                     src_addr = %local_addr,
-                    fake_addr = %remote_addr,
+                    fake_addr = %fake_remote_addr,
                     dst_addr = %target_addr,
                     send = stats.a_to_b_bytes,
                     recv = stats.b_to_a_bytes,
@@ -427,23 +434,33 @@ impl Tun {
                         None => break,
                     };
 
-                    if packet.dst_addr.port() == 53 {
+                    let src_addr = packet.src_addr;
+                    let dst_addr = packet.dst_addr;
+
+                    if dst_addr.port() == 53 {
                         let mut dns_writer = writer.clone();
                         self.handle_dns_query_packet(packet, &mut dns_writer).await;
                         continue;
                     }
 
                     // Skip UDP packets to port 443 if disabled
-                    if self.config.disable_udp_443 && packet.dst_addr.port() == 443 {
+                    if self.config.disable_udp_443 && dst_addr.port() == 443 {
                         info!(
-                            src_addr = %packet.src_addr,
-                            dst_addr = %packet.dst_addr,
-                            "dropping UDP packet to port 443"
+                            src_addr = %src_addr,
+                            dst_addr = %dst_addr,
+                            "dropping udp packet to port 443"
                         );
                         continue;
                     }
 
-                    self.handle_udp_data_packet(packet, &active_sessions, writer.clone()).await;
+                    if let Err(err) = self.handle_udp_data_packet(packet, &active_sessions, writer.clone()).await {
+                        error!(
+                            src_addr = %src_addr,
+                            dst_addr = %dst_addr,
+                            error = %err,
+                            "udp error"
+                        );
+                    };
                 }
             }
         }
@@ -476,17 +493,33 @@ impl Tun {
         packet: UdpPacket,
         active_sessions: &Arc<DashMap<SocketAddr, mpsc::Sender<(Bytes, Address)>>>,
         writer: SplitWrite,
-    ) {
+    ) -> io::Result<()> {
         let local_addr = packet.src_addr;
         let fake_remote_addr = packet.dst_addr;
-        let packet_data: Bytes = packet.data.into_bytes();
+        let packet_data = packet.data.into_bytes();
 
-        let target_addr: Address =
+        let target_addr =
             if let Some(domain) = self.fakedns.get_domain_by_ip(&fake_remote_addr.ip()).await {
                 Address::from((domain.to_utf8(), fake_remote_addr.port()))
             } else {
+                if let SocketAddr::V4(addr) = fake_remote_addr
+                    && self.config.fakedns_cidr.contains(addr.ip())
+                {
+                    return Err(io::Error::other(format!(
+                        "dns cache miss: {} -> {}",
+                        local_addr, fake_remote_addr
+                    )));
+                }
                 Address::from(fake_remote_addr)
             };
+
+        // Skip private/reserved addresses to avoid wasting resources
+        if Self::should_skip_address(&target_addr) {
+            return Err(io::Error::other(format!(
+                "skipping private/reserved address: {} -> {}",
+                local_addr, target_addr
+            )));
+        }
 
         match active_sessions.entry(local_addr) {
             Entry::Occupied(entry) => {
@@ -501,17 +534,10 @@ impl Tun {
                     .await
                     .is_err()
                 {
-                    return;
+                    return Ok(());
                 }
 
                 entry.insert(sender);
-
-                info!(
-                    local_addr = %local_addr,
-                    fake_remote_addr = %fake_remote_addr,
-                    target = %target_addr,
-                    "udp flow started"
-                );
 
                 #[cfg(feature = "datagram")]
                 tokio::spawn(self.clone().relay_udp_flow(
@@ -523,6 +549,8 @@ impl Tun {
                 ));
             }
         }
+
+        Ok(())
     }
 
     #[cfg(feature = "datagram")]
@@ -580,11 +608,11 @@ impl Tun {
                 }
 
                 _ = &mut idle_timeout => {
-                    info!(
+                    debug!(
                         local_addr = %local_addr,
                         fake_remote_addr = %fake_remote_addr,
                         idle_timeout_secs = self.config.udp_idle_timeout.as_secs(),
-                        "udp flow timeout"
+                        "udp session timeout"
                     );
                     break;
                 }
@@ -594,21 +622,61 @@ impl Tun {
         active_sessions.remove(&local_addr);
         if let Some(target) = target_addr {
             info!(
-                local_addr = %local_addr,
-                fake_remote_addr = %fake_remote_addr,
-                target = %target,
+                src_addr = %local_addr,
+                fake_addr = %fake_remote_addr,
+                dst_addr = %target,
                 send = total_send_bytes,
                 recv = total_recv_bytes,
-                "udp flow closed"
+                "udp session"
             );
         } else {
             info!(
-                local_addr = %local_addr,
-                fake_remote_addr = %fake_remote_addr,
+                src_addr = %local_addr,
+                fake_addr = %fake_remote_addr,
                 send = total_send_bytes,
                 recv = total_recv_bytes,
-                "udp flow closed"
+                "udp session"
             );
+        }
+    }
+
+    /// Check if an IP address is a private/local network or reserved address.
+    /// Returns true if the address should be skipped (not tunneled).
+    fn is_private_or_reserved(ip: &IpAddr) -> bool {
+        match ip {
+            IpAddr::V4(v4) => {
+                v4.is_private()
+                    || v4.is_loopback()
+                    || v4.is_link_local()
+                    || v4.is_multicast()
+                    || v4.is_broadcast()
+                    || v4.is_documentation()
+                    || match v4.octets() {
+                        [0, ..] => true,                             // Current network
+                        [100, b, ..] if b >= 64 && b <= 127 => true, // CGNAT
+                        [192, 0, 0, ..] => true,                     // IETF Protocol Assignments
+                        [198, 18, ..] | [198, 19, ..] => true,       // Benchmarking
+                        [240, ..] => true,                           // Reserved/Experimental
+                        _ => false,
+                    }
+            }
+            IpAddr::V6(v6) => {
+                v6.is_loopback()
+                    || v6.is_unspecified()
+                    || v6.is_multicast()
+                    || (v6.segments()[0] & 0xfe00) == 0xfc00
+                    || (v6.segments()[0] & 0xffc0) == 0xfe80
+                    || v6.segments()[0] == 0x2001 && v6.segments()[1] == 0xdb8
+                    || v6.segments()[0] == 0x100
+            }
+        }
+    }
+
+    fn should_skip_address(addr: &Address) -> bool {
+        match addr {
+            Address::SocketV4(sock) => Self::is_private_or_reserved(&IpAddr::V4(*sock.ip())),
+            Address::SocketV6(sock) => Self::is_private_or_reserved(&IpAddr::V6(*sock.ip())),
+            Address::Domain(_, _) => false, // Domain names are resolved later, skip check here
         }
     }
 }
