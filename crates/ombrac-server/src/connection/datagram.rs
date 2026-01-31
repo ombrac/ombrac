@@ -25,8 +25,6 @@ const MAX_SESSIONS: u64 = 8192;
 const MAX_CONCURRENT_HANDLERS: usize = 4096;
 const MAX_UDP_RECV_BUFFER_SIZE: usize = 65535;
 
-// --- Protocol ---
-
 // --- Timeouts & TTL ---
 const SESSION_IDLE_TIMEOUT: Duration = Duration::from_secs(65);
 const DNS_CACHE_TTL: Duration = Duration::from_secs(300);
@@ -283,13 +281,11 @@ impl<C: Connection> DownstreamHandler<C> {
                             self.downstream_bytes.fetch_add(len as u64, Ordering::Relaxed);
 
                             if let Err(_err) = self.process_and_send_datagram(address, data).await {
-                                warn!("Failed to send packet to client, {_err} terminating loop.");
-                                break;
+                                warn!("failed to send packet to client, {_err}");
                             }
                         },
                         Err(_err) => {
-                            warn!("Failed to receiving from remote socket {_err}");
-                            break;
+                            warn!("failed to receiving from remote socket {_err}");
                         }
                     };
                 }
