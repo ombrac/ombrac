@@ -32,6 +32,12 @@ pub struct UdpDispatcher {
     dispatch_map: DashMap<u64, UdpSessionSender>,
 }
 
+impl Default for UdpDispatcher {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl UdpDispatcher {
     pub fn new() -> Self {
         Self {

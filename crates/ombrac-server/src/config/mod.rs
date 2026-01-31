@@ -389,7 +389,7 @@ pub fn load() -> Result<ServiceConfig, Box<dyn std::error::Error>> {
 ///
 /// A `ServiceConfig` ready to use, or an error if parsing fails or required fields are missing.
 pub fn load_from_json(json_str: &str) -> Result<ServiceConfig, Box<dyn std::error::Error>> {
-    let json_config = json::JsonConfig::from_str(json_str)?;
+    let json_config = json::JsonConfig::from_json_str(json_str)?;
     ConfigBuilder::new()
         .merge_json(json_config)
         .build()

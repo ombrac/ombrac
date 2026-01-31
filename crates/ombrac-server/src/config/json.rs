@@ -37,7 +37,7 @@ impl JsonConfig {
     /// # Returns
     ///
     /// A `JsonConfig` instance, or an error if parsing fails
-    pub fn from_str(json_str: &str) -> Result<Self, Box<dyn Error>> {
+    pub fn from_json_str(json_str: &str) -> Result<Self, Box<dyn Error>> {
         let config: JsonConfig = serde_json::from_str(json_str)?;
         Ok(config)
     }
@@ -57,6 +57,6 @@ impl JsonConfig {
         }
 
         let content = std::fs::read_to_string(config_path)?;
-        Self::from_str(&content)
+        Self::from_json_str(&content)
     }
 }

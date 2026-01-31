@@ -652,11 +652,11 @@ impl Tun {
                     || v4.is_broadcast()
                     || v4.is_documentation()
                     || match v4.octets() {
-                        [0, ..] => true,                             // Current network
-                        [100, b, ..] if b >= 64 && b <= 127 => true, // CGNAT
-                        [192, 0, 0, ..] => true,                     // IETF Protocol Assignments
-                        [198, 18, ..] | [198, 19, ..] => true,       // Benchmarking
-                        [240, ..] => true,                           // Reserved/Experimental
+                        [0, ..] => true,                                 // Current network
+                        [100, b, ..] if (64..=127).contains(&b) => true, // CGNAT
+                        [192, 0, 0, ..] => true, // IETF Protocol Assignments
+                        [198, 18, ..] | [198, 19, ..] => true, // Benchmarking
+                        [240, ..] => true,       // Reserved/Experimental
                         _ => false,
                     }
             }
