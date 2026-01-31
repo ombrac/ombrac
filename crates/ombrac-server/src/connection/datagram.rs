@@ -229,7 +229,9 @@ impl<C: Connection> DatagramTunnel<C> {
             }
         }
         Err(last_error.unwrap_or_else(|| {
-            io::Error::new(io::ErrorKind::Other, "UDP bind failed after retries")
+            io::Error::other(format!(
+                "UDP socket bind failed after {SOCKET_BIND_RETRY_MAX} retries"
+            ))
         }))
     }
 
