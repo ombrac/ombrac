@@ -266,6 +266,9 @@ jobs:
   publish:
     needs: [release, push-docker-images]
 
+    permissions:
+      contents: read
+
     runs-on: ubuntu-latest
 
     env:
