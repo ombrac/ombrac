@@ -252,7 +252,7 @@ checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
 name = "benches"
-version = "0.7.3"
+version = "0.7.4"
 dependencies = [
  "criterion",
  "ombrac",
@@ -1408,7 +1408,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "07033963ba89ebaf1584d767badaa2e8fcec21aedea6b8c0346d487d49c28667"
 dependencies = [
  "cfg-if",
- "windows-targets 0.53.4",
+ "windows-targets 0.48.5",
 ]
 
 [[package]]
@@ -1735,7 +1735,7 @@ dependencies = [
 
 [[package]]
 name = "ombrac"
-version = "0.7.3"
+version = "0.7.4"
 dependencies = [
  "bincode",
  "bytes",
@@ -1747,7 +1747,7 @@ dependencies = [
 
 [[package]]
 name = "ombrac-client"
-version = "0.7.3"
+version = "0.7.4"
 dependencies = [
  "arc-swap",
  "bincode",
@@ -1783,14 +1783,14 @@ dependencies = [
 
 [[package]]
 name = "ombrac-macros"
-version = "0.7.3"
+version = "0.7.4"
 dependencies = [
  "tracing",
 ]
 
 [[package]]
 name = "ombrac-netstack"
-version = "0.7.3"
+version = "0.7.4"
 dependencies = [
  "bytes",
  "crossbeam-queue",
@@ -1805,7 +1805,7 @@ dependencies = [
 
 [[package]]
 name = "ombrac-server"
-version = "0.7.3"
+version = "0.7.4"
 dependencies = [
  "arc-swap",
  "bincode",
@@ -1832,7 +1832,7 @@ dependencies = [
 
 [[package]]
 name = "ombrac-transport"
-version = "0.7.3"
+version = "0.7.4"
 dependencies = [
  "arc-swap",
  "async-channel",
@@ -2661,7 +2661,7 @@ dependencies = [
 
 [[package]]
 name = "tests-integration"
-version = "0.7.3"
+version = "0.7.4"
 dependencies = [
  "blake3",
  "bytes",
@@ -2678,7 +2678,7 @@ dependencies = [
 
 [[package]]
 name = "tests-support"
-version = "0.7.3"
+version = "0.7.4"
 dependencies = [
  "bytes",
  "ombrac-transport",
@@ -2803,9 +2803,9 @@ checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 
 [[package]]
 name = "tokio"
-version = "1.49.0"
+version = "1.50.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "72a2903cd7736441aac9df9d7688bd0ce48edccaadf181c3b90be801e81d3d86"
+checksum = "27ad5e34374e03cfffefc301becb44e9dc3c17584f414349ebe29ed26661822d"
 dependencies = [
  "bytes",
  "libc",
