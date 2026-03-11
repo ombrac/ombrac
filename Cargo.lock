@@ -252,7 +252,7 @@ checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
 name = "benches"
-version = "0.7.3"
+version = "0.7.4"
 dependencies = [
  "criterion",
  "ombrac",
@@ -1408,7 +1408,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "07033963ba89ebaf1584d767badaa2e8fcec21aedea6b8c0346d487d49c28667"
 dependencies = [
  "cfg-if",
- "windows-targets 0.48.5",
+ "windows-targets 0.53.4",
 ]
 
 [[package]]
@@ -1735,7 +1735,7 @@ dependencies = [
 
 [[package]]
 name = "ombrac"
-version = "0.7.3"
+version = "0.7.4"
 dependencies = [
  "bincode",
  "bytes",
@@ -1747,7 +1747,7 @@ dependencies = [
 
 [[package]]
 name = "ombrac-client"
-version = "0.7.3"
+version = "0.7.4"
 dependencies = [
  "arc-swap",
  "bincode",
@@ -1783,14 +1783,14 @@ dependencies = [
 
 [[package]]
 name = "ombrac-macros"
-version = "0.7.3"
+version = "0.7.4"
 dependencies = [
  "tracing",
 ]
 
 [[package]]
 name = "ombrac-netstack"
-version = "0.7.3"
+version = "0.7.4"
 dependencies = [
  "bytes",
  "crossbeam-queue",
@@ -1805,7 +1805,7 @@ dependencies = [
 
 [[package]]
 name = "ombrac-server"
-version = "0.7.3"
+version = "0.7.4"
 dependencies = [
  "arc-swap",
  "bincode",
@@ -1832,7 +1832,7 @@ dependencies = [
 
 [[package]]
 name = "ombrac-transport"
-version = "0.7.3"
+version = "0.7.4"
 dependencies = [
  "arc-swap",
  "async-channel",
@@ -2104,9 +2104,9 @@ dependencies = [
 
 [[package]]
 name = "quinn-proto"
-version = "0.11.13"
+version = "0.11.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f1906b49b0c3bc04b5fe5d86a77925ae6524a19b816ae38ce1e426255f1d8a31"
+checksum = "434b42fec591c96ef50e21e886936e66d3cc3f737104fdb9b737c40ffb94c098"
 dependencies = [
  "aws-lc-rs",
  "bytes",
@@ -2661,7 +2661,7 @@ dependencies = [
 
 [[package]]
 name = "tests-integration"
-version = "0.7.3"
+version = "0.7.4"
 dependencies = [
  "blake3",
  "bytes",
@@ -2678,7 +2678,7 @@ dependencies = [
 
 [[package]]
 name = "tests-support"
-version = "0.7.3"
+version = "0.7.4"
 dependencies = [
  "bytes",
  "ombrac-transport",
