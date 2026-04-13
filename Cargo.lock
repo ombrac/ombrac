@@ -252,7 +252,7 @@ checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
 name = "benches"
-version = "0.7.4"
+version = "0.7.5"
 dependencies = [
  "criterion",
  "ombrac",
@@ -820,7 +820,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -1407,7 +1407,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "07033963ba89ebaf1584d767badaa2e8fcec21aedea6b8c0346d487d49c28667"
 dependencies = [
  "cfg-if",
- "windows-targets 0.53.4",
+ "windows-targets 0.48.5",
 ]
 
 [[package]]
@@ -1734,7 +1734,7 @@ dependencies = [
 
 [[package]]
 name = "ombrac"
-version = "0.7.4"
+version = "0.7.5"
 dependencies = [
  "bincode",
  "bytes",
@@ -1746,7 +1746,7 @@ dependencies = [
 
 [[package]]
 name = "ombrac-client"
-version = "0.7.4"
+version = "0.7.5"
 dependencies = [
  "arc-swap",
  "bincode",
@@ -1782,14 +1782,14 @@ dependencies = [
 
 [[package]]
 name = "ombrac-macros"
-version = "0.7.4"
+version = "0.7.5"
 dependencies = [
  "tracing",
 ]
 
 [[package]]
 name = "ombrac-netstack"
-version = "0.7.4"
+version = "0.7.5"
 dependencies = [
  "bytes",
  "crossbeam-queue",
@@ -1804,7 +1804,7 @@ dependencies = [
 
 [[package]]
 name = "ombrac-server"
-version = "0.7.4"
+version = "0.7.5"
 dependencies = [
  "arc-swap",
  "bincode",
@@ -1831,7 +1831,7 @@ dependencies = [
 
 [[package]]
 name = "ombrac-transport"
-version = "0.7.4"
+version = "0.7.5"
 dependencies = [
  "arc-swap",
  "async-channel",
@@ -2323,14 +2323,14 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
 name = "rustls"
-version = "0.23.37"
+version = "0.23.38"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "758025cb5fccfd3bc2fd74708fd4682be41d99e5dff73c377c0646c6012c73a4"
+checksum = "69f9466fb2c14ea04357e91413efb882e2a6d4a406e625449bc0a5d360d53a21"
 dependencies = [
  "aws-lc-rs",
  "once_cell",
@@ -2631,12 +2631,12 @@ dependencies = [
  "getrandom 0.3.3",
  "once_cell",
  "rustix",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
 name = "tests-integration"
-version = "0.7.4"
+version = "0.7.5"
 dependencies = [
  "blake3",
  "bytes",
@@ -2653,7 +2653,7 @@ dependencies = [
 
 [[package]]
 name = "tests-support"
-version = "0.7.4"
+version = "0.7.5"
 dependencies = [
  "bytes",
  "ombrac-transport",
