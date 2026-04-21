@@ -55,7 +55,7 @@ hyper = { version = "1", default-features = false }
 hyper-util = { version = "0.1", default-features = false }
 http-body-util = { version = "0.1", default-features = false }
 smoltcp = { version = "0.13", default-features = false }
-etherparse = { version = "0.19", default-features = false }
+etherparse = { version = "0.20", default-features = false }
 rand = { version = "0.9", default-features = false }
 tun-rs = { version = "2.7", default-features = false }
 twox-hash = { version = "2", default-features = false }
