@@ -18,13 +18,15 @@ struct ServiceHandle {
     runtime: Runtime,
 }
 
-/// A helper function to safely convert a C string pointer to a Rust string slice.
-/// Returns an empty string if the pointer is null.
-unsafe fn c_str_to_str<'a>(s: *const c_char) -> &'a str {
+/// A helper function to safely convert a C string pointer to an owned Rust String.
+/// Returns an empty string if the pointer is null or contains invalid UTF-8.
+///
+/// The string is immediately copied to avoid lifetime issues with the C string.
+unsafe fn c_str_to_string(s: *const c_char) -> String {
     if s.is_null() {
-        return "";
+        return String::new();
     }
-    unsafe { CStr::from_ptr(s).to_str().unwrap_or("") }
+    unsafe { CStr::from_ptr(s).to_str().unwrap_or("").to_string() }
 }
 
 /// Initializes the logging system to use a C-style callback for log messages.
@@ -46,12 +48,14 @@ unsafe fn c_str_to_str<'a>(s: *const c_char) -> &'a str {
 #[cfg(feature = "tracing")]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn ombrac_client_set_log_callback(callback: *const LogCallback) {
-    let callback = if callback.is_null() {
-        None
-    } else {
-        Some(unsafe { *callback })
-    };
-    crate::logging::set_log_callback(callback);
+    let _ = std::panic::catch_unwind(|| {
+        let callback = if callback.is_null() {
+            None
+        } else {
+            Some(unsafe { *callback })
+        };
+        crate::logging::set_log_callback(callback);
+    });
 }
 
 /// Initializes and starts the service with a given JSON configuration.
@@ -77,56 +81,68 @@ pub unsafe extern "C" fn ombrac_client_set_log_callback(callback: *const LogCall
 /// The caller must ensure that `config_json` is a valid pointer to a
 /// null-terminated C string. This function is not thread-safe and should not be
 /// called concurrently with `ombrac_client_service_shutdown`.
+///
+/// This function is protected against Rust panics crossing the FFI boundary.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn ombrac_client_service_startup(config_json: *const c_char) -> i32 {
-    let config_str = unsafe { c_str_to_str(config_json) };
+    let result = std::panic::catch_unwind(|| {
+        let config_str = unsafe { c_str_to_string(config_json) };
 
-    let service_config = match crate::config::load_from_json(config_str) {
-        Ok(cfg) => cfg,
-        Err(e) => {
-            error!("Failed to parse config JSON: {}", e);
+        let service_config = match crate::config::load_from_json(&config_str) {
+            Ok(cfg) => cfg,
+            Err(e) => {
+                error!("Failed to parse config JSON: {}", e);
+                return -1;
+            }
+        };
+
+        #[cfg(feature = "tracing")]
+        crate::logging::init_for_ffi(&service_config.logging);
+
+        let runtime = match Builder::new_multi_thread().enable_all().build() {
+            Ok(rt) => rt,
+            Err(_e) => {
+                error!("Failed to create Tokio runtime: {}", _e);
+                return -1;
+            }
+        };
+
+        let service = runtime.block_on(async {
+            use std::sync::Arc;
+            OmbracClient::build(Arc::new(service_config)).await
+        });
+
+        let service = match service {
+            Ok(s) => s,
+            Err(e) => {
+                error!("Failed to build service: {}", e);
+                return -1;
+            }
+        };
+
+        let mut handle_guard = SERVICE_HANDLE.lock().unwrap_or_else(|e| e.into_inner());
+        if handle_guard.is_some() {
+            error!("Service is already running. Please shut down the existing service first.");
             return -1;
         }
-    };
 
-    #[cfg(feature = "tracing")]
-    crate::logging::init_for_ffi(&service_config.logging);
+        *handle_guard = Some(ServiceHandle {
+            service: Some(Box::new(service)),
+            runtime,
+        });
 
-    let runtime = match Builder::new_multi_thread().enable_all().build() {
-        Ok(rt) => rt,
-        Err(_e) => {
-            error!("Failed to create Tokio runtime: {}", _e);
-            return -1;
-        }
-    };
+        info!("Service started successfully");
 
-    let service = runtime.block_on(async {
-        use std::sync::Arc;
-        OmbracClient::build(Arc::new(service_config)).await
+        0
     });
 
-    let service = match service {
-        Ok(s) => s,
-        Err(e) => {
-            error!("Failed to build service: {}", e);
-            return -1;
+    match result {
+        Ok(ret) => ret,
+        Err(_) => {
+            error!("Panic occurred in ombrac_client_service_startup");
+            -1
         }
-    };
-
-    let mut handle_guard = SERVICE_HANDLE.lock().unwrap();
-    if handle_guard.is_some() {
-        error!("Service is already running. Please shut down the existing service first.");
-        return -1;
     }
-
-    *handle_guard = Some(ServiceHandle {
-        service: Some(Box::new(service)),
-        runtime,
-    });
-
-    info!("Service started successfully");
-
-    0
 }
 
 /// Triggers a network rebind on the underlying transport.
@@ -145,20 +161,30 @@ pub unsafe extern "C" fn ombrac_client_service_startup(config_json: *const c_cha
 /// other service management functions.
 #[unsafe(no_mangle)]
 pub extern "C" fn ombrac_client_service_rebind() -> i32 {
-    let handle_guard = SERVICE_HANDLE.lock().unwrap();
-    if let Some(handle) = handle_guard.as_ref() {
-        if let Some(service) = &handle.service {
-            let result = handle.runtime.block_on(service.rebind());
-            if let Err(e) = result {
-                error!("Failed to rebind: {}", e);
-                return -1;
-            } else {
-                info!("Service rebind successful");
-                return 0;
+    let result = std::panic::catch_unwind(|| {
+        let handle_guard = SERVICE_HANDLE.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(handle) = handle_guard.as_ref() {
+            if let Some(service) = &handle.service {
+                let result = handle.runtime.block_on(service.rebind());
+                if let Err(e) = result {
+                    error!("Failed to rebind: {}", e);
+                    return -1;
+                } else {
+                    info!("Service rebind successful");
+                    return 0;
+                }
             }
         }
+        -1
+    });
+
+    match result {
+        Ok(ret) => ret,
+        Err(_) => {
+            error!("Panic occurred in ombrac_client_service_rebind");
+            -1
+        }
     }
-    -1
 }
 
 /// Shuts down the running service and releases all associated resources.
@@ -175,27 +201,51 @@ pub extern "C" fn ombrac_client_service_rebind() -> i32 {
 ///
 /// This function is not thread-safe and should not be called concurrently with
 /// `ombrac_client_service_startup`.
+///
+/// This function is protected against Rust panics crossing the FFI boundary.
 #[unsafe(no_mangle)]
 pub extern "C" fn ombrac_client_service_shutdown() -> i32 {
-    let mut handle_guard = SERVICE_HANDLE.lock().unwrap();
+    let result = std::panic::catch_unwind(|| {
+        let mut handle_guard = SERVICE_HANDLE.lock().unwrap_or_else(|e| e.into_inner());
 
-    if let Some(mut handle) = handle_guard.take() {
-        info!("Shutting down service");
+        if let Some(mut handle) = handle_guard.take() {
+            info!("Shutting down service");
 
-        if let Some(service) = handle.service.take() {
-            handle.runtime.block_on(async {
-                service.shutdown().await;
-            });
+            if let Some(service) = handle.service.take() {
+                let shutdown_result =
+                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        handle.runtime.block_on(async {
+                            service.shutdown().await;
+                        });
+                    }));
+
+                if shutdown_result.is_err() {
+                    error!("Panic occurred during service shutdown");
+                }
+            }
+
+            handle.runtime.shutdown_background();
+
+            info!("Service shut down complete.");
+        } else {
+            info!("Service was not running.");
         }
 
-        handle.runtime.shutdown_background();
+        #[cfg(feature = "tracing")]
+        crate::logging::shutdown_logging();
 
-        info!("Service shut down complete.");
-    } else {
-        info!("Service was not running.");
+        0
+    });
+
+    match result {
+        Ok(ret) => ret,
+        Err(_) => {
+            error!("Panic occurred in ombrac_client_service_shutdown");
+            #[cfg(feature = "tracing")]
+            let _ = std::panic::catch_unwind(|| crate::logging::shutdown_logging());
+            0
+        }
     }
-
-    0
 }
 
 /// Returns the version of the ombrac-client library.
