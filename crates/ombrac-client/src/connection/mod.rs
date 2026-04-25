@@ -5,6 +5,7 @@ mod stream;
 use std::future::Future;
 use std::io;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use arc_swap::{ArcSwap, Guard};
@@ -64,6 +65,7 @@ where
 {
     transport: T,
     connection: ArcSwap<C>,
+    connection_id: AtomicU64,
     reconnect_lock: Mutex<ReconnectState>,
     secret: Secret,
     options: Bytes,
@@ -94,6 +96,7 @@ where
         Ok(Self {
             transport,
             connection: ArcSwap::new(Arc::new(connection)),
+            connection_id: AtomicU64::new(0),
             reconnect_lock: Mutex::new(ReconnectState::default()),
             secret,
             options,
@@ -227,8 +230,7 @@ where
         Fut: Future<Output = io::Result<R>>,
     {
         let connection = self.connection.load();
-        // Use the pointer address as a unique ID for the connection instance.
-        let old_conn_id = Arc::as_ptr(&connection) as usize;
+        let old_conn_id = self.connection_id.load(Ordering::Acquire);
 
         match operation(connection).await {
             Ok(result) => Ok(result),
@@ -261,12 +263,11 @@ where
     /// - Reconnection is throttled (too many attempts)
     /// - Transport rebind fails
     /// - Authentication fails
-    async fn reconnect(&self, old_conn_id: usize) -> io::Result<()> {
+    async fn reconnect(&self, old_conn_id: u64) -> io::Result<()> {
         let mut state = self.reconnect_lock.lock().await;
 
-        // Check if another task has already reconnected
-        let current_conn = self.connection.load();
-        let current_conn_id = Arc::as_ptr(&current_conn) as usize;
+        // Check if another task has already reconnected by comparing monotonic IDs
+        let current_conn_id = self.connection_id.load(Ordering::Acquire);
         if current_conn_id != old_conn_id {
             // Another task already reconnected, we're done
             return Ok(());
@@ -304,6 +305,7 @@ where
                 state.last_attempt = None;
 
                 self.connection.store(Arc::new(new_connection));
+                self.connection_id.fetch_add(1, Ordering::Release);
                 Ok(())
             }
             Err(e) => {
