@@ -12,7 +12,7 @@ mod tests {
     use ombrac_server::connection::ConnectionAcceptor;
 
     fn random_secret() -> Secret {
-        use rand::RngCore;
+        use rand::Rng;
         let mut secret = [0u8; 32];
         let mut rng = rand::rng();
         rng.fill_bytes(&mut secret);
