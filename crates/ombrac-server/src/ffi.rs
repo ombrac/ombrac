@@ -149,7 +149,7 @@ pub unsafe extern "C" fn ombrac_server_service_startup(config_json: *const c_cha
             }
         };
 
-        let mut handle_guard = SERVICE_HANDLE.lock().unwrap();
+        let mut handle_guard = SERVICE_HANDLE.lock().unwrap_or_else(|e| e.into_inner());
         if handle_guard.is_some() {
             #[cfg(feature = "tracing")]
             error!("Service is already running. Please shut down the existing service first.");
@@ -198,7 +198,7 @@ pub unsafe extern "C" fn ombrac_server_service_startup(config_json: *const c_cha
 pub extern "C" fn ombrac_server_service_shutdown() -> i32 {
     // Catch panics to prevent them from crossing the FFI boundary (undefined behavior).
     let result = std::panic::catch_unwind(|| {
-        let mut handle_guard = SERVICE_HANDLE.lock().unwrap();
+        let mut handle_guard = SERVICE_HANDLE.lock().unwrap_or_else(|e| e.into_inner());
 
         if let Some(mut handle) = handle_guard.take() {
             #[cfg(feature = "tracing")]
