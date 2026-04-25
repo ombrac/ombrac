@@ -128,7 +128,7 @@ impl Server {
             runtime,
         )?);
 
-        let (sender, receiver) = async_channel::unbounded();
+        let (sender, receiver) = async_channel::bounded(128);
         let (shutdown_sender, shutdown_receiver) = watch::channel(());
 
         tokio::spawn(accept_loop(endpoint.clone(), sender, shutdown_receiver));
@@ -157,7 +157,8 @@ async fn accept_loop(
                         Ok(connection) => {
                             debug!("Accept connection from {}", connection.remote_address());
                             if sender_clone.send(connection).await.is_err() {
-                                warn!("Connection receiver is closed");
+                                warn!("Connection receiver is closed, stopping accept loop");
+                                return;
                             }
                         }
                         Err(_err) => {
