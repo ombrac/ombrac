@@ -472,6 +472,15 @@ impl TcpConnectionWorker {
                 return false;
             }
 
+            if socket_control
+                .shared_state
+                .write_closed
+                .load(Ordering::Acquire)
+                && socket_control.send_buffer_cons.is_empty()
+            {
+                socket.close();
+            }
+
             if !socket.is_active() {
                 sockets.remove(*handle);
                 return false;
@@ -513,6 +522,7 @@ mod stream {
         pub(crate) recv_waker: AtomicWaker,
         pub(crate) send_waker: AtomicWaker,
         pub(crate) read_closed: AtomicBool,
+        pub(crate) write_closed: AtomicBool,
         pub(crate) socket_dropped: AtomicBool,
     }
 
@@ -522,6 +532,7 @@ mod stream {
                 recv_waker: AtomicWaker::new(),
                 send_waker: AtomicWaker::new(),
                 read_closed: AtomicBool::new(false),
+                write_closed: AtomicBool::new(false),
                 socket_dropped: AtomicBool::new(false),
             }
         }
@@ -587,7 +598,9 @@ mod stream {
             cx: &mut Context<'_>,
             buf: &[u8],
         ) -> Poll<std::io::Result<usize>> {
-            if self.shared_state.socket_dropped.load(Ordering::Acquire) {
+            if self.shared_state.socket_dropped.load(Ordering::Acquire)
+                || self.shared_state.write_closed.load(Ordering::Acquire)
+            {
                 return Poll::Ready(Err(std::io::Error::new(
                     std::io::ErrorKind::BrokenPipe,
                     "Socket is closing",
@@ -629,7 +642,7 @@ mod stream {
             std::task::ready!(self.as_mut().poll_flush(cx))?;
 
             self.shared_state
-                .socket_dropped
+                .write_closed
                 .store(true, Ordering::Release);
             self.worker_notifier.notify_one();
             Poll::Ready(Ok(()))
