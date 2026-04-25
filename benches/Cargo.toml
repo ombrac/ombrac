@@ -11,11 +11,23 @@ keywords.workspace = true
 readme = "../../README.md"
 
 [dependencies]
-tests-support = { path = "../tests/support" }
-
 ombrac = { workspace = true }
-criterion = { workspace = true, features = ["default"] }
+criterion = { workspace = true, features = ["default", "async_tokio"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+tokio-util = { workspace = true, features = ["codec"] }
+bytes = { workspace = true, features = ["std"] }
 
+[[bench]]
+name = "throughput"
+harness = false
+
+[[bench]]
+name = "latency"
+harness = false
+
+[[bench]]
+name = "concurrency"
+harness = false
 
 [lints]
 workspace = true
