@@ -25,17 +25,32 @@ fn main() {
 }
 
 /// A high-level function to run the client from a command-line context.
-/// It builds the session, waits for a Ctrl+C signal, and then gracefully shuts down.
+/// It builds the session, waits for a shutdown signal, and then gracefully shuts down.
 pub async fn run_from_cli(config: ombrac_client::config::ServiceConfig) -> io::Result<()> {
     use ombrac_client::OmbracClient;
     use std::sync::Arc;
 
     match OmbracClient::build(Arc::new(config)).await {
         Ok(client) => {
-            tokio::signal::ctrl_c().await?;
+            wait_for_shutdown_signal().await?;
             client.shutdown().await;
             Ok(())
         }
         Err(e) => Err(io::Error::other(e.to_string())),
     }
+}
+
+async fn wait_for_shutdown_signal() -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{SignalKind, signal};
+        let mut sigterm = signal(SignalKind::terminate())?;
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {},
+            _ = sigterm.recv() => {},
+        }
+        return Ok(());
+    }
+    #[cfg(not(unix))]
+    tokio::signal::ctrl_c().await
 }
