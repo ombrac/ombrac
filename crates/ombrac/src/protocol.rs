@@ -396,3 +396,362 @@ macro_rules! impl_message_serde {
 impl_message_serde!(ClientHello);
 impl_message_serde!(UdpPacket);
 impl_message_serde!(Address);
+
+#[cfg(test)]
+mod tests {
+    use std::net::{Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6};
+
+    use super::*;
+
+    // ── Group A: Address::try_from(&str) ────────────────────────────────────
+
+    #[test]
+    fn test_address_try_from_ipv4() {
+        let addr = Address::try_from("1.2.3.4:80").unwrap();
+        match addr {
+            Address::SocketV4(a) => {
+                assert_eq!(a.ip(), &Ipv4Addr::new(1, 2, 3, 4));
+                assert_eq!(a.port(), 80);
+            }
+            _ => panic!("expected SocketV4"),
+        }
+    }
+
+    #[test]
+    fn test_address_try_from_ipv6() {
+        let addr = Address::try_from("[::1]:443").unwrap();
+        match addr {
+            Address::SocketV6(a) => {
+                assert_eq!(a.ip(), &Ipv6Addr::LOCALHOST);
+                assert_eq!(a.port(), 443);
+            }
+            _ => panic!("expected SocketV6"),
+        }
+    }
+
+    #[test]
+    fn test_address_try_from_domain() {
+        let addr = Address::try_from("example.com:8080").unwrap();
+        match addr {
+            Address::Domain(bytes, port) => {
+                assert_eq!(bytes.as_ref(), b"example.com");
+                assert_eq!(port, 8080);
+            }
+            _ => panic!("expected Domain"),
+        }
+    }
+
+    #[test]
+    fn test_address_try_from_empty_string() {
+        let err = Address::try_from("").unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+    }
+
+    #[test]
+    fn test_address_try_from_empty_domain() {
+        let err = Address::try_from(":80").unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+        assert!(err.to_string().contains("empty"));
+    }
+
+    #[test]
+    fn test_address_try_from_domain_too_long() {
+        let long_domain = format!("{}:80", "a".repeat(MAX_DOMAIN_LENGTH + 1));
+        let err = Address::try_from(long_domain.as_str()).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+        assert!(err.to_string().contains("too long"));
+    }
+
+    #[test]
+    fn test_address_try_from_invalid_port() {
+        let err = Address::try_from("example.com:notaport").unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+    }
+
+    #[test]
+    fn test_address_try_from_port_overflow() {
+        let err = Address::try_from("example.com:65536").unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+    }
+
+    // ── Group B: Address::to_socket_addr() ──────────────────────────────────
+
+    #[tokio::test]
+    async fn test_address_to_socket_addr_ipv4() {
+        let addr = Address::SocketV4(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 9999));
+        let result = addr.to_socket_addr().await.unwrap();
+        assert_eq!(result.port(), 9999);
+        assert_eq!(result.ip().to_string(), "127.0.0.1");
+    }
+
+    #[tokio::test]
+    async fn test_address_to_socket_addr_ipv6() {
+        let addr =
+            Address::SocketV6(SocketAddrV6::new(Ipv6Addr::LOCALHOST, 443, 0, 0));
+        let result = addr.to_socket_addr().await.unwrap();
+        assert_eq!(result.port(), 443);
+    }
+
+    #[tokio::test]
+    async fn test_address_to_socket_addr_invalid_utf8() {
+        let addr = Address::Domain(Bytes::from_static(b"\xff\xfe"), 80);
+        let err = addr.to_socket_addr().await.unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+        assert!(err.to_string().contains("utf-8"));
+    }
+
+    #[tokio::test]
+    async fn test_address_to_socket_addr_localhost_domain() {
+        let addr = Address::Domain(Bytes::from_static(b"localhost"), 80);
+        let result = addr.to_socket_addr().await.unwrap();
+        assert_eq!(result.port(), 80);
+    }
+
+    // ── Group C: encode() / decode() roundtrips ─────────────────────────────
+
+    #[test]
+    fn test_encode_decode_client_hello() {
+        let original = ClientHello {
+            version: PROTOCOL_VERSION,
+            secret: [0xab; 32],
+            options: Bytes::from_static(b"opts"),
+        };
+        let bytes = encode(&original).unwrap();
+        let decoded: ClientHello = decode(&bytes).unwrap();
+        assert_eq!(decoded, original);
+    }
+
+    #[test]
+    fn test_encode_decode_client_hello_empty_options() {
+        let original = ClientHello {
+            version: 1,
+            secret: [0u8; 32],
+            options: Bytes::new(),
+        };
+        let bytes = encode(&original).unwrap();
+        let decoded: ClientHello = decode(&bytes).unwrap();
+        assert_eq!(decoded, original);
+    }
+
+    #[test]
+    fn test_encode_decode_client_connect_ipv4() {
+        let original = ClientConnect {
+            address: Address::SocketV4(SocketAddrV4::new(Ipv4Addr::new(10, 0, 0, 1), 443)),
+        };
+        let bytes = encode(&original).unwrap();
+        let decoded: ClientConnect = decode(&bytes).unwrap();
+        assert_eq!(decoded, original);
+    }
+
+    #[test]
+    fn test_encode_decode_client_connect_domain() {
+        let original = ClientConnect {
+            address: Address::Domain(Bytes::from_static(b"example.com"), 8080),
+        };
+        let bytes = encode(&original).unwrap();
+        let decoded: ClientConnect = decode(&bytes).unwrap();
+        assert_eq!(decoded, original);
+    }
+
+    #[test]
+    fn test_encode_decode_udp_packet_unfragmented() {
+        let original = UdpPacket::Unfragmented {
+            session_id: 42,
+            address: Address::SocketV4(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 53)),
+            data: Bytes::from_static(b"hello"),
+        };
+        let bytes = original.encode().unwrap();
+        let decoded = UdpPacket::decode(&bytes).unwrap();
+        assert_eq!(decoded, original);
+    }
+
+    #[test]
+    fn test_encode_decode_udp_packet_fragmented() {
+        let original = UdpPacket::Fragmented {
+            session_id: 1,
+            fragment_id: 7,
+            fragment_index: 1,
+            fragment_count: 3,
+            address: None,
+            data: Bytes::from_static(b"chunk"),
+        };
+        let bytes = original.encode().unwrap();
+        let decoded = UdpPacket::decode(&bytes).unwrap();
+        assert_eq!(decoded, original);
+    }
+
+    #[test]
+    fn test_decode_rejects_garbage() {
+        let err = decode::<ClientHello>(&[0xde, 0xad, 0xbe, 0xef]).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+    }
+
+    // ── Group D: ConnectErrorKind::from_io_error() ──────────────────────────
+
+    #[test]
+    fn test_connect_error_kind_connection_refused() {
+        let e = std::io::Error::new(std::io::ErrorKind::ConnectionRefused, "");
+        assert_eq!(
+            ConnectErrorKind::from_io_error(&e),
+            ConnectErrorKind::ConnectionRefused
+        );
+    }
+
+    #[test]
+    fn test_connect_error_kind_network_unreachable() {
+        let e = std::io::Error::new(std::io::ErrorKind::NetworkUnreachable, "");
+        assert_eq!(
+            ConnectErrorKind::from_io_error(&e),
+            ConnectErrorKind::NetworkUnreachable
+        );
+    }
+
+    #[test]
+    fn test_connect_error_kind_host_unreachable() {
+        let e = std::io::Error::new(std::io::ErrorKind::HostUnreachable, "");
+        assert_eq!(
+            ConnectErrorKind::from_io_error(&e),
+            ConnectErrorKind::HostUnreachable
+        );
+    }
+
+    #[test]
+    fn test_connect_error_kind_timed_out() {
+        let e = std::io::Error::new(std::io::ErrorKind::TimedOut, "");
+        assert_eq!(
+            ConnectErrorKind::from_io_error(&e),
+            ConnectErrorKind::TimedOut
+        );
+    }
+
+    #[test]
+    fn test_connect_error_kind_other_not_found() {
+        let e = std::io::Error::new(std::io::ErrorKind::NotFound, "dns");
+        assert_eq!(ConnectErrorKind::from_io_error(&e), ConnectErrorKind::Other);
+    }
+
+    #[test]
+    fn test_connect_error_kind_other_permission_denied() {
+        let e = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "");
+        assert_eq!(ConnectErrorKind::from_io_error(&e), ConnectErrorKind::Other);
+    }
+
+    // ── Group E: UdpPacket::split_packet() ──────────────────────────────────
+
+    fn make_ipv4_addr() -> Address {
+        Address::SocketV4(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 5000))
+    }
+
+    #[test]
+    fn test_split_packet_basic() {
+        let frags: Vec<_> =
+            UdpPacket::split_packet(1, make_ipv4_addr(), Bytes::from(vec![0u8; 300]), 100, 42)
+                .collect();
+        assert_eq!(frags.len(), 3);
+        for (i, frag) in frags.iter().enumerate() {
+            match frag {
+                UdpPacket::Fragmented {
+                    session_id,
+                    fragment_id,
+                    fragment_index,
+                    fragment_count,
+                    address,
+                    ..
+                } => {
+                    assert_eq!(*session_id, 1);
+                    assert_eq!(*fragment_id, 42);
+                    assert_eq!(*fragment_index, i as u16);
+                    assert_eq!(*fragment_count, 3);
+                    if i == 0 {
+                        assert!(address.is_some());
+                    } else {
+                        assert!(address.is_none());
+                    }
+                }
+                _ => panic!("expected Fragmented"),
+            }
+        }
+    }
+
+    #[test]
+    fn test_split_packet_single_fragment() {
+        let frags: Vec<_> =
+            UdpPacket::split_packet(5, make_ipv4_addr(), Bytes::from(vec![1u8; 50]), 100, 1)
+                .collect();
+        assert_eq!(frags.len(), 1);
+        match &frags[0] {
+            UdpPacket::Fragmented {
+                fragment_index,
+                fragment_count,
+                address,
+                ..
+            } => {
+                assert_eq!(*fragment_index, 0);
+                assert_eq!(*fragment_count, 1);
+                assert!(address.is_some());
+            }
+            _ => panic!("expected Fragmented"),
+        }
+    }
+
+    #[test]
+    fn test_split_packet_exact_boundary() {
+        let frags: Vec<_> =
+            UdpPacket::split_packet(2, make_ipv4_addr(), Bytes::from(vec![0u8; 100]), 100, 0)
+                .collect();
+        assert_eq!(frags.len(), 1);
+    }
+
+    #[test]
+    fn test_split_packet_one_byte_over() {
+        let frags: Vec<_> =
+            UdpPacket::split_packet(3, make_ipv4_addr(), Bytes::from(vec![7u8; 101]), 100, 0)
+                .collect();
+        assert_eq!(frags.len(), 2);
+        match &frags[1] {
+            UdpPacket::Fragmented { data, .. } => assert_eq!(data.len(), 1),
+            _ => panic!("expected Fragmented"),
+        }
+    }
+
+    #[test]
+    fn test_split_packet_data_integrity() {
+        let original: Vec<u8> = (0u16..500).map(|i| (i % 256) as u8).collect();
+        let frags: Vec<_> = UdpPacket::split_packet(
+            9,
+            make_ipv4_addr(),
+            Bytes::from(original.clone()),
+            100,
+            5,
+        )
+        .collect();
+        let reassembled: Vec<u8> = frags
+            .iter()
+            .flat_map(|f| match f {
+                UdpPacket::Fragmented { data, .. } => data.to_vec(),
+                _ => panic!("expected Fragmented"),
+            })
+            .collect();
+        assert_eq!(reassembled, original);
+    }
+
+    // ── Group F: fragmented_overhead() + Address Display ────────────────────
+
+    #[test]
+    fn test_fragmented_overhead_value() {
+        assert_eq!(UdpPacket::fragmented_overhead(), 277);
+    }
+
+    #[test]
+    fn test_address_display_ipv4() {
+        let addr =
+            Address::SocketV4(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 8080));
+        assert_eq!(format!("{addr}"), "127.0.0.1:8080");
+    }
+
+    #[test]
+    fn test_address_display_domain() {
+        let addr = Address::Domain(Bytes::from_static(b"example.com"), 443);
+        assert_eq!(format!("{addr}"), "example.com:443");
+    }
+}

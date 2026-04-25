@@ -66,3 +66,52 @@ pub(crate) async fn resolve_domain(domain: &[u8], port: u16) -> io::Result<Socke
             )
         })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── Group I: resolve_domain() ────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_resolve_domain_valid_localhost() {
+        let result = resolve_domain(b"localhost", 80).await;
+        let addr = result.expect("localhost should resolve");
+        assert_eq!(addr.port(), 80);
+    }
+
+    #[tokio::test]
+    async fn test_resolve_domain_ipv4_literal() {
+        let result = resolve_domain(b"127.0.0.1", 9000).await;
+        let addr = result.expect("IP literal should resolve");
+        assert_eq!(addr.port(), 9000);
+        assert_eq!(addr.ip().to_string(), "127.0.0.1");
+    }
+
+    #[tokio::test]
+    async fn test_resolve_domain_invalid_utf8() {
+        let err = resolve_domain(b"\xff\xfe", 80)
+            .await
+            .expect_err("invalid utf-8 should fail");
+        assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+        assert!(err.to_string().contains("utf-8"));
+    }
+
+    #[tokio::test]
+    async fn test_resolve_domain_empty_bytes() {
+        let result = resolve_domain(b"", 80).await;
+        assert!(result.is_err(), "empty domain should fail");
+    }
+
+    #[tokio::test]
+    async fn test_resolve_domain_nonexistent() {
+        // .invalid TLD is guaranteed non-resolvable per RFC 2606
+        let err = resolve_domain(
+            b"this-absolutely-does-not-exist.ombrac-test-invalid",
+            80,
+        )
+        .await
+        .expect_err("non-existent domain should fail");
+        assert_eq!(err.kind(), io::ErrorKind::NotFound);
+    }
+}
