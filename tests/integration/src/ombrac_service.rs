@@ -19,7 +19,7 @@ mod tests {
     };
 
     fn random_secret() -> String {
-        use rand::RngCore;
+        use rand::Rng;
         let mut secret = [0u8; 32];
         let mut rng = rand::rng();
         rng.fill_bytes(&mut secret);

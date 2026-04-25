@@ -13,7 +13,7 @@ mod tests {
     use ombrac_transport::{Connection, Initiator};
 
     fn random_secret() -> Secret {
-        use rand::RngCore;
+        use rand::Rng;
         let mut secret = [0u8; 32];
         rand::rng().fill_bytes(&mut secret);
         secret
