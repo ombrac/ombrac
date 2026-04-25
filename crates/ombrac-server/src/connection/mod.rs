@@ -218,7 +218,7 @@ impl<C: Connection> ClientConnectionProcessor<C> {
     /// making it harder for attackers to distinguish between different failure modes
     /// based on response timing.
     async fn disconnect_with_random_delay(stream: &mut C::Stream) {
-        use rand::Rng;
+        use rand::RngExt;
 
         let delay_ms = {
             let mut rng = rand::rng();
