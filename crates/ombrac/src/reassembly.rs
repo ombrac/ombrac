@@ -14,6 +14,10 @@ const DEFAULT_REASSEMBLY_TIMEOUT: Duration = Duration::from_secs(10);
 /// Default maximum number of concurrent reassembly operations [8192]
 const DEFAULT_MAX_CONCURRENT_REASSEMBLIES: u64 = 8192;
 
+/// Maximum allowed number of fragments per packet to prevent memory exhaustion.
+/// A 64KB UDP packet with 256-byte fragments = 256 fragments max.
+const MAX_FRAGMENT_COUNT: u16 = 256;
+
 /// Cache key type: (session_id, fragment_id)
 ///
 /// The combination ensures fragments from different sessions don't collide,
@@ -70,8 +74,8 @@ impl ReassemblyBuffer {
         };
 
         // Validate fragment_count
-        if fragment_count == 0 {
-            return false; // Invalid fragment
+        if fragment_count == 0 || fragment_count > MAX_FRAGMENT_COUNT {
+            return false; // Invalid or oversized fragment count
         }
 
         // Initialize the buffer with the fragment_count from the first fragment we see.
