@@ -13,7 +13,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::Instrument;
 
 use ombrac::{codec, protocol};
-use ombrac_macros::info;
+use ombrac_macros::{info, warn};
 use ombrac_transport::Connection;
 use ombrac_transport::io::{CopyBidirectionalStats, copy_bidirectional};
 
@@ -44,7 +44,13 @@ impl<C: Connection> StreamTunnel<C> {
                 biased;
                 _ = self.shutdown.cancelled() => break,
                 result = self.connection.accept_bidirectional() => {
-                    let stream = result?;
+                    let stream = match result {
+                        Ok(s) => s,
+                        Err(e) => {
+                            warn!("failed to accept stream: {}", e);
+                            continue;
+                        }
+                    };
                     let semaphore = Arc::clone(&self.semaphore);
                     let shutdown = self.shutdown.child_token();
 
