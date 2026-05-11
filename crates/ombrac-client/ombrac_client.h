@@ -55,6 +55,8 @@ void ombrac_client_set_log_callback(const LogCallback *callback);
  * The caller must ensure that `config_json` is a valid pointer to a
  * null-terminated C string. This function is not thread-safe and should not be
  * called concurrently with `ombrac_client_service_shutdown`.
+ *
+ * This function is protected against Rust panics crossing the FFI boundary.
  */
 int32_t ombrac_client_service_startup(const char *config_json);
 
@@ -91,6 +93,8 @@ int32_t ombrac_client_service_rebind(void);
  *
  * This function is not thread-safe and should not be called concurrently with
  * `ombrac_client_service_startup`.
+ *
+ * This function is protected against Rust panics crossing the FFI boundary.
  */
 int32_t ombrac_client_service_shutdown(void);
 
