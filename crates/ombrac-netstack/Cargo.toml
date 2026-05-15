@@ -35,6 +35,7 @@ smoltcp = { workspace = true, features = [
 etherparse = { workspace = true, features = ["std"] }
 ringbuf = { workspace = true, features = ["std"] }
 crossbeam-queue = { workspace = true, features = ["std"] }
+twox-hash = { workspace = true, features = ["xxhash64"] }
 
 [lints]
 workspace = true

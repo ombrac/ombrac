@@ -301,3 +301,146 @@ impl futures::Stream for StackSplitStream {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use etherparse::PacketBuilder;
+    use futures::SinkExt;
+
+    fn build_ipv4_udp(src: [u8; 4], dst: [u8; 4], src_port: u16, dst_port: u16, payload: &[u8]) -> Vec<u8> {
+        let builder = PacketBuilder::ipv4(src, dst, 64).udp(src_port, dst_port);
+        let mut buf = Vec::with_capacity(builder.size(payload.len()));
+        builder.write(&mut buf, payload).unwrap();
+        buf
+    }
+
+    fn build_ipv4_tcp(src: [u8; 4], dst: [u8; 4], src_port: u16, dst_port: u16) -> Vec<u8> {
+        let builder = PacketBuilder::ipv4(src, dst, 64).tcp(src_port, dst_port, 0, 1024).syn();
+        let mut buf = Vec::with_capacity(builder.size(0));
+        builder.write(&mut buf, &[]).unwrap();
+        buf
+    }
+
+    fn build_ipv6_udp(src: [u8; 16], dst: [u8; 16], src_port: u16, dst_port: u16, payload: &[u8]) -> Vec<u8> {
+        let builder = PacketBuilder::ipv6(src, dst, 64).udp(src_port, dst_port);
+        let mut buf = Vec::with_capacity(builder.size(payload.len()));
+        builder.write(&mut buf, payload).unwrap();
+        buf
+    }
+
+    #[test]
+    fn ip_packet_v4_parsing() {
+        let raw = build_ipv4_udp([10, 0, 0, 1], [10, 0, 0, 2], 1000, 53, b"hello");
+        let pkt = IpPacket::new_checked(raw.as_slice()).unwrap();
+        assert!(matches!(pkt, IpPacket::Ipv4(_)));
+        assert_eq!(pkt.src_addr().to_string(), "10.0.0.1");
+        assert_eq!(pkt.dst_addr().to_string(), "10.0.0.2");
+        assert_eq!(pkt.protocol(), smoltcp::wire::IpProtocol::Udp);
+    }
+
+    #[test]
+    fn ip_packet_v6_parsing() {
+        let src = [0x20, 0x01, 0xdb, 0x8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1];
+        let dst = [0x20, 0x01, 0xdb, 0x8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2];
+        let raw = build_ipv6_udp(src, dst, 1234, 4321, b"x");
+        let pkt = IpPacket::new_checked(raw.as_slice()).unwrap();
+        assert!(matches!(pkt, IpPacket::Ipv6(_)));
+        assert_eq!(pkt.protocol(), smoltcp::wire::IpProtocol::Udp);
+    }
+
+    #[test]
+    fn ip_packet_tcp_protocol() {
+        let raw = build_ipv4_tcp([10, 0, 0, 1], [10, 0, 0, 2], 1000, 80);
+        let pkt = IpPacket::new_checked(raw.as_slice()).unwrap();
+        assert_eq!(pkt.protocol(), smoltcp::wire::IpProtocol::Tcp);
+    }
+
+    #[test]
+    fn ip_packet_rejects_garbage() {
+        let garbage = [0xff, 0xee, 0xdd, 0xcc];
+        assert!(IpPacket::new_checked(&garbage[..]).is_err());
+    }
+
+    #[test]
+    fn netstack_config_defaults_are_sane() {
+        let cfg = NetStackConfig::default();
+        assert_eq!(cfg.mtu, 1500);
+        assert!(cfg.channel_size >= 1024);
+        assert!(cfg.tcp_recv_buffer_size >= 4096);
+        assert!(cfg.tcp_send_buffer_size >= 4096);
+        assert!(cfg.number_workers >= 1);
+        assert_eq!(cfg.ipv4_prefix_len, 24);
+        assert_eq!(cfg.ipv6_prefix_len, 64);
+        assert_eq!(cfg.ip_ttl, 64);
+        assert!(cfg.tcp_timeout > Duration::ZERO);
+    }
+
+    #[test]
+    fn packet_new_and_into_bytes_roundtrip() {
+        let data = Bytes::from_static(b"raw_packet_data");
+        let pkt = Packet::new(data.clone());
+        assert_eq!(pkt.data(), data.as_ref());
+        let back = pkt.into_bytes();
+        assert_eq!(back, data);
+    }
+
+    #[tokio::test]
+    async fn split_sink_routes_udp_to_udp_channel() {
+        let (udp_tx, mut udp_rx) = mpsc::channel::<Packet>(8);
+        let (tcp_tx, _tcp_rx) = mpsc::channel::<Packet>(8);
+        let mut sink = StackSplitSink::new(udp_tx, tcp_tx);
+
+        let raw = build_ipv4_udp([10, 0, 0, 1], [10, 0, 0, 2], 1000, 53, b"dns");
+        sink.send(Packet::new(Bytes::from(raw))).await.unwrap();
+
+        let got = udp_rx.recv().await.expect("udp packet should arrive");
+        assert!(!got.data().is_empty());
+    }
+
+    #[tokio::test]
+    async fn split_sink_routes_tcp_to_tcp_channel() {
+        let (udp_tx, _udp_rx) = mpsc::channel::<Packet>(8);
+        let (tcp_tx, mut tcp_rx) = mpsc::channel::<Packet>(8);
+        let mut sink = StackSplitSink::new(udp_tx, tcp_tx);
+
+        let raw = build_ipv4_tcp([10, 0, 0, 1], [10, 0, 0, 2], 1000, 80);
+        sink.send(Packet::new(Bytes::from(raw))).await.unwrap();
+
+        let got = tcp_rx.recv().await.expect("tcp packet should arrive");
+        assert!(!got.data().is_empty());
+    }
+
+    #[tokio::test]
+    async fn split_sink_ignores_empty_packet() {
+        let (udp_tx, mut udp_rx) = mpsc::channel::<Packet>(8);
+        let (tcp_tx, mut tcp_rx) = mpsc::channel::<Packet>(8);
+        let mut sink = StackSplitSink::new(udp_tx, tcp_tx);
+
+        sink.send(Packet::new(Bytes::new())).await.unwrap();
+
+        assert!(udp_rx.try_recv().is_err());
+        assert!(tcp_rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn split_sink_rejects_malformed_packet() {
+        let (udp_tx, _udp_rx) = mpsc::channel::<Packet>(8);
+        let (tcp_tx, _tcp_rx) = mpsc::channel::<Packet>(8);
+        let mut sink = StackSplitSink::new(udp_tx, tcp_tx);
+
+        let bad = Bytes::from_static(&[0u8, 1, 2, 3]);
+        let result = sink.send(Packet::new(bad)).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn netstack_new_returns_consistent_handles() {
+        let mut cfg = NetStackConfig::default();
+        cfg.number_workers = 1;
+        cfg.channel_size = 64;
+
+        let (_stack, _tcp, _udp) = NetStack::new(cfg);
+        // Construction should succeed; we drop everything to clean up workers.
+    }
+}
