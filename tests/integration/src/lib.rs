@@ -24,3 +24,15 @@ mod auth_version;
 
 #[cfg(test)]
 mod udp_stress;
+
+#[cfg(test)]
+mod e2e_real_transport;
+
+#[cfg(test)]
+mod endpoint_http;
+
+#[cfg(test)]
+mod tls_modes;
+
+#[cfg(test)]
+mod drain_shutdown;
