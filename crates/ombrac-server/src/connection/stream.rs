@@ -1,6 +1,7 @@
 use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
 use futures::{SinkExt, StreamExt};
@@ -12,6 +13,7 @@ use tokio_util::sync::CancellationToken;
 #[cfg(feature = "tracing")]
 use tracing::Instrument;
 
+use ombrac::metrics::Metrics;
 use ombrac::{codec, protocol};
 use ombrac_macros::info;
 use ombrac_transport::Connection;
@@ -27,14 +29,16 @@ pub(crate) struct StreamTunnel<C: Connection> {
     connection: Arc<C>,
     shutdown: CancellationToken,
     semaphore: Arc<Semaphore>,
+    metrics: Metrics,
 }
 
 impl<C: Connection> StreamTunnel<C> {
-    pub(crate) fn new(connection: Arc<C>, shutdown: CancellationToken) -> Self {
+    pub(crate) fn new(connection: Arc<C>, shutdown: CancellationToken, metrics: Metrics) -> Self {
         Self {
             connection,
             shutdown,
             semaphore: Arc::new(Semaphore::new(MAX_CONCURRENT_CONNECTIONS)),
+            metrics,
         }
     }
 
@@ -47,6 +51,7 @@ impl<C: Connection> StreamTunnel<C> {
                     let stream = result?;
                     let semaphore = Arc::clone(&self.semaphore);
                     let shutdown = self.shutdown.child_token();
+                    let metrics = self.metrics.clone();
 
                     let future = async move {
                         // Acquire semaphore permit to limit concurrent connections
@@ -58,10 +63,36 @@ impl<C: Connection> StreamTunnel<C> {
                             }
                         };
 
+                        metrics
+                            .counters()
+                            .streams_opened
+                            .fetch_add(1, Ordering::Relaxed);
+
                         let mut guard = StreamGuard::default();
-                        if let Err(e) = Self::handle_connect(stream, &mut guard, shutdown).await {
+                        let result = Self::handle_connect(stream, &mut guard, shutdown).await;
+
+                        if let Err(e) = result {
+                            metrics
+                                .counters()
+                                .streams_failed
+                                .fetch_add(1, Ordering::Relaxed);
                             guard.reason = Some(e);
                         }
+
+                        // Record bytes from the bidirectional copy stats, if any
+                        if let Some(stats) = &guard.stats {
+                            let c = metrics.counters();
+                            c.bytes_rx.fetch_add(stats.b_to_a_bytes, Ordering::Relaxed);
+                            c.bytes_tx.fetch_add(
+                                stats.a_to_b_bytes + guard.initial_upstream_bytes,
+                                Ordering::Relaxed,
+                            );
+                        }
+
+                        metrics
+                            .counters()
+                            .streams_closed
+                            .fetch_add(1, Ordering::Relaxed);
                         // Permit is automatically released when dropped
                     };
 
@@ -229,10 +260,18 @@ impl<C: Connection> StreamTunnel<C> {
 }
 
 pub(crate) struct StreamGuard {
+    // All five fields are read only by the Drop impl under the `tracing`
+    // feature. Suppress dead_code rather than #[cfg]-gating the fields so the
+    // default/construction path stays consistent across feature combinations.
+    #[cfg_attr(not(feature = "tracing"), allow(dead_code))]
     created_at: Instant,
+    #[cfg_attr(not(feature = "tracing"), allow(dead_code))]
     initial_upstream_bytes: u64,
+    #[cfg_attr(not(feature = "tracing"), allow(dead_code))]
     destination: Option<protocol::Address>,
+    #[cfg_attr(not(feature = "tracing"), allow(dead_code))]
     reason: Option<io::Error>,
+    #[cfg_attr(not(feature = "tracing"), allow(dead_code))]
     stats: Option<CopyBidirectionalStats>,
 }
 
@@ -269,6 +308,7 @@ impl Drop for StreamGuard {
     }
 }
 
+#[cfg_attr(not(feature = "tracing"), allow(dead_code))]
 pub(crate) struct DisconnectReason<'a>(pub(crate) &'a Option<io::Error>);
 
 impl std::fmt::Display for DisconnectReason<'_> {

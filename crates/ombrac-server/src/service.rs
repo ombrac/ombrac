@@ -6,6 +6,8 @@ use std::time::Duration;
 use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 
+use ombrac::metrics::Metrics;
+use ombrac::protocol::Secret;
 use ombrac_macros::{error, info, warn};
 use ombrac_transport::quic::TransportConfig as QuicTransportConfig;
 use ombrac_transport::quic::error::Error as QuicError;
@@ -14,6 +16,8 @@ use ombrac_transport::quic::server::Server as QuicServer;
 
 use crate::config::{ServiceConfig, TlsMode};
 use crate::connection::ConnectionAcceptor;
+
+type BuiltAcceptor = ConnectionAcceptor<QuicServer, Secret>;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -70,6 +74,11 @@ macro_rules! require_config {
 pub struct OmbracServer {
     handle: JoinHandle<Result<()>>,
     shutdown_tx: broadcast::Sender<()>,
+    metrics: Metrics,
+    // Held to keep the QUIC endpoint alive after the accept loop exits, so
+    // `shutdown_with_drain` can wait for in-flight streams without the
+    // underlying transport being torn down.
+    _acceptor_keepalive: Arc<BuiltAcceptor>,
 }
 
 impl OmbracServer {
@@ -103,18 +112,37 @@ impl OmbracServer {
             secret,
             connection_config,
         ));
+        let metrics = acceptor.metrics();
 
         // Set up shutdown channel
         let (shutdown_tx, shutdown_rx) = broadcast::channel(1);
 
-        // Spawn accept loop
-        let handle =
-            tokio::spawn(async move { acceptor.accept_loop(shutdown_rx).await.map_err(Error::Io) });
+        // Spawn accept loop. Hold a strong reference to the acceptor (and thus
+        // the underlying QUIC server) outside the task as well, so the
+        // transport stays alive after the accept loop exits — needed for
+        // shutdown_with_drain to let in-flight streams finish naturally.
+        let acceptor_for_task = Arc::clone(&acceptor);
+        let handle = tokio::spawn(async move {
+            acceptor_for_task
+                .accept_loop(shutdown_rx)
+                .await
+                .map_err(Error::Io)
+        });
 
         Ok(OmbracServer {
             handle,
             shutdown_tx,
+            metrics,
+            _acceptor_keepalive: acceptor,
         })
+    }
+
+    /// Returns a clone-able handle to runtime metrics for this server.
+    ///
+    /// Callers can snapshot or read individual counters at any time:
+    /// `server.metrics().snapshot()`.
+    pub fn metrics(&self) -> Metrics {
+        self.metrics.clone()
     }
 
     /// Gracefully shuts down the server.
@@ -154,6 +182,50 @@ impl OmbracServer {
             }
         }
     }
+
+    /// Stops accepting new connections, then waits up to `drain_timeout` for
+    /// in-flight streams to close naturally before returning.
+    ///
+    /// Returns `true` if all streams drained within the timeout, `false` if
+    /// the timeout elapsed with active streams still in flight. In the latter
+    /// case, those streams' tasks will keep running until their underlying
+    /// QUIC connection closes (typically via idle timeout) — they are not
+    /// hard-cancelled by this call.
+    ///
+    /// Use this for rolling restarts where you want existing client requests
+    /// to complete before the process exits.
+    pub async fn shutdown_with_drain(self, drain_timeout: Duration) -> bool {
+        let _ = self.shutdown_tx.send(());
+
+        // Poll the stream counter until balanced (no active streams) or timeout.
+        let deadline = tokio::time::Instant::now() + drain_timeout;
+        let mut interval = tokio::time::interval(Duration::from_millis(50));
+        let drained = loop {
+            interval.tick().await;
+            let snap = self.metrics.snapshot();
+            let active_streams = snap.streams_opened.saturating_sub(snap.streams_closed);
+            if active_streams == 0 {
+                break true;
+            }
+            if tokio::time::Instant::now() >= deadline {
+                warn!(
+                    active_streams = active_streams,
+                    timeout_ms = drain_timeout.as_millis() as u64,
+                    "drain timed out with streams still active"
+                );
+                break false;
+            }
+        };
+
+        // Either way, wait for the accept-loop task to clean up.
+        match self.handle.await {
+            Ok(Ok(_)) => {}
+            Ok(Err(e)) => error!("server task exited with error: {e}"),
+            Err(e) => error!("server task failed to shut down cleanly: {e}"),
+        }
+
+        drained
+    }
 }
 
 async fn quic_server_from_config(config: &ServiceConfig) -> Result<QuicServer> {
@@ -183,7 +255,24 @@ async fn quic_server_from_config(config: &ServiceConfig) -> Result<QuicServer> {
             )?);
         }
         TlsMode::Insecure => {
-            warn!("tls is in insecure mode; generating self-signed certificates for local/dev use");
+            warn!(
+                "================================================================"
+            );
+            warn!(
+                "TLS IS IN INSECURE MODE — self-signed certificates will be used."
+            );
+            warn!(
+                "This bypasses any meaningful authentication of the SERVER and"
+            );
+            warn!(
+                "is intended for local development and CI only. DO NOT use this"
+            );
+            warn!(
+                "mode on a network you don't control."
+            );
+            warn!(
+                "================================================================"
+            );
             quic_config.enable_self_signed = true;
         }
     }
