@@ -6,5 +6,6 @@
 //! - **reassembly**: UDP packet fragmentation and reassembly
 
 pub mod codec;
+pub mod metrics;
 pub mod protocol;
 pub mod reassembly;
