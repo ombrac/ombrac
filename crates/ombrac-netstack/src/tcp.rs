@@ -1,10 +1,11 @@
 use std::collections::HashMap;
-use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
+
+use twox_hash::XxHash64;
 
 use ringbuf::HeapRb;
 use ringbuf::traits::{Consumer, Observer, Producer};
@@ -141,7 +142,9 @@ impl TcpConnection {
                                         if addr1 > addr2 {
                                             std::mem::swap(&mut addr1, &mut addr2);
                                         }
-                                        let mut hasher = DefaultHasher::new();
+                                        // XxHash64 is ~4x faster than SipHash on this hot path
+                                        // and we only need uniform distribution, not crypto strength.
+                                        let mut hasher = XxHash64::with_seed(0);
                                         addr1.hash(&mut hasher);
                                         addr2.hash(&mut hasher);
                                         (hasher.finish() % num_workers as u64) as usize
