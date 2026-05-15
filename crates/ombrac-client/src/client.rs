@@ -7,6 +7,7 @@ use bytes::Bytes;
 #[cfg(feature = "datagram")]
 use tokio_util::sync::CancellationToken;
 
+use ombrac::metrics::Metrics;
 use ombrac::protocol::{Address, Secret};
 use ombrac_transport::{Connection, Initiator};
 
@@ -119,6 +120,11 @@ where
     /// Rebind the transport to a new socket to ensure a clean state for reconnection.
     pub async fn rebind(&self) -> io::Result<()> {
         self.connection.rebind().await
+    }
+
+    /// Returns a clone-able handle to client-side runtime metrics.
+    pub fn metrics(&self) -> Metrics {
+        self.connection.metrics()
     }
 }
 

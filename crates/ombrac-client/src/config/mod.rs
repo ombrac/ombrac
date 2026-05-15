@@ -414,3 +414,199 @@ pub fn load_from_file(
         .build()
         .map_err(|e| e.into())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn minimal_json() -> &'static str {
+        r#"{
+            "secret": "topsecret",
+            "server": "example.com:443"
+        }"#
+    }
+
+    #[test]
+    fn load_from_json_with_only_required_fields_uses_defaults() {
+        let cfg = load_from_json(minimal_json()).unwrap();
+        assert_eq!(cfg.secret, "topsecret");
+        assert_eq!(cfg.server, "example.com:443");
+        // Transport defaults applied
+        assert_eq!(cfg.transport.tls_mode, Some(TlsMode::Tls));
+        assert_eq!(cfg.transport.idle_timeout, Some(30000));
+        assert_eq!(cfg.transport.keep_alive, Some(8000));
+        assert_eq!(cfg.transport.max_streams, Some(100));
+        assert_eq!(cfg.transport.zero_rtt, Some(false));
+    }
+
+    #[test]
+    fn load_from_json_missing_secret_fails() {
+        let json = r#"{ "server": "example.com:443" }"#;
+        let err = load_from_json(json).unwrap_err();
+        assert!(err.to_string().contains("secret"));
+    }
+
+    #[test]
+    fn load_from_json_missing_server_fails() {
+        let json = r#"{ "secret": "s" }"#;
+        let err = load_from_json(json).unwrap_err();
+        assert!(err.to_string().contains("server"));
+    }
+
+    #[test]
+    fn load_from_json_invalid_json_returns_error() {
+        let result = load_from_json("not json {");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn load_from_json_overrides_transport_defaults() {
+        let json = r#"{
+            "secret": "k",
+            "server": "1.2.3.4:443",
+            "transport": {
+                "tls_mode": "insecure",
+                "idle_timeout": 60000,
+                "keep_alive": 4000,
+                "max_streams": 200,
+                "zero_rtt": true
+            }
+        }"#;
+        let cfg = load_from_json(json).unwrap();
+        assert_eq!(cfg.transport.tls_mode, Some(TlsMode::Insecure));
+        assert_eq!(cfg.transport.idle_timeout, Some(60000));
+        assert_eq!(cfg.transport.keep_alive, Some(4000));
+        assert_eq!(cfg.transport.max_streams, Some(200));
+        assert_eq!(cfg.transport.zero_rtt, Some(true));
+    }
+
+    #[test]
+    fn cli_overrides_json_in_merge_order() {
+        let json = json::JsonConfig {
+            secret: Some("from_json".into()),
+            server: Some("from_json:1".into()),
+            auth_option: None,
+            endpoint: None,
+            transport: Some(TransportConfig {
+                idle_timeout: Some(11111),
+                keep_alive: Some(2222),
+                ..Default::default()
+            }),
+            #[cfg(feature = "tracing")]
+            logging: None,
+        };
+
+        let cli = cli::CliConfig {
+            secret: Some("from_cli".into()),
+            server: None, // CLI doesn't override → JSON wins
+            auth_option: None,
+            endpoint: EndpointConfig::default(),
+            transport: TransportConfig {
+                idle_timeout: Some(99999),
+                keep_alive: None, // CLI doesn't override this one
+                ..Default::default()
+            },
+            #[cfg(feature = "tracing")]
+            logging: LoggingConfig::default(),
+        };
+
+        let cfg = ConfigBuilder::new()
+            .merge_json(json)
+            .merge_cli(cli)
+            .build()
+            .unwrap();
+
+        assert_eq!(cfg.secret, "from_cli"); // CLI wins
+        assert_eq!(cfg.server, "from_json:1"); // JSON wins (CLI absent)
+        assert_eq!(cfg.transport.idle_timeout, Some(99999)); // CLI wins
+        assert_eq!(cfg.transport.keep_alive, Some(2222)); // JSON wins (CLI absent)
+    }
+
+    #[test]
+    fn json_config_roundtrips_serialization() {
+        let json = r#"{
+            "secret": "abc",
+            "server": "127.0.0.1:5555",
+            "transport": {
+                "tls_mode": "tls",
+                "congestion": "Bbr",
+                "max_streams": 50
+            }
+        }"#;
+        let parsed = json::JsonConfig::from_json_str(json).unwrap();
+        let reserialized = serde_json::to_string(&parsed).unwrap();
+        let reparsed = json::JsonConfig::from_json_str(&reserialized).unwrap();
+        assert_eq!(reparsed.secret.as_deref(), Some("abc"));
+        assert_eq!(reparsed.server.as_deref(), Some("127.0.0.1:5555"));
+    }
+
+    #[test]
+    fn tls_mode_serializes_kebab_case() {
+        let s_tls = serde_json::to_string(&TlsMode::Tls).unwrap();
+        let s_mtls = serde_json::to_string(&TlsMode::MTls).unwrap();
+        let s_insecure = serde_json::to_string(&TlsMode::Insecure).unwrap();
+        assert_eq!(s_tls, "\"tls\"");
+        assert_eq!(s_mtls, "\"m-tls\"");
+        assert_eq!(s_insecure, "\"insecure\"");
+    }
+
+    #[test]
+    fn tls_mode_default_is_tls() {
+        assert_eq!(TlsMode::default(), TlsMode::Tls);
+    }
+
+    #[test]
+    fn endpoint_config_defaults_are_empty() {
+        let cfg = EndpointConfig::default();
+        #[cfg(feature = "endpoint-socks")]
+        assert!(cfg.socks.is_none());
+        #[cfg(feature = "endpoint-http")]
+        assert!(cfg.http.is_none());
+        let _ = cfg;
+    }
+
+    #[test]
+    fn load_from_file_missing_path_returns_error() {
+        let path = std::path::Path::new("/this/path/does/not/exist/config.json");
+        let result = load_from_file(path);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn load_from_file_reads_real_file() {
+        let dir = std::env::temp_dir();
+        let path = dir.join(format!("ombrac-client-cfg-{}.json", std::process::id()));
+        std::fs::write(
+            &path,
+            r#"{"secret":"k","server":"1.1.1.1:443"}"#,
+        )
+        .unwrap();
+
+        let cfg = load_from_file(&path).unwrap();
+        assert_eq!(cfg.secret, "k");
+        assert_eq!(cfg.server, "1.1.1.1:443");
+
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn config_builder_build_fails_without_required_fields() {
+        let err = ConfigBuilder::new().build().unwrap_err();
+        assert!(err.contains("secret"));
+    }
+
+    #[cfg(feature = "endpoint-socks")]
+    #[test]
+    fn endpoint_socks_address_parses_from_json() {
+        let json = r#"{
+            "secret": "k",
+            "server": "s:1",
+            "endpoint": { "socks": "127.0.0.1:1080" }
+        }"#;
+        let cfg = load_from_json(json).unwrap();
+        assert_eq!(
+            cfg.endpoint.socks.unwrap().to_string(),
+            "127.0.0.1:1080"
+        );
+    }
+}
