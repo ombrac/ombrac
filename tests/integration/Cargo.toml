@@ -24,6 +24,7 @@ curl = { workspace = true }
 ntest = { workspace = true }
 rand = { workspace = true, features = ["thread_rng"] }
 blake3 = { workspace = true }
+rcgen = { workspace = true, features = ["pem", "crypto", "aws_lc_rs"] }
 
 [lints]
 workspace = true
