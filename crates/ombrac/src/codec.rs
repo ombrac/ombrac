@@ -3,7 +3,19 @@ pub use tokio_util::codec::LengthDelimitedCodec;
 
 use crate::protocol::{ClientConnect, ClientHello, ServerConnectResponse};
 
-/// Maximum frame length for length-delimited codec [8MB]
+/// Maximum frame length for the control plane codec.
+///
+/// Control messages (`ClientHello`, `ClientConnect`, `ServerConnectResponse`,
+/// `ServerAuthResponse`) are small by construction — typically <1 KiB.
+/// 64 KiB is generous for opaque `options` payloads while keeping the
+/// memory amplification factor bounded against malicious senders.
+pub const MAX_CONTROL_FRAME_LENGTH: usize = 64 * 1024;
+
+/// Maximum frame length for any future data-plane codec [8 MB].
+///
+/// Currently unused by the protocol (bulk data is sent raw over streams),
+/// but kept as a public ceiling for downstream consumers building on this
+/// codec.
 pub const MAX_FRAME_LENGTH: usize = 8 * 1024 * 1024;
 
 /// Messages sent from client to server.
@@ -28,17 +40,23 @@ pub enum ServerMessage {
     ConnectResponse(ServerConnectResponse),
 }
 
-/// Creates a length-delimited codec for framing protocol messages.
+/// Creates a length-delimited codec for control-plane messages.
 ///
-/// The codec uses a 4-byte big-endian length prefix, followed by the message payload.
-/// Maximum frame size is limited to prevent memory exhaustion attacks.
+/// The codec uses a 4-byte big-endian length prefix, followed by the message
+/// payload. Frame size is capped at `MAX_CONTROL_FRAME_LENGTH` to prevent a
+/// malicious sender from forcing the receiver to allocate megabytes of memory
+/// before the control message is rejected.
+///
+/// All current uses of this codec are control flow (auth handshake,
+/// connect request/response). Bulk data is forwarded raw, not through this
+/// codec.
 pub fn length_codec() -> LengthDelimitedCodec {
     LengthDelimitedCodec::builder()
         .length_field_offset(0)
         .length_field_length(4)
         .length_adjustment(0)
         .num_skip(4)
-        .max_frame_length(MAX_FRAME_LENGTH)
+        .max_frame_length(MAX_CONTROL_FRAME_LENGTH)
         .new_codec()
 }
 
@@ -99,17 +117,17 @@ mod tests {
     fn test_length_codec_frame_at_exact_max_size() {
         let mut codec = length_codec();
         let mut buf = BytesMut::new();
-        let payload = Bytes::from(vec![0u8; MAX_FRAME_LENGTH]);
+        let payload = Bytes::from(vec![0u8; MAX_CONTROL_FRAME_LENGTH]);
         Encoder::<Bytes>::encode(&mut codec, payload.clone(), &mut buf).unwrap();
         let decoded = codec.decode(&mut buf).unwrap().unwrap();
-        assert_eq!(decoded.len(), MAX_FRAME_LENGTH);
+        assert_eq!(decoded.len(), MAX_CONTROL_FRAME_LENGTH);
     }
 
     #[test]
     fn test_length_codec_frame_exceeds_max_size_rejected() {
         let mut codec = length_codec();
-        // Craft a 4-byte big-endian length prefix exceeding MAX_FRAME_LENGTH
-        let oversized_len = (MAX_FRAME_LENGTH + 1) as u32;
+        // Craft a 4-byte big-endian length prefix exceeding MAX_CONTROL_FRAME_LENGTH
+        let oversized_len = (MAX_CONTROL_FRAME_LENGTH + 1) as u32;
         let mut buf = BytesMut::new();
         buf.extend_from_slice(&oversized_len.to_be_bytes());
         buf.extend_from_slice(&[0u8; 16]); // some dummy bytes after the prefix
