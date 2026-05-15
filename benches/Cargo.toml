@@ -12,10 +12,18 @@ readme = "../../README.md"
 
 [dependencies]
 ombrac = { workspace = true }
+ombrac-netstack = { workspace = true }
+ombrac-transport = { workspace = true, features = ["quic", "datagram"] }
+ombrac-client = { workspace = true, features = ["datagram"] }
+ombrac-server = { workspace = true, features = ["datagram"] }
 criterion = { workspace = true, features = ["default", "async_tokio"] }
-tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "io-util", "sync"] }
 tokio-util = { workspace = true, features = ["codec"] }
 bytes = { workspace = true, features = ["std"] }
+futures = { workspace = true, features = ["std"] }
+rcgen = { workspace = true, features = ["pem", "crypto", "aws_lc_rs"] }
+etherparse = { workspace = true, features = ["std"] }
+rand = { workspace = true, features = ["thread_rng"] }
 
 [[bench]]
 name = "throughput"
@@ -27,6 +35,14 @@ harness = false
 
 [[bench]]
 name = "concurrency"
+harness = false
+
+[[bench]]
+name = "netstack"
+harness = false
+
+[[bench]]
+name = "e2e_quic"
 harness = false
 
 [lints]
