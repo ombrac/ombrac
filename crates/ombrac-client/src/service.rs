@@ -5,7 +5,7 @@ use std::time::Duration;
 use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 
-use ombrac_macros::{error, info};
+use ombrac_macros::{error, info, warn};
 use ombrac_transport::quic::Connection as QuicConnection;
 use ombrac_transport::quic::TransportConfig as QuicTransportConfig;
 use ombrac_transport::quic::client::Client as QuicClient;
@@ -184,6 +184,11 @@ impl OmbracClient {
 
     pub fn client(&self) -> &Arc<Client<QuicClient, QuicConnection>> {
         &self.client
+    }
+
+    /// Returns a clone-able handle to runtime metrics for this client.
+    pub fn metrics(&self) -> ombrac::metrics::Metrics {
+        self.client.metrics()
     }
 
     /// Gracefully shuts down the client.
@@ -435,6 +440,24 @@ async fn quic_client_from_config(config: &ServiceConfig) -> io::Result<QuicClien
             quic_config.client_cert_key_paths = Some((client_cert, client_key));
         }
         TlsMode::Insecure => {
+            warn!(
+                "================================================================"
+            );
+            warn!(
+                "TLS IS IN INSECURE MODE — SERVER CERTIFICATE VERIFICATION DISABLED."
+            );
+            warn!(
+                "Traffic is encrypted, but the server identity is NOT validated."
+            );
+            warn!(
+                "An attacker on the network path can impersonate the server."
+            );
+            warn!(
+                "Use this mode only for local development and CI."
+            );
+            warn!(
+                "================================================================"
+            );
             quic_config.skip_server_verification = true;
         }
     }

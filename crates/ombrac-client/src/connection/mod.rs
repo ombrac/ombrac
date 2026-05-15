@@ -17,6 +17,7 @@ use tokio::time::Instant;
 use tokio_util::codec::Framed;
 
 use ombrac::codec::{ClientMessage, ServerMessage, length_codec};
+use ombrac::metrics::Metrics;
 use ombrac::protocol::{
     self, Address, ClientConnect, ClientHello, ConnectErrorKind, PROTOCOL_VERSION, Secret,
     ServerAuthResponse, ServerConnectResponse,
@@ -39,6 +40,28 @@ const INITIAL_RECONNECT_BACKOFF: Duration = Duration::from_secs(1);
 
 /// Maximum backoff duration for reconnection attempts [default: 60 seconds]
 const MAX_RECONNECT_BACKOFF: Duration = Duration::from_secs(60);
+
+/// Returns a multiplier in `[0.8, 1.2)` to add ±20% jitter to backoff durations.
+///
+/// Avoids the thundering-herd problem where many disconnected clients all
+/// reconnect at the same time. Derived from the current wall clock subsec
+/// nanos — non-cryptographic and dependency-free.
+fn backoff_jitter() -> f64 {
+    use std::time::SystemTime;
+    let nanos = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map(|d| d.subsec_nanos())
+        .unwrap_or(0);
+    0.8 + (nanos as f64 / 1_000_000_000.0) * 0.4
+}
+
+/// Doubles the current backoff (capped at `MAX_RECONNECT_BACKOFF`) and applies ±20% jitter.
+fn next_backoff(current: Duration) -> Duration {
+    let doubled = (current * 2).min(MAX_RECONNECT_BACKOFF);
+    let jittered = doubled.as_secs_f64() * backoff_jitter();
+    let capped = jittered.min(MAX_RECONNECT_BACKOFF.as_secs_f64());
+    Duration::from_secs_f64(capped)
+}
 
 struct ReconnectState {
     last_attempt: Option<Instant>,
@@ -69,6 +92,7 @@ where
     reconnect_lock: Mutex<ReconnectState>,
     secret: Secret,
     options: Bytes,
+    metrics: Metrics,
 }
 
 impl<T, C> ClientConnection<T, C>
@@ -100,7 +124,13 @@ where
             reconnect_lock: Mutex::new(ReconnectState::default()),
             secret,
             options,
+            metrics: Metrics::new(),
         })
+    }
+
+    /// Returns a clone-able handle to client-side runtime metrics.
+    pub fn metrics(&self) -> Metrics {
+        self.metrics.clone()
     }
 
     /// Opens a new bidirectional stream for TCP-like communication.
@@ -188,10 +218,18 @@ where
             ServerConnectResponse::Ok => {
                 // Connection successful - return the stream wrapped in BufferedStream
                 // to ensure any buffered data is read first
+                self.metrics
+                    .counters()
+                    .streams_opened
+                    .fetch_add(1, Ordering::Relaxed);
                 Ok(BufferedStream::new(stream, buffered_data))
             }
             ServerConnectResponse::Err { kind, message } => {
                 // Connection failed - return appropriate error
+                self.metrics
+                    .counters()
+                    .streams_failed
+                    .fetch_add(1, Ordering::Relaxed);
                 let error_kind = match kind {
                     ConnectErrorKind::ConnectionRefused => io::ErrorKind::ConnectionRefused,
                     ConnectErrorKind::NetworkUnreachable => io::ErrorKind::NetworkUnreachable,
@@ -288,9 +326,13 @@ where
         }
 
         state.last_attempt = Some(Instant::now());
+        self.metrics
+            .counters()
+            .reconnect_attempts
+            .fetch_add(1, Ordering::Relaxed);
 
         if let Err(e) = self.transport.rebind().await {
-            state.backoff = (state.backoff * 2).min(MAX_RECONNECT_BACKOFF);
+            state.backoff = next_backoff(state.backoff);
             log_reconnect_error(
                 ErrorContext::new("reconnect").with_details("transport rebind failed".to_string()),
                 &e,
@@ -306,10 +348,14 @@ where
 
                 self.connection.store(Arc::new(new_connection));
                 self.connection_id.fetch_add(1, Ordering::Release);
+                self.metrics
+                    .counters()
+                    .reconnect_succeeded
+                    .fetch_add(1, Ordering::Relaxed);
                 Ok(())
             }
             Err(e) => {
-                state.backoff = (state.backoff * 2).min(MAX_RECONNECT_BACKOFF);
+                state.backoff = next_backoff(state.backoff);
                 log_reconnect_error(
                     ErrorContext::new("reconnect")
                         .with_details("authentication failed".to_string()),
@@ -439,10 +485,81 @@ fn is_connection_error(e: &io::Error) -> bool {
     matches!(
         e.kind(),
         io::ErrorKind::ConnectionReset
+            | io::ErrorKind::ConnectionAborted
             | io::ErrorKind::BrokenPipe
             | io::ErrorKind::NotConnected
             | io::ErrorKind::TimedOut
             | io::ErrorKind::UnexpectedEof
             | io::ErrorKind::NetworkUnreachable
+            | io::ErrorKind::NetworkDown
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn is_connection_error_recognizes_all_transient_kinds() {
+        let kinds = [
+            io::ErrorKind::ConnectionReset,
+            io::ErrorKind::ConnectionAborted,
+            io::ErrorKind::BrokenPipe,
+            io::ErrorKind::NotConnected,
+            io::ErrorKind::TimedOut,
+            io::ErrorKind::UnexpectedEof,
+            io::ErrorKind::NetworkUnreachable,
+            io::ErrorKind::NetworkDown,
+        ];
+        for k in kinds {
+            assert!(is_connection_error(&io::Error::new(k, "")), "missed {k:?}");
+        }
+    }
+
+    #[test]
+    fn is_connection_error_ignores_application_errors() {
+        let kinds = [
+            io::ErrorKind::PermissionDenied,
+            io::ErrorKind::InvalidData,
+            io::ErrorKind::InvalidInput,
+            io::ErrorKind::NotFound,
+            io::ErrorKind::WouldBlock,
+        ];
+        for k in kinds {
+            assert!(
+                !is_connection_error(&io::Error::new(k, "")),
+                "false positive on {k:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn backoff_jitter_is_in_expected_band() {
+        // Run many samples; every one must land within [0.8, 1.2).
+        for _ in 0..1000 {
+            let j = backoff_jitter();
+            assert!((0.8..1.2).contains(&j), "jitter {j} out of band");
+            // Sleep a nanosecond to nudge SystemTime; ensures we exercise different inputs.
+            std::thread::sleep(Duration::from_nanos(1));
+        }
+    }
+
+    #[test]
+    fn next_backoff_doubles_with_jitter_and_caps() {
+        // Starting from 1s and doubling we should hit the cap quickly.
+        // Cap is 60s; check both shape and saturation.
+        let initial = INITIAL_RECONNECT_BACKOFF;
+        let after_one = next_backoff(initial);
+        // doubled=2s, jitter ±20% → [1.6, 2.4)
+        assert!(after_one >= Duration::from_millis(1600));
+        assert!(after_one < Duration::from_millis(2400));
+
+        // Saturation test: enormous current value never exceeds MAX_RECONNECT_BACKOFF.
+        let huge = Duration::from_secs(10_000);
+        let result = next_backoff(huge);
+        assert!(
+            result <= MAX_RECONNECT_BACKOFF,
+            "next_backoff saturated above cap: {result:?}"
+        );
+    }
 }
