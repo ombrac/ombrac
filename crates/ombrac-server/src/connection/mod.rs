@@ -8,6 +8,7 @@ use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::Weak;
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use futures::{SinkExt, StreamExt};
@@ -20,6 +21,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::Instrument;
 
 use ombrac::codec;
+use ombrac::metrics::Metrics;
 use ombrac::protocol;
 use ombrac_macros::{debug, error, warn};
 use ombrac_transport::{Acceptor, Connection};
@@ -34,6 +36,7 @@ use crate::config::ConnectionConfig;
 pub struct ClientConnectionProcessor<C: Connection> {
     transport_connection: Arc<C>,
     shutdown_token: CancellationToken,
+    metrics: Metrics,
 }
 
 impl<C: Connection> ClientConnectionProcessor<C> {
@@ -47,6 +50,7 @@ impl<C: Connection> ClientConnectionProcessor<C> {
         connection: C,
         authenticator: &A,
         config: Arc<ConnectionConfig>,
+        metrics: &Metrics,
     ) -> io::Result<()>
     where
         A: Authenticator<C>,
@@ -68,6 +72,7 @@ impl<C: Connection> ClientConnectionProcessor<C> {
         let processor = Self {
             transport_connection,
             shutdown_token: CancellationToken::new(),
+            metrics: metrics.clone(),
         };
 
         processor.run_tunnel_loops().await;
@@ -259,7 +264,7 @@ impl<C: Connection> ClientConnectionProcessor<C> {
 
         let connection = Arc::clone(&self.transport_connection);
         let shutdown = self.shutdown_token.child_token();
-        let tunnel = StreamTunnel::new(connection, shutdown);
+        let tunnel = StreamTunnel::new(connection, shutdown, self.metrics.clone());
 
         #[cfg(not(feature = "tracing"))]
         let handle = tokio::spawn(tunnel.accept_loop());
@@ -275,7 +280,7 @@ impl<C: Connection> ClientConnectionProcessor<C> {
 
         let connection = Arc::clone(&self.transport_connection);
         let shutdown = self.shutdown_token.child_token();
-        let tunnel = DatagramTunnel::new(connection, shutdown);
+        let tunnel = DatagramTunnel::new(connection, shutdown, self.metrics.clone());
 
         #[cfg(not(feature = "tracing"))]
         let handle = tokio::spawn(tunnel.accept_loop());
@@ -315,6 +320,7 @@ pub struct ConnectionAcceptor<T, A> {
     authenticator: Arc<A>,
     connection_semaphore: Arc<Semaphore>,
     config: Arc<ConnectionConfig>,
+    metrics: Metrics,
 }
 
 impl<T: Acceptor, A: Authenticator<T::Connection> + 'static> ConnectionAcceptor<T, A> {
@@ -337,7 +343,16 @@ impl<T: Acceptor, A: Authenticator<T::Connection> + 'static> ConnectionAcceptor<
             authenticator: Arc::new(authenticator),
             connection_semaphore: Arc::new(Semaphore::new(max_connections)),
             config,
+            metrics: Metrics::new(),
         }
+    }
+
+    /// Returns a clone-able handle to runtime metrics.
+    ///
+    /// Counters are incremented as connections/streams flow through this acceptor;
+    /// callers can `metrics.snapshot()` at any time to read them.
+    pub fn metrics(&self) -> Metrics {
+        self.metrics.clone()
     }
 
     /// Main accept loop that accepts incoming connections and manages them with resource limits.
@@ -359,6 +374,7 @@ impl<T: Acceptor, A: Authenticator<T::Connection> + 'static> ConnectionAcceptor<
                         Arc::clone(&self.authenticator),
                         Arc::clone(&self.connection_semaphore),
                         Arc::clone(&self.config),
+                        self.metrics.clone(),
                     );
                 },
             }
@@ -373,16 +389,22 @@ impl<T: Acceptor, A: Authenticator<T::Connection> + 'static> ConnectionAcceptor<
         authenticator: Arc<A>,
         semaphore: Arc<Semaphore>,
         config: Arc<ConnectionConfig>,
+        metrics: Metrics,
     ) {
         match result {
             Ok(connection) => match semaphore.try_acquire_owned() {
                 Ok(permit) => {
+                    metrics
+                        .counters()
+                        .connections_accepted
+                        .fetch_add(1, Ordering::Relaxed);
                     #[cfg(not(feature = "tracing"))]
                     tokio::spawn(Self::process_connection_with_permit(
                         connection,
                         authenticator,
                         permit,
                         config,
+                        metrics,
                     ));
                     #[cfg(feature = "tracing")]
                     tokio::spawn(
@@ -391,11 +413,16 @@ impl<T: Acceptor, A: Authenticator<T::Connection> + 'static> ConnectionAcceptor<
                             authenticator,
                             permit,
                             config,
+                            metrics,
                         )
                         .in_current_span(),
                     );
                 }
                 Err(_) => {
+                    metrics
+                        .counters()
+                        .connections_rejected
+                        .fetch_add(1, Ordering::Relaxed);
                     warn!(
                         "connection rejected: maximum concurrent connections ({}) reached",
                         config.max_connections()
@@ -416,9 +443,10 @@ impl<T: Acceptor, A: Authenticator<T::Connection> + 'static> ConnectionAcceptor<
         authenticator: Arc<A>,
         _permit: OwnedSemaphorePermit,
         config: Arc<ConnectionConfig>,
+        metrics: Metrics,
     ) {
         // Permit is held for the lifetime of this function
-        Self::process_connection(connection, authenticator, config).await;
+        Self::process_connection(connection, authenticator, config, metrics).await;
         // Permit is automatically released when dropped
     }
 
@@ -438,6 +466,7 @@ impl<T: Acceptor, A: Authenticator<T::Connection> + 'static> ConnectionAcceptor<
         connection: <T as Acceptor>::Connection,
         authenticator: Arc<A>,
         config: Arc<ConnectionConfig>,
+        metrics: Metrics,
     ) {
         #[cfg(feature = "tracing")]
         if let Ok(addr) = connection.remote_address() {
@@ -445,7 +474,15 @@ impl<T: Acceptor, A: Authenticator<T::Connection> + 'static> ConnectionAcceptor<
         }
 
         let _result =
-            ClientConnectionProcessor::handle(connection, authenticator.as_ref(), config).await;
+            ClientConnectionProcessor::handle(connection, authenticator.as_ref(), config, &metrics)
+                .await;
+
+        if _result.is_err() {
+            metrics
+                .counters()
+                .connections_auth_failed
+                .fetch_add(1, Ordering::Relaxed);
+        }
 
         #[cfg(feature = "tracing")]
         match _result {

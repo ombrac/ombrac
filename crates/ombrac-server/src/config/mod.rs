@@ -136,14 +136,6 @@ impl ConnectionConfig {
         self.auth_timeout_secs.unwrap_or(10)
     }
 
-    /// Get handshake timeout with default (in seconds)
-    ///
-    /// Deprecated: Use `auth_timeout_secs` instead
-    #[deprecated(note = "Use auth_timeout_secs instead")]
-    pub fn handshake_timeout_secs(&self) -> u64 {
-        self.auth_timeout_secs()
-    }
-
     /// Get max concurrent streams with default
     pub fn max_concurrent_streams(&self) -> usize {
         self.max_concurrent_streams.unwrap_or(4096)
@@ -416,4 +408,209 @@ pub fn load_from_file(
         .merge_json(json_config)
         .build()
         .map_err(|e| e.into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn load_from_json_minimal_uses_defaults() {
+        let json = r#"{
+            "secret": "k",
+            "listen": "0.0.0.0:443"
+        }"#;
+        let cfg = load_from_json(json).unwrap();
+        assert_eq!(cfg.secret, "k");
+        assert_eq!(cfg.listen.to_string(), "0.0.0.0:443");
+        assert_eq!(cfg.transport.tls_mode, Some(TlsMode::Tls));
+        assert_eq!(cfg.transport.idle_timeout, Some(30000));
+        assert_eq!(cfg.connection.max_connections, Some(10000));
+        assert_eq!(cfg.connection.auth_timeout_secs, Some(10));
+        assert_eq!(cfg.connection.max_concurrent_streams, Some(4096));
+    }
+
+    #[test]
+    fn load_from_json_missing_secret_fails() {
+        let json = r#"{ "listen": "0.0.0.0:443" }"#;
+        let err = load_from_json(json).unwrap_err();
+        assert!(err.to_string().contains("secret"));
+    }
+
+    #[test]
+    fn load_from_json_missing_listen_fails() {
+        let json = r#"{ "secret": "k" }"#;
+        let err = load_from_json(json).unwrap_err();
+        assert!(err.to_string().contains("listen"));
+    }
+
+    #[test]
+    fn load_from_json_invalid_listen_address_fails() {
+        let json = r#"{ "secret": "k", "listen": "not-an-address" }"#;
+        let result = load_from_json(json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn load_from_json_overrides_transport() {
+        let json = r#"{
+            "secret": "k",
+            "listen": "127.0.0.1:443",
+            "transport": {
+                "tls_mode": "m-tls",
+                "idle_timeout": 12345,
+                "max_streams": 999
+            }
+        }"#;
+        let cfg = load_from_json(json).unwrap();
+        assert_eq!(cfg.transport.tls_mode, Some(TlsMode::MTls));
+        assert_eq!(cfg.transport.idle_timeout, Some(12345));
+        assert_eq!(cfg.transport.max_streams, Some(999));
+    }
+
+    #[test]
+    fn load_from_json_overrides_connection_limits() {
+        let json = r#"{
+            "secret": "k",
+            "listen": "127.0.0.1:443",
+            "connection": {
+                "max_connections": 500,
+                "auth_timeout_secs": 5,
+                "max_concurrent_streams": 100,
+                "max_concurrent_datagrams": 200
+            }
+        }"#;
+        let cfg = load_from_json(json).unwrap();
+        assert_eq!(cfg.connection.max_connections, Some(500));
+        assert_eq!(cfg.connection.auth_timeout_secs, Some(5));
+        assert_eq!(cfg.connection.max_concurrent_streams, Some(100));
+        assert_eq!(cfg.connection.max_concurrent_datagrams, Some(200));
+    }
+
+    #[test]
+    fn cli_overrides_json_in_merge_order() {
+        let json = json::JsonConfig {
+            secret: Some("from_json".into()),
+            listen: Some("0.0.0.0:5555".parse().unwrap()),
+            transport: Some(TransportConfig {
+                idle_timeout: Some(11111),
+                keep_alive: Some(2222),
+                ..Default::default()
+            }),
+            connection: None,
+            #[cfg(feature = "tracing")]
+            logging: None,
+        };
+
+        let cli = cli::CliConfig {
+            secret: None, // JSON wins
+            listen: Some("127.0.0.1:6666".parse().unwrap()), // CLI wins
+            transport: TransportConfig {
+                idle_timeout: Some(99999), // CLI wins
+                keep_alive: None,          // JSON wins
+                ..Default::default()
+            },
+            #[cfg(feature = "tracing")]
+            logging: LoggingConfig::default(),
+        };
+
+        let cfg = ConfigBuilder::new()
+            .merge_json(json)
+            .merge_cli(cli)
+            .build()
+            .unwrap();
+
+        assert_eq!(cfg.secret, "from_json");
+        assert_eq!(cfg.listen.to_string(), "127.0.0.1:6666");
+        assert_eq!(cfg.transport.idle_timeout, Some(99999));
+        assert_eq!(cfg.transport.keep_alive, Some(2222));
+    }
+
+    #[test]
+    fn transport_config_accessors_apply_defaults_on_none() {
+        let cfg = TransportConfig {
+            tls_mode: None,
+            ca_cert: None,
+            tls_cert: None,
+            tls_key: None,
+            zero_rtt: None,
+            alpn_protocols: None,
+            congestion: None,
+            cwnd_init: None,
+            idle_timeout: None,
+            keep_alive: None,
+            max_streams: None,
+        };
+        assert_eq!(cfg.tls_mode(), TlsMode::Tls);
+        assert!(!cfg.zero_rtt());
+        assert_eq!(cfg.idle_timeout(), 30000);
+        assert_eq!(cfg.keep_alive(), 8000);
+        assert_eq!(cfg.max_streams(), 1000);
+        assert_eq!(cfg.alpn_protocols(), vec![b"h3".to_vec()]);
+    }
+
+    #[test]
+    fn connection_config_accessors_apply_defaults_on_none() {
+        let cfg = ConnectionConfig {
+            max_connections: None,
+            auth_timeout_secs: None,
+            max_concurrent_streams: None,
+            max_concurrent_datagrams: None,
+        };
+        assert_eq!(cfg.max_connections(), 10000);
+        assert_eq!(cfg.auth_timeout_secs(), 10);
+        assert_eq!(cfg.max_concurrent_streams(), 4096);
+        assert_eq!(cfg.max_concurrent_datagrams(), 4096);
+    }
+
+    #[test]
+    fn tls_mode_kebab_case_serialization() {
+        assert_eq!(serde_json::to_string(&TlsMode::Tls).unwrap(), "\"tls\"");
+        assert_eq!(
+            serde_json::to_string(&TlsMode::MTls).unwrap(),
+            "\"m-tls\""
+        );
+        assert_eq!(
+            serde_json::to_string(&TlsMode::Insecure).unwrap(),
+            "\"insecure\""
+        );
+        assert_eq!(TlsMode::default(), TlsMode::Tls);
+    }
+
+    #[test]
+    fn json_config_roundtrips() {
+        let original = r#"{
+            "secret": "abc",
+            "listen": "0.0.0.0:443",
+            "transport": { "tls_mode": "insecure", "max_streams": 50 },
+            "connection": { "max_connections": 100 }
+        }"#;
+        let parsed = json::JsonConfig::from_json_str(original).unwrap();
+        let s = serde_json::to_string(&parsed).unwrap();
+        let reparsed = json::JsonConfig::from_json_str(&s).unwrap();
+        assert_eq!(reparsed.secret.as_deref(), Some("abc"));
+    }
+
+    #[test]
+    fn load_from_file_missing_path_returns_error() {
+        let p = std::path::Path::new("/no/such/file/srvcfg.json");
+        assert!(load_from_file(p).is_err());
+    }
+
+    #[test]
+    fn load_from_file_reads_real_file() {
+        let path = std::env::temp_dir()
+            .join(format!("ombrac-server-cfg-{}.json", std::process::id()));
+        std::fs::write(
+            &path,
+            r#"{"secret":"abc","listen":"127.0.0.1:9999"}"#,
+        )
+        .unwrap();
+
+        let cfg = load_from_file(&path).unwrap();
+        assert_eq!(cfg.secret, "abc");
+        assert_eq!(cfg.listen.to_string(), "127.0.0.1:9999");
+
+        std::fs::remove_file(&path).ok();
+    }
 }

@@ -13,6 +13,7 @@ use tokio_util::sync::CancellationToken;
 #[cfg(feature = "tracing")]
 use tracing::Instrument;
 
+use ombrac::metrics::Metrics;
 use ombrac::protocol::{Address, UdpPacket};
 use ombrac::reassembly::UdpReassembler;
 use ombrac_macros::{info, warn};
@@ -41,35 +42,53 @@ pub(crate) struct DatagramTunnel<C: Connection> {
     dns_cache: Cache<Bytes, SocketAddr>,
     reassembler: Arc<UdpReassembler>,
     semaphore: Arc<Semaphore>,
+    metrics: Metrics,
 }
 
 pub(crate) struct DatagramSession {
     socket: Arc<UdpSocket>,
     upstream_bytes: Arc<AtomicU64>,
+    // These three fields are only read from the eviction listener under the
+    // `tracing` feature for end-of-session logging. Suppress the warning when
+    // the feature is off rather than #[cfg]-gating the fields themselves —
+    // it keeps the constructor compatible across feature combinations.
+    #[cfg_attr(not(feature = "tracing"), allow(dead_code))]
     downstream_bytes: Arc<AtomicU64>,
     abort_handle: AbortHandle,
+    #[cfg_attr(not(feature = "tracing"), allow(dead_code))]
     destination: Address,
+    #[cfg_attr(not(feature = "tracing"), allow(dead_code))]
     created_at: Instant,
 }
 
 impl<C: Connection> DatagramTunnel<C> {
-    pub(crate) fn new(connection: Arc<C>, shutdown: CancellationToken) -> Self {
+    pub(crate) fn new(connection: Arc<C>, shutdown: CancellationToken, metrics: Metrics) -> Self {
         Self {
             connection,
             shutdown,
-            sessions: Self::create_session_cache(),
+            sessions: Self::create_session_cache(metrics.clone()),
             dns_cache: Self::create_dns_cache(),
             reassembler: Arc::new(UdpReassembler::default()),
             semaphore: Arc::new(Semaphore::new(MAX_CONCURRENT_HANDLERS)),
+            metrics,
         }
     }
 
-    fn create_session_cache() -> Cache<u64, Arc<DatagramSession>> {
+    fn create_session_cache(metrics: Metrics) -> Cache<u64, Arc<DatagramSession>> {
         Cache::builder()
             .max_capacity(MAX_SESSIONS)
             .time_to_idle(SESSION_IDLE_TIMEOUT)
-            .eviction_listener(|session_id, session: Arc<DatagramSession>, _cause| {
+            .eviction_listener(move |session_id, session: Arc<DatagramSession>, _cause| {
                 session.abort_handle.abort();
+
+                let c = metrics.counters();
+                c.udp_sessions_closed.fetch_add(1, Ordering::Relaxed);
+                c.bytes_rx
+                    .fetch_add(session.upstream_bytes.load(Ordering::Relaxed), Ordering::Relaxed);
+                c.bytes_tx.fetch_add(
+                    session.downstream_bytes.load(Ordering::Relaxed),
+                    Ordering::Relaxed,
+                );
 
                 #[cfg(feature = "tracing")]
                 info!(
@@ -80,6 +99,8 @@ impl<C: Connection> DatagramTunnel<C> {
                     duration = session.created_at.elapsed().as_millis(),
                     reason = %"ok",
                 );
+                #[cfg(not(feature = "tracing"))]
+                let _ = session_id;
             })
             .build()
     }
@@ -124,7 +145,14 @@ impl<C: Connection> DatagramTunnel<C> {
         };
 
         // Reassemble packet if fragmented
-        if let Some((session_id, address, data)) = self.reassembler.process(packet).await? {
+        let reassembled = self.reassembler.process(packet).await?;
+        if reassembled.is_some() {
+            self.metrics
+                .counters()
+                .reassemblies_completed
+                .fetch_add(1, Ordering::Relaxed);
+        }
+        if let Some((session_id, address, data)) = reassembled {
             let session = match self.get_or_create_session(session_id, &address).await {
                 Ok(s) => s,
                 Err(e) => {
@@ -198,6 +226,11 @@ impl<C: Connection> DatagramTunnel<C> {
                     new_socket.clone(),
                     downstream_bytes.clone(),
                 );
+
+                self.metrics
+                    .counters()
+                    .udp_sessions_opened
+                    .fetch_add(1, Ordering::Relaxed);
 
                 let session = DatagramSession {
                     socket: new_socket,
