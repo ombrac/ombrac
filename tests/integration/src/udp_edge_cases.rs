@@ -134,7 +134,7 @@ async fn test_udp_multiple_sessions() -> io::Result<()> {
 async fn test_udp_domain_name_resolution() -> io::Result<()> {
     let (client, _shutdown_tx, _) = setup_test_env().await;
 
-    let echo_server = UdpSocket::bind("127.0.0.1:0").await?;
+    let echo_server = UdpSocket::bind("[::1]:0").await?;
     let server_addr = echo_server.local_addr()?;
 
     let mut udp_session = client.open_associate();

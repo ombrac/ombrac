@@ -17,9 +17,10 @@ static DNS_RESOLVER: OnceCell<TokioResolver> = OnceCell::const_new();
 pub(crate) async fn get_dns_resolver() -> io::Result<&'static TokioResolver> {
     DNS_RESOLVER
         .get_or_try_init(|| async {
-            TokioResolver::builder_tokio()
-                .map(|b| b.build())
-                .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("failed to create dns resolver from system config: {e}")))
+            let builder = TokioResolver::builder_tokio()
+                .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("failed to create dns resolver from system config: {e}")))?;
+            builder.build()
+                .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("failed to build dns resolver: {e}")))
         })
         .await
 }
@@ -45,7 +46,6 @@ pub(crate) async fn resolve_domain(domain: &[u8], port: u16) -> io::Result<Socke
         )
     })?;
 
-    // Use hickory-resolver for DNS resolution
     let resolver = get_dns_resolver().await?;
     let lookup_result = resolver.lookup_ip(domain_str).await.map_err(|e| {
         io::Error::new(
@@ -114,4 +114,5 @@ mod tests {
         .expect_err("non-existent domain should fail");
         assert_eq!(err.kind(), io::ErrorKind::NotFound);
     }
+
 }
