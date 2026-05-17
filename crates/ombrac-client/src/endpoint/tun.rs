@@ -130,17 +130,17 @@ mod fakedns {
                 }
             };
 
-            if query.queries().is_empty() {
+            if query.queries.is_empty() {
                 return None;
             }
 
-            let question = &query.queries()[0];
+            let question = &query.queries[0];
             let domain_name = question.name();
 
             if question.query_type() != RecordType::A {
                 let mut response = query.clone();
-                response.set_message_type(MessageType::Response);
-                response.set_response_code(ResponseCode::Refused);
+                response.metadata.message_type = MessageType::Response;
+                response.metadata.response_code = ResponseCode::Refused;
                 return Some(response);
             }
 
@@ -155,8 +155,8 @@ mod fakedns {
             };
 
             let mut response = query.clone();
-            response.set_message_type(MessageType::Response);
-            response.set_response_code(ResponseCode::NoError);
+            response.metadata.message_type = MessageType::Response;
+            response.metadata.response_code = ResponseCode::NoError;
             let record = Record::from_rdata(
                 domain_name.clone(),
                 DNS_RESPONSE_TTL,
