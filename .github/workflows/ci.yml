@@ -66,6 +66,11 @@ jobs:
           toolchain: stable
           targets: ${{ matrix.target }}
 
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
       - name: Install dependencies for Windows
         if: startsWith(matrix.os, 'windows')
         run: |
@@ -131,6 +136,11 @@ jobs:
         with:
           toolchain: stable
 
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ios
+
       - name: Install dependencies
         run: |
           rustup target add aarch64-apple-ios
@@ -158,6 +168,11 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: android
 
       - name: Install dependencies
         run: |
@@ -238,6 +253,11 @@ jobs:
         with:
           toolchain: stable
           targets: ${{ matrix.target }}
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: dry-publish
 
       - name: Publish ombrac
         working-directory: crates/ombrac
