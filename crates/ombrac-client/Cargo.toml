@@ -36,7 +36,7 @@ datagram = [
 
 # Endpoint features
 endpoint-default = ["endpoint-socks"]
-endpoint-socks = ["socks-lib"]
+endpoint-socks = []
 endpoint-http = [
     "http", 
     "hyper", 
@@ -107,7 +107,6 @@ tracing-appender = { workspace = true, optional = true}
 tracing-subscriber = { workspace = true, features = ["ansi", "env-filter", "registry"], optional = true }
 
 # endpoint
-socks-lib = { workspace = true, optional = true }
 http = { workspace = true, optional = true }
 hyper = { workspace = true, features = ["client", "server", "http1"], optional = true }
 hyper-util = { workspace = true, features = ["tokio"], optional = true }

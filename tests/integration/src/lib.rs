@@ -36,3 +36,6 @@ mod tls_modes;
 
 #[cfg(test)]
 mod drain_shutdown;
+
+#[cfg(test)]
+mod endpoint_socks;
