@@ -270,24 +270,19 @@ impl OmbracClient {
         ombrac: Arc<Client<QuicClient, QuicConnection>>,
         mut shutdown_rx: broadcast::Receiver<()>,
     ) -> Result<()> {
-        use crate::endpoint::socks::CommandHandler;
-        use socks_lib::v5::server::auth::NoAuthentication;
-        use socks_lib::v5::server::{Config as SocksConfig, Server as SocksServer};
+        use crate::endpoint::socks::Server as SocksServer;
 
         let bind_addr = require_config!(config.endpoint.socks, "endpoint.socks")?;
         let socket = tokio::net::TcpListener::bind(bind_addr).await?;
 
         info!("starting socks endpoint, listening on {bind_addr}");
 
-        let socks_config = Arc::new(SocksConfig::new(
-            NoAuthentication,
-            CommandHandler::new(ombrac),
-        ));
-        SocksServer::run(socket, socks_config, async {
-            let _ = shutdown_rx.recv().await;
-        })
-        .await
-        .map_err(|e| Error::Endpoint(format!("socks server failed to run: {}", e)))
+        SocksServer::new(ombrac)
+            .run(socket, async {
+                let _ = shutdown_rx.recv().await;
+            })
+            .await
+            .map_err(|e| Error::Endpoint(format!("socks server failed to run: {}", e)))
     }
 
     #[cfg(feature = "endpoint-tun")]
