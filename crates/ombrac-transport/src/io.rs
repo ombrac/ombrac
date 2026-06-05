@@ -112,6 +112,23 @@ where
     Ok(stats)
 }
 
+/// Returns `true` when the error is a clean peer-initiated stream close —
+/// namely a QUIC `STOP_SENDING` frame with application error code 0 ("no error"
+/// per RFC 9000). These are expected during normal operation and should be
+/// logged at a lower severity than genuine transport errors.
+///
+/// The check works by downcasting the inner error source to [`quinn::WriteError`]
+/// rather than string-matching, so it is robust across quinn message format changes.
+#[cfg(feature = "quic")]
+pub fn is_clean_stream_close(error: &io::Error) -> bool {
+    if let Some(inner) = error.get_ref() {
+        if let Some(write_err) = inner.downcast_ref::<quinn::WriteError>() {
+            return matches!(write_err, quinn::WriteError::Stopped(code) if *code == quinn::VarInt::from(0u32));
+        }
+    }
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

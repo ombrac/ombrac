@@ -1,7 +1,9 @@
 use std::io;
 use std::net::SocketAddr;
 
+use hickory_resolver::proto::rr::{RData, RecordType};
 use hickory_resolver::TokioResolver;
+use ombrac_macros::debug;
 use tokio::sync::OnceCell;
 
 // Global DNS resolver instance using hickory-resolver
@@ -46,25 +48,48 @@ pub(crate) async fn resolve_domain(domain: &[u8], port: u16) -> io::Result<Socke
         )
     })?;
 
-    let resolver = get_dns_resolver().await?;
-    let lookup_result = resolver.lookup_ip(domain_str).await.map_err(|e| {
-        io::Error::new(
-            io::ErrorKind::NotFound,
-            format!("dns resolution failed for {}: {}", domain_str, e),
-        )
-    })?;
+    // If the input is already an IP literal, return it directly without DNS lookup
+    if let Ok(ip) = domain_str.parse::<std::net::IpAddr>() {
+        return Ok(SocketAddr::new(ip, port));
+    }
 
-    // Get the first IP address (hickory-resolver returns addresses in preferred order)
-    lookup_result
-        .iter()
-        .next()
-        .map(|ip| SocketAddr::new(ip, port))
-        .ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::NotFound,
-                format!("no ip addresses found for {}", domain_str),
-            )
-        })
+    let resolver = get_dns_resolver().await?;
+
+    // Try IPv6 lookup first (RFC 6724 default preference).
+    // If IPv6 fails (common for domains without AAAA records), fall back to IPv4.
+    match resolver.lookup(domain_str, RecordType::AAAA).await {
+        Ok(lookup) => {
+            for record in lookup.answers() {
+                if let RData::AAAA(ipv6) = record.data {
+                    return Ok(SocketAddr::new(std::net::IpAddr::V6(ipv6.0), port));
+                }
+            }
+            debug!("ipv6 lookup for {} returned no AAAA records, trying ipv4", domain_str);
+        }
+        Err(e) => {
+            debug!("ipv6 lookup for {} failed: {}, trying ipv4", domain_str, e);
+        }
+    }
+
+    // Fall back to IPv4
+    match resolver.lookup(domain_str, RecordType::A).await {
+        Ok(lookup) => {
+            for record in lookup.answers() {
+                if let RData::A(ipv4) = record.data {
+                    return Ok(SocketAddr::new(std::net::IpAddr::V4(ipv4.0), port));
+                }
+            }
+            debug!("ipv4 lookup for {} returned no A records", domain_str);
+        }
+        Err(e) => {
+            debug!("ipv4 lookup for {} failed: {}", domain_str, e);
+        }
+    }
+
+    Err(io::Error::new(
+        io::ErrorKind::NotFound,
+        format!("dns resolution failed for {}: no records found", domain_str),
+    ))
 }
 
 #[cfg(test)]
