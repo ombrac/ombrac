@@ -15,9 +15,9 @@ use tracing::Instrument;
 
 use ombrac::metrics::Metrics;
 use ombrac::{codec, protocol};
-use ombrac_macros::info;
+use ombrac_macros::{debug, info};
 use ombrac_transport::Connection;
-use ombrac_transport::io::{CopyBidirectionalStats, copy_bidirectional};
+use ombrac_transport::io::{CopyBidirectionalStats, copy_bidirectional, is_clean_stream_close};
 
 use crate::connection::dns;
 
@@ -297,13 +297,34 @@ impl Drop for StreamGuard {
                 .map(|s| (s.a_to_b_bytes, s.b_to_a_bytes))
                 .unwrap_or_default();
 
-            info!(
-                dest = %self.destination.as_ref().map(|a| a.to_string()).unwrap_or_else(|| "unknown".to_string()),
-                up = up + self.initial_upstream_bytes,
-                down,
-                duration = self.created_at.elapsed().as_millis(),
-                reason = %DisconnectReason(&self.reason),
-            );
+            let reason = DisconnectReason(&self.reason);
+            let dest = self
+                .destination
+                .as_ref()
+                .map(|a| a.to_string())
+                .unwrap_or_else(|| "unknown".to_string());
+            let up = up + self.initial_upstream_bytes;
+            let duration = self.created_at.elapsed().as_millis();
+
+            // Clean peer closes are expected; log at debug to reduce noise.
+            // Real errors remain at info level for operational visibility.
+            if reason.is_clean_peer_close() {
+                debug!(
+                    dest = %dest,
+                    up,
+                    down,
+                    duration,
+                    reason = %reason,
+                );
+            } else {
+                info!(
+                    dest = %dest,
+                    up,
+                    down,
+                    duration,
+                    reason = %reason,
+                );
+            }
         }
     }
 }
@@ -314,8 +335,22 @@ pub(crate) struct DisconnectReason<'a>(pub(crate) &'a Option<io::Error>);
 impl std::fmt::Display for DisconnectReason<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.0 {
+            Some(e) if is_clean_stream_close(e) => {
+                write!(f, "peer closed stream")
+            }
             Some(e) => write!(f, "{}", e),
             None => write!(f, "ok"),
+        }
+    }
+}
+
+impl DisconnectReason<'_> {
+    /// Returns true when the reason is a clean peer-initiated stream close
+    /// (quinn STOP_SENDING with error code 0 = "no error" per RFC 9000).
+    fn is_clean_peer_close(&self) -> bool {
+        match self.0 {
+            Some(e) => is_clean_stream_close(e),
+            None => true,
         }
     }
 }
