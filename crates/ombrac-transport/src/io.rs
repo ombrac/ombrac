@@ -119,8 +119,8 @@ where
 ///
 /// The check works by downcasting the inner error source to [`quinn::WriteError`]
 /// rather than string-matching, so it is robust across quinn message format changes.
-#[cfg(feature = "quic")]
 pub fn is_clean_stream_close(error: &io::Error) -> bool {
+    #[cfg(feature = "quic")]
     if let Some(inner) = error.get_ref() {
         if let Some(write_err) = inner.downcast_ref::<quinn::WriteError>() {
             return matches!(write_err, quinn::WriteError::Stopped(code) if *code == quinn::VarInt::from(0u32));
