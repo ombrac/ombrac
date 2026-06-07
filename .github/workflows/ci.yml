@@ -1,4 +1,5 @@
 name: CI
+
 permissions:
   contents: read
 
@@ -67,7 +68,7 @@ jobs:
           targets: ${{ matrix.target }}
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@master
         with:
           key: ${{ matrix.target }}
 
@@ -137,7 +138,7 @@ jobs:
           toolchain: stable
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@master
         with:
           key: ios
 
@@ -170,7 +171,7 @@ jobs:
           toolchain: stable
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@master
         with:
           key: android
 
@@ -255,30 +256,9 @@ jobs:
           targets: ${{ matrix.target }}
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@master
         with:
           key: dry-publish
 
-      - name: Publish ombrac
-        working-directory: crates/ombrac
-        run: cargo publish --dry-run
-
-      - name: Publish ombrac-macros
-        working-directory: crates/ombrac-macros
-        run: cargo publish --dry-run
-
-      - name: Publish ombrac-netstack
-        working-directory: crates/ombrac-netstack
-        run: cargo publish --dry-run
-
-      - name: Publish ombrac-transport
-        working-directory: crates/ombrac-transport
-        run: cargo publish --dry-run
-
-      - name: Publish ombrac-server
-        working-directory: crates/ombrac-server
-        run: cargo publish --dry-run
-
-      - name: Publish ombrac-client
-        working-directory: crates/ombrac-client
-        run: cargo publish --dry-run
+      - name: Dry-run publish
+        run: cargo publish --dry-run --workspace
