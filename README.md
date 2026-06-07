@@ -6,9 +6,13 @@
 [![Build Status][release-badge]][release-url]
 [![Apache 2.0 Licensed][license-badge]][license-url]
 
-A secure, high-performance TCP/UDP-over-QUIC tunnel written in Rust.
+## What is ombrac?
 
-## Highlights
+Ombrac is a secure, high-performance TCP/UDP-over-QUIC tunnel written in Rust.
+
+![ombrac architecture](./docs/desc.svg)
+
+The client sends TCP or UDP traffic to ombrac-client. ombrac-client encapsulates the traffic into an encrypted QUIC tunnel and sends it to ombrac-server. ombrac-server forwards the traffic to the target. Responses travel back through the same tunnel, making the connection full-duplex.
 
 - TLS 1.3 encryption with optional mutual TLS — secure by default
 - BBR congestion control, stream multiplexing, 0-RTT fast reconnect
@@ -29,7 +33,7 @@ cargo install ombrac-client ombrac-server --features binary
 
 Pre-compiled binaries are available on the [Releases page](https://github.com/ombrac/ombrac/releases).
 
-## Quick Start
+## Example
 
 **Server**
 
