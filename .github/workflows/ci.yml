@@ -78,6 +78,20 @@ jobs:
           choco install nasm
           echo "C:\Program Files\NASM" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
+      - name: Setup MSVC environment for Windows
+        if: startsWith(matrix.os, 'windows')
+        shell: pwsh
+        run: |
+          $arch = if ("${{ matrix.target }}" -eq "aarch64-pc-windows-msvc") { "amd64_arm64" } else { "amd64" }
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vsPath = & $vswhere -latest -property installationPath
+          $vcvars = Join-Path $vsPath "VC\Auxiliary\Build\vcvarsall.bat"
+          cmd /c "`"$vcvars`" $arch && set" | ForEach-Object {
+            if ($_ -match "^([^=]+)=(.*)$") {
+              "$($matches[1])=$($matches[2])" | Out-File -Append -FilePath $env:GITHUB_ENV
+            }
+          }
+
       - name: Install general dependencies for Ubuntu
         if: startsWith(matrix.os, 'ubuntu')
         run: |
