@@ -93,11 +93,15 @@ jobs:
           }
           $vsMajor = [int]((& $vswhere -latest -property installationVersion).Split('.')[0])
           $cmakeExe = Join-Path $vsPath "Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe"
-          $generator = (& $cmakeExe --help 2>&1 |
-            Select-String "Visual Studio $vsMajor \d+" |
-            Select-Object -First 1).ToString().Trim().Split(' [')[0].Trim('* ')
-          "CMAKE_GENERATOR=$generator" | Out-File -Append -FilePath $env:GITHUB_ENV
-          Write-Host "Using CMake generator: $generator"
+          $helpOutput = & $cmakeExe --help 2>&1 | Out-String
+          if ($helpOutput -match "Visual Studio $vsMajor (\d{4})") {
+            $generator = "Visual Studio $vsMajor $($matches[1])"
+            "CMAKE_GENERATOR=$generator" | Out-File -Append -FilePath $env:GITHUB_ENV
+            Write-Host "Using CMake generator: $generator"
+          } else {
+            Write-Error "Could not detect Visual Studio $vsMajor cmake generator"
+            exit 1
+          }
 
       - name: Install general dependencies for Ubuntu
         if: startsWith(matrix.os, 'ubuntu')
