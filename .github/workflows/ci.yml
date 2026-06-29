@@ -91,6 +91,7 @@ jobs:
               "$($matches[1])=$($matches[2])" | Out-File -Append -FilePath $env:GITHUB_ENV
             }
           }
+          "CMAKE_GENERATOR=Ninja" | Out-File -Append -FilePath $env:GITHUB_ENV
 
       - name: Install general dependencies for Ubuntu
         if: startsWith(matrix.os, 'ubuntu')
