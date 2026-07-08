@@ -221,9 +221,9 @@ dependencies = [
 
 [[package]]
 name = "aws-lc-rs"
-version = "1.17.0"
+version = "1.17.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5ec2f1fc3ec205783a5da9a7e6c1509cc69dedf09a1949e412c1e18469326d00"
+checksum = "4342d8937fc7e5dd9b1c60292261c0670c882a2cd1719cfc11b1af41731e32ad"
 dependencies = [
  "aws-lc-fips-sys",
  "aws-lc-sys",
@@ -233,15 +233,16 @@ dependencies = [
 
 [[package]]
 name = "aws-lc-sys"
-version = "0.41.0"
+version = "0.42.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1a2f9779ce85b93ab6170dd940ad0169b5766ff848247aff13bb788b832fe3f4"
+checksum = "6d9ceb1da931507a12f4fccea479dccd00da1943e1b4ae72d8e502d707361444"
 dependencies = [
  "bindgen",
  "cc",
  "cmake",
  "dunce",
  "fs_extra",
+ "pkg-config",
 ]
 
 [[package]]
@@ -252,7 +253,7 @@ checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
 name = "benches"
-version = "0.7.11"
+version = "0.7.12"
 dependencies = [
  "bytes",
  "criterion",
@@ -1547,7 +1548,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "07033963ba89ebaf1584d767badaa2e8fcec21aedea6b8c0346d487d49c28667"
 dependencies = [
  "cfg-if",
- "windows-targets 0.53.4",
+ "windows-targets 0.48.5",
 ]
 
 [[package]]
@@ -1880,7 +1881,7 @@ dependencies = [
 
 [[package]]
 name = "ombrac"
-version = "0.7.11"
+version = "0.7.12"
 dependencies = [
  "bincode",
  "bytes",
@@ -1892,7 +1893,7 @@ dependencies = [
 
 [[package]]
 name = "ombrac-client"
-version = "0.7.11"
+version = "0.7.12"
 dependencies = [
  "arc-swap",
  "bincode",
@@ -1927,14 +1928,14 @@ dependencies = [
 
 [[package]]
 name = "ombrac-macros"
-version = "0.7.11"
+version = "0.7.12"
 dependencies = [
  "tracing",
 ]
 
 [[package]]
 name = "ombrac-netstack"
-version = "0.7.11"
+version = "0.7.12"
 dependencies = [
  "bytes",
  "crossbeam-queue",
@@ -1950,7 +1951,7 @@ dependencies = [
 
 [[package]]
 name = "ombrac-server"
-version = "0.7.11"
+version = "0.7.12"
 dependencies = [
  "arc-swap",
  "bincode",
@@ -1977,7 +1978,7 @@ dependencies = [
 
 [[package]]
 name = "ombrac-transport"
-version = "0.7.11"
+version = "0.7.12"
 dependencies = [
  "arc-swap",
  "async-channel",
@@ -2863,7 +2864,7 @@ dependencies = [
 
 [[package]]
 name = "tests-integration"
-version = "0.7.11"
+version = "0.7.12"
 dependencies = [
  "blake3",
  "bytes",
@@ -2881,7 +2882,7 @@ dependencies = [
 
 [[package]]
 name = "tests-support"
-version = "0.7.11"
+version = "0.7.12"
 dependencies = [
  "bytes",
  "ombrac-transport",
