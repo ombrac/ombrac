@@ -3144,9 +3144,9 @@ checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 
 [[package]]
 name = "tun-rs"
-version = "2.8.6"
+version = "2.8.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "675d4d5a2a7fe12c743132eb35d45e90a5f9bf798762d2de6cea91d1d9d8feb4"
+checksum = "ea75f145e8f32c72b1afdf137f2181810b0232be9930519e8d82071b4a3b3bdf"
 dependencies = [
  "blocking",
  "byteorder",
