@@ -253,7 +253,7 @@ checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
 name = "benches"
-version = "0.7.12"
+version = "0.7.13"
 dependencies = [
  "bytes",
  "criterion",
@@ -1860,7 +1860,7 @@ dependencies = [
 
 [[package]]
 name = "ombrac"
-version = "0.7.12"
+version = "0.7.13"
 dependencies = [
  "bincode",
  "bytes",
@@ -1872,7 +1872,7 @@ dependencies = [
 
 [[package]]
 name = "ombrac-client"
-version = "0.7.12"
+version = "0.7.13"
 dependencies = [
  "arc-swap",
  "bincode",
@@ -1907,14 +1907,14 @@ dependencies = [
 
 [[package]]
 name = "ombrac-macros"
-version = "0.7.12"
+version = "0.7.13"
 dependencies = [
  "tracing",
 ]
 
 [[package]]
 name = "ombrac-netstack"
-version = "0.7.12"
+version = "0.7.13"
 dependencies = [
  "bytes",
  "crossbeam-queue",
@@ -1930,7 +1930,7 @@ dependencies = [
 
 [[package]]
 name = "ombrac-server"
-version = "0.7.12"
+version = "0.7.13"
 dependencies = [
  "arc-swap",
  "bincode",
@@ -1957,7 +1957,7 @@ dependencies = [
 
 [[package]]
 name = "ombrac-transport"
-version = "0.7.12"
+version = "0.7.13"
 dependencies = [
  "arc-swap",
  "async-channel",
@@ -2843,7 +2843,7 @@ dependencies = [
 
 [[package]]
 name = "tests-integration"
-version = "0.7.12"
+version = "0.7.13"
 dependencies = [
  "blake3",
  "bytes",
@@ -2861,7 +2861,7 @@ dependencies = [
 
 [[package]]
 name = "tests-support"
-version = "0.7.12"
+version = "0.7.13"
 dependencies = [
  "bytes",
  "ombrac-transport",
@@ -3413,9 +3413,9 @@ dependencies = [
 
 [[package]]
 name = "webpki-roots"
-version = "1.0.8"
+version = "1.0.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bf85cb06032201fa7c6f829d7db5a7e5aa45bcc0655327713065f6f0576731bf"
+checksum = "7dcd9d09a39985f5344844e66b0c530a33843579125f23e21e9f0f220850f22a"
 dependencies = [
  "rustls-pki-types",
 ]
