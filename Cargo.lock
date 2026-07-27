@@ -253,7 +253,7 @@ checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
 name = "benches"
-version = "0.7.12"
+version = "0.7.13"
 dependencies = [
  "bytes",
  "criterion",
@@ -678,7 +678,7 @@ dependencies = [
  "libc",
  "schannel",
  "socket2 0.6.5",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.1",
 ]
 
 [[package]]
@@ -692,7 +692,7 @@ dependencies = [
  "libz-sys",
  "pkg-config",
  "vcpkg",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.1",
 ]
 
 [[package]]
@@ -830,7 +830,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -1527,7 +1527,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "07033963ba89ebaf1584d767badaa2e8fcec21aedea6b8c0346d487d49c28667"
 dependencies = [
  "cfg-if",
- "windows-targets 0.53.4",
+ "windows-targets 0.48.5",
 ]
 
 [[package]]
@@ -1860,7 +1860,7 @@ dependencies = [
 
 [[package]]
 name = "ombrac"
-version = "0.7.12"
+version = "0.7.13"
 dependencies = [
  "bincode",
  "bytes",
@@ -1872,7 +1872,7 @@ dependencies = [
 
 [[package]]
 name = "ombrac-client"
-version = "0.7.12"
+version = "0.7.13"
 dependencies = [
  "arc-swap",
  "bincode",
@@ -1907,14 +1907,14 @@ dependencies = [
 
 [[package]]
 name = "ombrac-macros"
-version = "0.7.12"
+version = "0.7.13"
 dependencies = [
  "tracing",
 ]
 
 [[package]]
 name = "ombrac-netstack"
-version = "0.7.12"
+version = "0.7.13"
 dependencies = [
  "bytes",
  "crossbeam-queue",
@@ -1930,7 +1930,7 @@ dependencies = [
 
 [[package]]
 name = "ombrac-server"
-version = "0.7.12"
+version = "0.7.13"
 dependencies = [
  "arc-swap",
  "bincode",
@@ -1957,7 +1957,7 @@ dependencies = [
 
 [[package]]
 name = "ombrac-transport"
-version = "0.7.12"
+version = "0.7.13"
 dependencies = [
  "arc-swap",
  "async-channel",
@@ -2271,7 +2271,7 @@ dependencies = [
  "once_cell",
  "socket2 0.5.10",
  "tracing",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2492,7 +2492,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2722,7 +2722,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c3d1e2c7f27f8d4cb10542a02c49005dbd6e93095799d6f3be745fae9f8fedd4"
 dependencies = [
  "libc",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.1",
 ]
 
 [[package]]
@@ -2838,12 +2838,12 @@ dependencies = [
  "getrandom 0.3.3",
  "once_cell",
  "rustix",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
 name = "tests-integration"
-version = "0.7.12"
+version = "0.7.13"
 dependencies = [
  "blake3",
  "bytes",
@@ -2861,7 +2861,7 @@ dependencies = [
 
 [[package]]
 name = "tests-support"
-version = "0.7.12"
+version = "0.7.13"
 dependencies = [
  "bytes",
  "ombrac-transport",
@@ -3144,9 +3144,9 @@ checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 
 [[package]]
 name = "tun-rs"
-version = "2.8.7"
+version = "2.8.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ea75f145e8f32c72b1afdf137f2181810b0232be9930519e8d82071b4a3b3bdf"
+checksum = "bb50fdefaf791097b5559791cef2b2e9da2fad974809264d104cafbaa3efc452"
 dependencies = [
  "blocking",
  "byteorder",
@@ -3831,7 +3831,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7d6f32a0ff4a9f6f01231eb2059cc85479330739333e0e58cadf03b6af2cca10"
 dependencies = [
  "cfg-if",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.1",
 ]
 
 [[package]]
